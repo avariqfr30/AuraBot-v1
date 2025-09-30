@@ -1,0 +1,132 @@
+/* This ensures that newlines in the AI's text are rendered correctly. */
+.chat-bubble p {
+    white-space: pre-wrap;
+}
+
+/* Styling for lists that the Markdown parser might create */
+.chat-bubble ul, .chat-bubble ol {
+    list-style-position: inside;
+    padding-left: 1rem;
+    margin-top: 0.5rem;
+    margin-bottom: 0.5rem;
+}
+.chat-bubble ul {
+    list-style-type: disc;
+}
+.chat-bubble ol {
+    list-style-type: decimal;
+}
+
+/* Styling for code blocks */
+.chat-bubble pre {
+    background-color: #1f2937; /* A darker gray */
+    padding: 1rem;
+    border-radius: 0.5rem;
+    margin-top: 0.75rem;
+    margin-bottom: 0.75rem;
+    overflow-x: auto;
+    font-family: 'Courier New', Courier, monospace;
+}
+
+.chat-bubble code {
+    font-family: 'Courier New', Courier, monospace;
+}
+
+/* ================================================================= */
+/* --- Tuxedo Cat Animation --- */
+/* ================================================================= */
+#animated-cat-container {
+    animation: bobbing-cat 3s ease-in-out infinite;
+}
+
+@keyframes bobbing-cat {
+    0%, 100% {
+        transform: translateY(0);
+    }
+    50% {
+        transform: translateY(-4px);
+    }
+}
+
+/* ================================================================= */
+/* --- NEW: Styles for Agentic Tools --- */
+/* ================================================================= */
+
+/* --- Mood Tracker --- */
+.mood-tracker-container {
+    display: flex;
+    justify-content: space-around;
+    gap: 0.5rem;
+    padding-top: 0.5rem;
+}
+.mood-button {
+    background-color: #374151; /* gray-700 */
+    border: none;
+    border-radius: 9999px; /* rounded-full */
+    padding: 0.75rem;
+    font-size: 1.5rem; /* text-2xl */
+    cursor: pointer;
+    transition: transform 0.2s, background-color 0.2s;
+}
+.mood-button:hover {
+    background-color: #4b5563; /* gray-600 */
+    transform: scale(1.1);
+}
+
+/* --- Breathing Exercise --- */
+.breathing-exercise-container {
+    text-align: center;
+    padding: 1rem;
+    border: 1px solid #374151;
+    border-radius: 0.75rem;
+}
+.breathing-pacer {
+    width: 100px;
+    height: 100px;
+    background-color: #db2777; /* pink-600 */
+    border-radius: 9999px;
+    margin: 1rem auto;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    transition: transform 4s ease-in-out;
+}
+.breathing-pacer.inhale { transform: scale(1.5); }
+.breathing-pacer.exhale { transform: scale(0.5); }
+
+.breathing-status {
+    font-weight: 600;
+    font-size: 1.125rem;
+    height: 2rem;
+}
+
+.tool-button {
+    background-color: #4b5563;
+    color: white;
+    border: none;
+    border-radius: 0.5rem;
+    padding: 0.5rem 1rem;
+    margin-top: 0.5rem;
+    cursor: pointer;
+    transition: background-color 0.2s;
+}
+.tool-button:hover {
+    background-color: #6b7280;
+}
+.tool-button:disabled {
+    background-color: #374151;
+    cursor: not-allowed;
+}
+
+/* --- Affirmation Card --- */
+.affirmation-card {
+    padding: 1.25rem;
+    border-left: 4px solid #db2777; /* pink-600 */
+    background-color: #1f2937; /* gray-800 */
+    border-radius: 0.5rem;
+}
+.affirmation-text {
+    font-style: italic;
+    font-size: 1.125rem;
+    margin-bottom: 1rem;
+}

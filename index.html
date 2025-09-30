@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Aura AI Companion</title>
+    <link rel="icon" href="data:image/svg+xml,<svg width='100' height='100' viewBox='0 0 100 100' xmlns='http://www.w3.org/2000/svg'><path d='M50 10 C 20 10, 10 30, 10 50 C 10 90, 40 100, 50 100 C 60 100, 90 90, 90 50 C 90 30, 80 10, 50 10 Z' fill='%23111827'/><path d='M30 10 L 25 20 L 40 25 Z' fill='%23111827'/><path d='M70 10 L 75 20 L 60 25 Z' fill='%23111827'/><path d='M50 70 C 40 70, 35 60, 35 60 L 65 60 C 65 60, 60 70, 50 70 Z' fill='white'/><path d='M40 85 C 40 95, 60 95, 60 85 L 60 70 L 40 70 Z' fill='white'/><circle cx='35' cy='45' r='5' fill='white'/><circle cx='65' cy='45' r='5' fill='white'/></svg>" type="image/svg+xml">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/dompurify/dist/purify.min.js"></script>
+    <link rel="stylesheet" href="css/style.css">
+    <style>
+        .chat-bubble.user { background-color: #3b82f6; color: white; border-radius: 0.75rem; }
+        .chat-bubble.ai { background-color: #1f2937; color: #d1d5db; border-radius: 0.75rem; }
+    </style>
+</head>
+<body class="bg-gray-950 font-sans text-gray-200">
+
+    <div class="flex h-screen">
+        <div id="chatSidebar" class="w-64 bg-gray-900 text-gray-300 flex flex-col p-4 border-r border-gray-800">
+            <div class="flex items-center justify-start mb-4 pl-1">
+                <div id="animated-cat-container">
+                    <svg width="32" height="32" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg"><path d="M50 10 C 20 10, 10 30, 10 50 C 10 90, 40 100, 50 100 C 60 100, 90 90, 90 50 C 90 30, 80 10, 50 10 Z" fill="#111827"/><path d="M30 10 L 25 20 L 40 25 Z" fill="#111827"/><path d="M70 10 L 75 20 L 60 25 Z" fill="#111827"/><path d="M50 70 C 40 70, 35 60, 35 60 L 65 60 C 65 60, 60 70, 50 70 Z" fill="white"/><path d="M40 85 C 40 95, 60 95, 60 85 L 60 70 L 40 70 Z" fill="white"/><circle cx="35" cy="45" r="5" fill="white"/><circle cx="65" cy="45" r="5" fill="white"/></svg>
+                </div>
+                <h2 class="text-xl font-semibold text-gray-100 ml-2">Chats</h2>
+            </div>
+            <button id="newChatButton" class="w-full bg-pink-600 hover:bg-pink-700 text-white font-semibold py-2 px-4 rounded-md mb-4 transition duration-200">
+                + New Chat
+            </button>
+            <div id="chatList" class="flex-grow overflow-y-auto pr-2"></div>
+        </div>
+
+        <div class="flex-1 flex flex-col">
+            <header class="p-4 bg-gray-900 border-b border-gray-800 flex justify-between items-center">
+                <h1 class="text-xl font-bold text-gray-100">Aura AI Companion</h1>
+                <div class="flex items-center space-x-4">
+                    <button id="toolsButton" title="Tools" class="hidden text-gray-400 hover:text-white transition duration-200">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" /></svg>
+                    </button>
+                    <button id="settingsButton" title="Settings" class="text-gray-400 hover:text-white transition duration-200">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.525.322.956.51 1.066 1.065z" /><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
+                    </button>
+                </div>
+            </header>
+
+            <main id="chatMessages" class="flex-1 overflow-y-auto p-4 space-y-4"></main>
+
+            <footer class="p-4 bg-gray-900 border-t border-gray-800 flex items-center space-x-2">
+                <input id="userInput" type="text" placeholder="Type a message..." class="flex-1 p-3 bg-gray-800 text-gray-200 border border-gray-700 rounded-md focus:outline-none focus:ring-2 focus:ring-pink-500 transition duration-200">
+                <button id="sendButton" title="Send message" class="p-3 bg-pink-600 hover:bg-pink-700 text-white rounded-md transition duration-200"><svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" viewBox="0 0 20 20" fill="currentColor"><path d="M10.894 2.553a1 1 0 00-1.788 0l-7 14a1 1 0 00.957 1.454h14a1 1 0 00.957-1.454l-7-14z" /></svg></button>
+                <button id="micButton" title="Start voice input" class="p-3 bg-gray-700 hover:bg-gray-600 text-white rounded-md transition duration-200"><svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a4 4 0 11-8 0 4 4 0 018 0z" /></svg></button>
+            </footer>
+        </div>
+    </div>
+
+    <div id="settingsModal" class="hidden fixed inset-0 z-50 overflow-y-auto bg-black bg-opacity-75 flex items-center justify-center">
+        <div class="relative bg-gray-900 rounded-lg p-8 w-full max-w-lg shadow-2xl">
+            <h3 class="text-2xl font-bold mb-6 text-gray-100">Settings</h3>
+            <div class="space-y-6">
+                <div><label for="systemPromptTextarea" class="block text-sm font-medium text-gray-300">System Prompt</label><textarea id="systemPromptTextarea" rows="6" class="mt-1 block w-full p-3 bg-gray-800 border border-gray-700 rounded-md focus:outline-none focus:ring-2 focus:ring-pink-500"></textarea><p class="mt-2 text-xs text-gray-400">Tell Aura about its persona and purpose.</p></div>
+                <div><label for="voiceSelectDropdown" class="block text-sm font-medium text-gray-300">Voice</label><select id="voiceSelectDropdown" class="mt-1 block w-full p-3 bg-gray-800 border border-gray-700 rounded-md focus:outline-none focus:ring-2 focus:ring-pink-500"></select><p class="mt-2 text-xs text-gray-400">Select a voice for Aura. Quality depends on your browser and OS.</p></div>
+                <div><label for="modelSelectDropdown" class="block text-sm font-medium text-gray-300">AI Model</label><select id="modelSelectDropdown" class="mt-1 block w-full p-3 bg-gray-800 border border-gray-700 rounded-md focus:outline-none focus:ring-2 focus:ring-pink-500"></select><p class="mt-2 text-xs text-gray-400">Select the AI model for Aura. Different models have different personalities.</p></div>
+            </div>
+            <div class="mt-8 flex justify-end space-x-4"><button id="cancelSettingsButton" class="px-4 py-2 bg-gray-600 hover:bg-gray-500 rounded-md transition duration-200">Cancel</button><button id="saveSettingsButton" class="px-4 py-2 bg-pink-600 hover:bg-pink-700 text-white font-semibold rounded-md transition duration-200">Save</button></div>
+        </div>
+    </div>
+
+    <div id="toolsModal" class="hidden fixed inset-0 z-50 overflow-y-auto bg-black bg-opacity-75 flex items-center justify-center">
+        <div class="relative bg-gray-900 rounded-lg p-8 w-full max-w-lg shadow-2xl">
+            <h3 class="text-2xl font-bold mb-6 text-gray-100">Your Toolbox</h3>
+            <div id="toolsModalContent" class="space-y-6">
+                </div>
+            <div class="mt-8 flex justify-end">
+                <button id="closeToolsButton" class="px-4 py-2 bg-gray-600 hover:bg-gray-500 rounded-md transition duration-200">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="js/chat-logic.js"></script>
+    <script src="js/ui.js"></script>
+    <script src="js/app.js"></script>
+</body>
+</html>
