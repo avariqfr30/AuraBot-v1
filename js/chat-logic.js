@@ -1,5 +1,3 @@
-// Filename: chat-logic.js (with project planning modifications)
-
 // --- Constants for localStorage keys ---
 const PROMPT_STORAGE_KEY = 'aura_system_prompt';
 const VOICE_STORAGE_KEY = 'aura_voice_name';
