@@ -1,11 +1,24 @@
+// Filename: chat-logic.js (with project planning modifications)
+
 // --- Constants for localStorage keys ---
 const PROMPT_STORAGE_KEY = 'aura_system_prompt';
 const VOICE_STORAGE_KEY = 'aura_voice_name';
 const MODEL_STORAGE_KEY = 'aura_model_name';
-const DEFAULT_SYSTEM_PROMPT = `You are a friendly and helpful assistant named Aura. You are a bot that specializes on mental health-related topics, but you can also respond to physical health when asked. You are designed to be supportive, empathetic, and engaging. Your goal is to be as human-like as possible. Keep your answers conversational, concise, and engaging, like you're chatting with a friend.
+
+// --- MODIFICATION 1: Broaden the System Prompt's Persona ---
+const DEFAULT_SYSTEM_PROMPT = `You are a friendly and helpful assistant named Aura. You are an expert in two areas: 1) mental and physical health, and 2) project planning and task management. You are designed to be supportive, empathetic, and engaging. Your goal is to be as human-like as possible.
 
 // =================================================================
-// --- NEW CONVERSATIONAL RULES ---
+// --- NEW: CONVERSATIONAL STYLE GUIDE ---
+// =================================================================
+**Your Vibe**: Your tone should always be warm, encouraging, and relaxed. Imagine you're chatting with a close friend. You are not a formal, robotic assistant.
+**Natural Language**: Use contractions (e.g., "you're," "it's," "let's") in every response. It's essential for a natural flow. Feel free to use friendly, common phrases like "Hey, that's awesome," "no worries," or "let's dive in."
+**Use Emojis**: Incorporate emojis naturally to add warmth and emotion, just like in a real text conversation. A friendly emoji at the end of a message is a great touch. 😊
+**Be Proactive & Engaging**: Ask gentle, open-ended questions about how the user is feeling or what they're thinking. Proactively offer to help or brainstorm ideas.
+**Personalized Sign-offs**: Keep your sign-offs varied, friendly, and context-aware. Instead of a generic closing, use something like "Take care!", "Talk soon!", or "Enjoy the sunshine!"
+
+// =================================================================
+// --- CONVERSATIONAL RULES ---
 // =================================================================
 **Greeting Protocol**:
 - When a new chat begins, your very first response should be a brief introduction.
@@ -167,7 +180,6 @@ class ChatManager {
     addMemoryToActiveChat(memoryObject) { // Expects { text, embedding }
         if (this.state.activeChatId) {
             const activeChat = this.state.chats[this.state.activeChatId];
-            // No longer trimming the memory list; we store all and search semantically
             activeChat.memories.push(memoryObject);
             this.saveState();
         }
@@ -235,7 +247,6 @@ async function findRelevantMemories(queryText, topK = 4) {
 
     const scoredMemories = memories
         .map(memory => {
-            // Safety check for old memory formats that don't have embeddings
             if (!memory.embedding) return { ...memory, score: 0 };
             const score = cosineSimilarity(queryEmbedding, memory.embedding);
             return { ...memory, score };
@@ -260,19 +271,36 @@ async function performWebSearch(query) {
     return `Web Search Results: No specific information found for "${query}".`;
 }
 
+// --- MODIFICATION 3: Enhance the Tool Generation Logic ---
 async function generateChecklistFromContext(topic, context, history) {
     const modelToUse = getModelName();
     const historyString = historyToString(history);
-    const listGenPrompt = `You are an AI assistant that creates helpful, actionable checklists. Based on the user's conversation history AND the provided web search results, generate a highly personalized JSON object for a checklist to help the user with the topic: "${topic}". The JSON object must have the following structure: { "type": "checklist", "id": "checklist-${Date.now()}", "title": "A friendly, encouraging title for the list", "items": [{"text": "A short, actionable step", "done": false}] } Create between 3 and 5 simple, encouraging checklist items that are directly relevant to the user's situation described in the history.
+    let listGenPrompt;
+    const projectKeywords = ['plan', 'project', 'organize', 'goal', 'schedule', 'trip'];
+
+    // Check if the topic is project-related
+    if (projectKeywords.some(keyword => topic.toLowerCase().includes(keyword))) {
+        listGenPrompt = `You are an expert project manager AI. Based on the user's conversation history AND the provided web search results, generate a highly personalized JSON object for a checklist to help the user with the project: "${topic}". The JSON object must have the following structure: { "type": "checklist", "id": "checklist-${Date.now()}", "title": "A friendly, encouraging title for the project plan", "items": [{"text": "A clear, actionable step or milestone", "done": false}] } Create between 3 and 5 simple, encouraging checklist items that are directly relevant to the user's project described in the history.
 
 Conversation History:
 ${historyString}
 
 Web Search Results:
 ${context}`;
+    } else {
+        // The original mental-health focused prompt
+        listGenPrompt = `You are an AI assistant that creates helpful, actionable checklists. Based on the user's conversation history AND the provided web search results, generate a highly personalized JSON object for a checklist to help the user with the topic: "${topic}". The JSON object must have the following structure: { "type": "checklist", "id": "checklist-${Date.now()}", "title": "A friendly, encouraging title for the list", "items": [{"text": "A short, actionable step", "done": false}] } Create between 3 and 5 simple, encouraging checklist items that are directly relevant to the user's situation described in the history.
+
+Conversation History:
+${historyString}
+
+Web Search Results:
+${context}`;
+    }
 
     return await generateToolJson(listGenPrompt);
 }
+
 
 async function generateToolJson(prompt) {
     const modelToUse = getModelName();
@@ -313,7 +341,7 @@ Generate a JSON array of the new item objects to add. Each object must have the 
     return await generateToolJson(brainstormPrompt);
 }
 
-
+// --- MODIFICATION 2: Update the Agentic Router ---
 async function decideAndExecuteTool(userPrompt, history) {
     const modelToUse = getModelName();
     const historyString = historyToString(history);
@@ -325,10 +353,11 @@ async function decideAndExecuteTool(userPrompt, history) {
 2.  If the user explicitly asks to add a COMPLETE, SPECIFIC, ACTIONABLE task to a list (e.g., "add 'Call the doctor's office' to my list"), you MUST choose **ADD_TO_CHECKLIST**. Do NOT use this tool for vague requests like "add an item".
 3.  If the user asks for MORE items for a list (e.g., "add more to the list", "can you give me more ideas?", "add something else", "what else can I do?"), you MUST choose **GENERATE_MORE_ITEMS**.
 4.  If the user asks for a NEW plan, or to "change," "update," or "replace" the whole list, you MUST choose **CHECKLIST**.
-5.  If the user expresses feeling lost, stuck, overwhelmed, or says "I don't know what to do", you MUST choose **CHECKLIST** to provide a concrete plan.
-6.  If the user states a strong emotion ("I feel sad," "I'm so happy"), choose **MOOD_TRACKER**.
-7.  If the user expresses self-doubt or needs motivation, choose **AFFIRMATION_CARD**.
-8.  If none of the above rules apply, decide between **SEARCH** (for facts/recommendations) or **CHAT** (for conversation).
+5.  If the user wants to plan a project, set a goal, or organize tasks (e.g., "help me plan my app launch," "I need to organize my study schedule"), you MUST choose **CHECKLIST: [the specific topic of the project or goal]**.
+6.  If the user expresses feeling lost, stuck, overwhelmed, or says "I don't know what to do", you MUST choose **CHECKLIST** to provide a concrete plan.
+7.  If the user states a strong emotion ("I feel sad," "I'm so happy"), choose **MOOD_TRACKER**.
+8.  If the user expresses self-doubt or needs motivation, choose **AFFIRMATION_CARD**.
+9.  If none of the above rules apply, decide between **SEARCH** (for facts/recommendations) or **CHAT** (for conversation).
 
 **Conversation History:**
 ${historyString}
@@ -404,7 +433,6 @@ async function getOllamaResponse(prompt, toolFollowUp = null) {
     const systemPrompt = getSystemPrompt();
     const chatHistory = chatManager.getActiveChatHistory();
     
-    // Semantic search for relevant memories instead of just using recent ones
     const relevantMemoryTexts = await findRelevantMemories(prompt);
     const memory = relevantMemoryTexts.join('\n');
     
@@ -446,7 +474,6 @@ async function getOllamaResponse(prompt, toolFollowUp = null) {
         chatManager.addMessageToActiveChat('ai', aiResponse);
         const conversationSnippet = `User: ${prompt}\nAssistant: ${aiResponse}`;
         
-        // This process now happens asynchronously in the background
         extractAndSaveMemoriesForActiveChat(conversationSnippet);
         
         return aiResponse;

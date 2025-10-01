@@ -24,7 +24,9 @@ document.addEventListener('DOMContentLoaded', () => {
         'deepseek-r1:8b',
         'llama3:8b-instruct-q5_K_M',
         'llama3.2:3b',
-        'qwen3:4b-q4_K_M'
+        'qwen3:4b-q4_K_M',
+        'deepseek-v3.1:671b-cloud',
+        'gpt-oss:120b-cloud'
     ];
 
     // --- State Variables ---
