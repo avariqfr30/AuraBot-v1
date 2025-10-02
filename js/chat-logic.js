@@ -474,7 +474,6 @@ Based on the strict rules, which tool is MOST appropriate? Respond ONLY with one
             const toolJson = await generateToolJson(`Create a JSON for a mood tracker based on the user's statement. Structure: { "type": "mood_tracker", "id": "mood-${Date.now()}", "title": "How are you feeling right now?", "options": ["Happy", "Okay", "Neutral", "Sad", "Angry"] }`);
             return { tool: 'mood_tracker', content: toolJson };
         }
-        // This prompt now asks the AI to create a card with multiple affirmation points.
         if (decision.startsWith('AFFIRMATION_CARD:')) {
             const theme = decision.substring(17).trim();
             const toolJson = await generateToolJson(`Based on the theme "${theme}", create a JSON object for an affirmation card. The 'text' property MUST be an array of short, powerful affirmation strings (between 2 and 4). Structure: { "type": "affirmation_card", "id": "affirm-${Date.now()}", "title": "A Title for Your Card", "text": ["Affirmation 1.", "Affirmation 2."], "buttonText": "I will remember this." }`);
@@ -601,6 +600,14 @@ function getVoiceName() { return localStorage.getItem(VOICE_STORAGE_KEY); }
 function saveVoiceName(voiceName) { localStorage.setItem(VOICE_STORAGE_KEY, voiceName); }
 function getModelName() { return localStorage.getItem(MODEL_STORAGE_KEY) || DEFAULT_MODEL; }
 function saveModelName(modelName) { localStorage.setItem(MODEL_STORAGE_KEY, modelName); }
+
+/**
+ * A helper function to specifically get the hard-coded default system prompt,
+ * ignoring any user-saved version in localStorage. This is for the 'Reset' button.
+ */
+function getDefaultSystemPrompt() {
+    return DEFAULT_SYSTEM_PROMPT;
+}
 
 // --- Initialization ---
 // Create the single instance of the ChatManager that the app will use.
