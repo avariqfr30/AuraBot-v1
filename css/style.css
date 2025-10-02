@@ -94,6 +94,14 @@
 .breathing-pacer.inhale { transform: scale(1.5); }
 .breathing-pacer.exhale { transform: scale(0.5); }
 
+/* This ensures the pacer stays expanded during the 'hold' phase */
+.breathing-pacer.hold { transform: scale(1.5); } 
+/* --- END OF ADDITION --- */
+
+.breathing-status {
+    font-weight: 600;
+}
+
 .breathing-status {
     font-weight: 600;
     font-size: 1.125rem;
@@ -129,4 +137,44 @@
     font-style: italic;
     font-size: 1.125rem;
     margin-bottom: 1rem;
+}
+/* This is the container that will scroll if the content is too tall. */
+.checklist-scroll-container {
+    max-height: 280px; /* Adjust this value to control when scrolling starts */
+    overflow-y: auto;  /* A scrollbar will only appear if needed */
+    background-color: #111827; /* A slightly different dark shade for contrast */
+    border: 1px solid #374151; /* A subtle border */
+    border-radius: 0.5rem;
+    padding: 1rem;
+    margin-top: 0.5rem;
+}
+
+/* This will split the list itself into two columns inside the container. */
+.checklist-columns {
+    column-count: 2; /* Change to 1 on small screens if you add media queries */
+    column-gap: 1.5rem; /* Space between the columns */
+}
+
+/* This handy rule prevents a single checklist item from being awkwardly split across two columns. */
+.checklist-columns li {
+    -webkit-column-break-inside: avoid; /* For older browsers */
+    page-break-inside: avoid;
+    break-inside: avoid;
+}
+
+/* Custom scrollbar styling for a better look (optional but recommended) */
+.checklist-scroll-container::-webkit-scrollbar {
+    width: 8px;
+}
+.checklist-scroll-container::-webkit-scrollbar-track {
+    background: #1f2937;
+    border-radius: 4px;
+}
+.checklist-scroll-container::-webkit-scrollbar-thumb {
+    background-color: #4b5563;
+    border-radius: 4px;
+    border: 2px solid #1f2937;
+}
+.checklist-scroll-container::-webkit-scrollbar-thumb:hover {
+    background-color: #6b7280;
 }

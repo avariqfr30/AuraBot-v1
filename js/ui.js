@@ -48,8 +48,12 @@ function renderMoodTracker(tool) {
 // Renders a single checklist instance in the toolbox modal.
 function renderChecklistInModal(checklist, container) {
     const section = document.createElement('div');
-    let html = `<h4 class="text-xl font-bold mb-3 text-gray-200">${checklist.title}</h4>`;
-    html += '<ul class="space-y-3">';
+    // We add a wrapper div that will handle scrolling and styling for the list.
+    let html = `
+        <h4 class="text-xl font-bold mb-3 text-gray-200">${checklist.title}</h4>
+        <div class="checklist-scroll-container">
+            <ul class="checklist-columns space-y-3">`;
+
     checklist.items.forEach((item, index) => {
         html += `<li class="flex items-center">
             <input type="checkbox" id="modal-${checklist.id}-item-${index}" 
@@ -62,7 +66,12 @@ function renderChecklistInModal(checklist, container) {
             </label>
         </li>`;
     });
-    html += '</ul>';
+
+    // Close the new wrapper elements.
+    html += `
+            </ul>
+        </div>`;
+        
     section.innerHTML = html;
     container.appendChild(section);
 }
@@ -153,28 +162,32 @@ function addMessage(sender, content) {
     const chatBubble = document.createElement('div');
     chatBubble.className = `chat-bubble max-w-[75%] p-4 rounded-xl shadow-md ${isUser ? 'user' : 'ai'}`;
 
-    // If the content is an object, it's an interactive tool.
-    if (sender === 'ai' && typeof content === 'object' && content.type) {
+    // --- FIX STARTS HERE ---
+    // If the content is an object from the AI, it's an interactive tool.
+    if (sender === 'ai' && typeof content === 'object' && content !== null && content.type) {
         switch(content.type) {
             case 'mood_tracker':
+                // This now correctly calls the function to build the mood tracker UI
                 chatBubble.appendChild(renderMoodTracker(content));
                 break;
             default:
-                // Don't render unknown tool types in the chat.
-                return; 
+                // If we don't recognize the tool, we just show a placeholder to avoid errors.
+                chatBubble.textContent = `[Received an unknown tool type: ${content.type}]`;
+                break; 
         }
     } else {
         // Otherwise, it's a regular text message.
-        const p = document.createElement('p');
-        p.textContent = content;
-        chatBubble.innerHTML = '';
+        // This part handles both user text and AI text responses.
         if (isUser) {
+            const p = document.createElement('p');
+            p.textContent = content;
             chatBubble.appendChild(p);
         } else {
              // Use Marked and DOMPurify to safely render Markdown from the AI.
              chatBubble.innerHTML = DOMPurify.sanitize(marked.parse(String(content)));
         }
     }
+    // --- FIX ENDS HERE ---
     
     messageDiv.appendChild(chatBubble);
     chatMessages.appendChild(messageDiv);
