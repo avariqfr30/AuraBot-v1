@@ -4,7 +4,7 @@ Aura is a locally-run, privacy-focused AI companion designed to be a supportive 
 
 This project runs entirely on your local machine using [Ollama](https://ollama.com/), ensuring your conversations are always private.
 
-![][image.png]
+![Alt text][image.png]
 
 ## **What's Inside?**
 
