@@ -1,23 +1,29 @@
-// --- Constants for localStorage keys ---
+// chat-logic.js
+// This file holds the core client-side logic for Aura. It manages chat state,
+// tool interactions, and communication with the Ollama API.
+
+// --- App-wide Constants & Configuration ---
+
+// Keys for storing user settings in the browser's localStorage.
 const PROMPT_STORAGE_KEY = 'aura_system_prompt';
 const VOICE_STORAGE_KEY = 'aura_voice_name';
 const MODEL_STORAGE_KEY = 'aura_model_name';
 
-// DEFAULT SYSTEM PROMPT
+// The default "brain" for Aura. This detailed prompt defines its persona, rules, and capabilities.
 const DEFAULT_SYSTEM_PROMPT = `You are a friendly and helpful assistant named Aura. You are an expert in two areas: 1) mental and physical health, and 2) project planning and task management. You are designed to be supportive, empathetic, and engaging. Your goal is to be as human-like as possible.
 
-//
-// FACE-TO-FACE CONVERSATIONAL STYLE GUIDE 
-//
+// =================================================================
+// --- FACE-TO-FACE CONVERSATIONAL STYLE GUIDE ---
+// =================================================================
 **Your Vibe**: Your tone should always be warm, encouraging, and relaxed. Imagine you're having a friendly, face-to-face chat with a friend. You are not a formal, robotic assistant.
 **Natural Language**: Use contractions (e.g., "you're," "it's," "let's") in every response. It's essential for a natural flow. Use discourse markers like "Well," "Right," or "So," to start sentences where it feels natural.
 **Expressive Language**: Instead of using emojis, convey emotion and tone through your words. Use descriptive adjectives and adverbs. For example, instead of writing "That's great! 👍", say "Oh, that's genuinely wonderful to hear." or "That sounds like a fantastic plan."
 **Be Proactive & Engaging**: Ask gentle, open-ended questions about how the user is feeling or what they're thinking. Proactively offer to help or brainstorm ideas.
 **Personalized Sign-offs**: Keep your sign-offs varied, friendly, and context-aware. Instead of a generic closing, use something like "Take care!", "Talk soon!", or "Enjoy the rest of your day!"
 
-// 
-// CONVERSATIONAL RULES 
-// 
+// =================================================================
+// --- CONVERSATIONAL RULES ---
+// =================================================================
 **Greeting Protocol**:
 - When a new chat begins, your very first response should be a brief introduction.
 - After this initial introduction, you MUST NOT introduce yourself again in the same chat. Simply continue the conversation naturally. Avoid starting follow-up messages with phrases like "Aura here."
@@ -26,7 +32,7 @@ const DEFAULT_SYSTEM_PROMPT = `You are a friendly and helpful assistant named Au
 - End your responses in a friendly, supportive way (e.g., "Take care!", "Let me know if you need anything else.").
 - DO NOT end every message with a question like "How are you feeling?".
 - Only ask a follow-up question if you genuinely need more specific information from the user to continue the conversation or provide better help. If the conversation has reached a natural conclusion, use a simple sign-off instead of a question.
-// 
+// =================================================================
 
 **Golden Rule of Proactivity**: Your primary goal is to be a helpful, proactive companion. When you identify a useful action the user can take (like a checklist item or a breathing exercise), DO NOT ask for permission. Instead, perform the action (e.g., add the item, create the tool) and then confidently inform the user what you have done. Frame it as a helpful step you are taking together.
 
@@ -44,22 +50,27 @@ const DEFAULT_SYSTEM_PROMPT = `You are a friendly and helpful assistant named Au
 - **Mood Tracker**: Offer when a user states a strong feeling or emotion. This is a one-time, in-chat tool.
 - **Affirmation Card**: Offer when a user expresses self-doubt, a lack of motivation, or states a new personal goal. This is a persistent tool that can be saved to the Toolbox.`;
 const DEFAULT_MODEL = 'gemma3:4b';
-const DEFAULT_EMBEDDING_MODEL = 'mxbai-embed-large:latest'; // Using a default embedding model
+const DEFAULT_EMBEDDING_MODEL = 'mxbai-embed-large:latest';
 const STATE_STORAGE_KEY = 'multi_chat_app_state';
 const OLLAMA_API_BASE_URL = 'http://localhost:11434';
 
-// --- Chat Management Class ---
+/**
+ * Manages the entire state of the chat application, including all conversations,
+ * the active chat, and interactions with localStorage.
+ */
 class ChatManager {
     constructor() {
         this.state = this.loadState() || {
             chats: {},
             activeChatId: null
         };
+        // If there's no active chat on load, create a fresh one.
         if (!this.state.activeChatId) {
             this.createNewChat();
         }
     }
 
+    // Tries to load the app state from localStorage.
     loadState() {
         try {
             const serializedState = localStorage.getItem(STATE_STORAGE_KEY);
@@ -70,6 +81,7 @@ class ChatManager {
         }
     }
 
+    // Saves the current app state to localStorage.
     saveState() {
         try {
             const serializedState = JSON.stringify(this.state);
@@ -79,20 +91,22 @@ class ChatManager {
         }
     }
 
+    // Creates a new, empty chat session and sets it as the active one.
     createNewChat() {
         const newChatId = Date.now().toString();
         this.state.chats[newChatId] = {
             id: newChatId,
             title: 'New Chat',
             history: [],
-            memories: [], // Memories will be stored as { text: string, embedding: number[] }
-            tools: {},
+            memories: [],
+            tools: {}, // The toolbox starts empty.
             completed_tasks: []
         };
         this.state.activeChatId = newChatId;
         this.saveState();
     }
     
+    // Sets the currently active chat.
     setActiveChat(chatId) {
         if (this.state.chats[chatId]) {
             this.state.activeChatId = chatId;
@@ -100,6 +114,7 @@ class ChatManager {
         }
     }
 
+    // Deletes a chat and switches to the next available one.
     deleteChat(chatId) {
         if (this.state.chats[chatId]) {
             delete this.state.chats[chatId];
@@ -114,10 +129,12 @@ class ChatManager {
         }
     }
 
+    // Adds a message (from user or AI) to the active chat's history.
     addMessageToActiveChat(role, content) {
         if (this.state.activeChatId) {
             const history = this.state.chats[this.state.activeChatId].history;
             history.push({ role, content });
+            // If this is the first user message, use it to set the chat title.
             if (history.length === 1 && role === 'user') {
                 this.state.chats[this.state.activeChatId].title = content.substring(0, 20) + '...';
             }
@@ -125,44 +142,77 @@ class ChatManager {
         }
     }
     
+    /**
+     * The magic happens here: this function now supports multiple tools of the same type.
+     * Instead of overwriting, it adds the new tool to an array for that tool type.
+     */
     addOrUpdateToolInActiveChat(toolName, toolData) {
-        if (this.state.activeChatId) {
-            this.state.chats[this.state.activeChatId].tools[toolName] = toolData;
+        if (this.state.activeChatId && this.state.chats[this.state.activeChatId]) {
+            const activeChat = this.state.chats[this.state.activeChatId];
+            
+            // This handles legacy chats from localStorage that might not have a `.tools` property.
+            if (!activeChat.tools) {
+                activeChat.tools = {};
+            }
+            // If an array for this tool type doesn't exist yet, create it.
+            if (!Array.isArray(activeChat.tools[toolName])) {
+                activeChat.tools[toolName] = [];
+            }
+            // Add the new tool to the array.
+            activeChat.tools[toolName].push(toolData);
             this.saveState();
         }
     }
     
+    // Gets the entire toolbox for the active chat.
     getActiveChatTools() {
         if (this.state.activeChatId && this.state.chats[this.state.activeChatId]) {
-            return this.state.chats[this.state.activeChatId].tools;
+            // This handles legacy chats by returning an empty object if `.tools` is missing.
+            return this.state.chats[this.state.activeChatId].tools || {};
         }
         return {};
     }
 
+    // A helper to get the *first* checklist in the toolbox.
     getActiveChatChecklist() {
         const tools = this.getActiveChatTools();
-        return tools ? tools.checklist : null;
-    }
-    
-    completeAndRemoveChecklistItem(itemIndex) {
-        const activeChat = this.state.chats[this.state.activeChatId];
-        if (!activeChat) return null;
-
-        const checklist = activeChat.tools.checklist;
-        if (checklist && checklist.items[itemIndex]) {
-            const [completedItem] = checklist.items.splice(itemIndex, 1);
-            
-            activeChat.completed_tasks.push(completedItem.text);
-            if (activeChat.completed_tasks.length > 20) {
-                activeChat.completed_tasks.shift();
-            }
-
-            this.saveState();
-            return completedItem.text;
+        if (tools.checklist && tools.checklist.length > 0) {
+            return tools.checklist[0];
         }
         return null;
     }
+    
+    /**
+     * Completes a checklist item. It now requires the specific toolId to know
+     * *which* checklist to modify in the toolbox.
+     */
+    completeAndRemoveChecklistItem(toolId, itemIndex) {
+        const activeChat = this.state.chats[this.state.activeChatId];
+        if (!activeChat || !activeChat.tools || !activeChat.tools.checklist) return null;
 
+        const checklistArray = activeChat.tools.checklist;
+        const toolIndex = checklistArray.findIndex(list => list.id === toolId);
+
+        if (toolIndex === -1) return null; // Checklist wasn't found.
+
+        const checklist = checklistArray[toolIndex];
+        const [completedItem] = checklist.items.splice(itemIndex, 1);
+
+        // For good housekeeping, if the checklist is now empty, we remove it entirely.
+        if (checklist.items.length === 0) {
+            checklistArray.splice(toolIndex, 1);
+        }
+        
+        activeChat.completed_tasks.push(completedItem.text);
+        if (activeChat.completed_tasks.length > 20) {
+            activeChat.completed_tasks.shift(); // Keep the list tidy.
+        }
+
+        this.saveState();
+        return completedItem.text;
+    }
+
+    // Adds a new item to the *first* checklist.
     addItemToActiveChecklist(itemsToAdd) {
         const checklist = this.getActiveChatChecklist();
         if (!checklist) return;
@@ -175,7 +225,8 @@ class ChatManager {
         this.saveState();
     }
 
-    addMemoryToActiveChat(memoryObject) { // Expects { text, embedding }
+    // Adds a memory (text and its vector embedding) to the active chat.
+    addMemoryToActiveChat(memoryObject) {
         if (this.state.activeChatId) {
             const activeChat = this.state.chats[this.state.activeChatId];
             activeChat.memories.push(memoryObject);
@@ -206,8 +257,9 @@ class ChatManager {
     }
 }
 
-// --- Ollama Interaction ---
+// --- Ollama Interaction & AI Logic ---
 
+// Calls the Ollama API to get a vector embedding for a piece of text.
 async function getEmbedding(text) {
     try {
         const response = await fetch(`${OLLAMA_API_BASE_URL}/api/embeddings`, {
@@ -227,6 +279,7 @@ async function getEmbedding(text) {
     }
 }
 
+// Calculates the cosine similarity between two vectors.
 function cosineSimilarity(vecA, vecB) {
     if (!vecA || !vecB) return 0;
     const dotProduct = vecA.reduce((sum, a, i) => sum + a * vecB[i], 0);
@@ -236,6 +289,7 @@ function cosineSimilarity(vecA, vecB) {
     return dotProduct / (magnitudeA * magnitudeB);
 }
 
+// Finds the most relevant memories from the current chat based on the user's query.
 async function findRelevantMemories(queryText, topK = 4) {
     const memories = chatManager.getActiveChatMemories();
     if (memories.length === 0) return [];
@@ -245,7 +299,7 @@ async function findRelevantMemories(queryText, topK = 4) {
 
     const scoredMemories = memories
         .map(memory => {
-            if (!memory.embedding) return { ...memory, score: 0 };
+            if (!memory.embedding) return { ...memory, score: 0 }; // Safety check
             const score = cosineSimilarity(queryEmbedding, memory.embedding);
             return { ...memory, score };
         })
@@ -254,7 +308,7 @@ async function findRelevantMemories(queryText, topK = 4) {
     return scoredMemories.slice(0, topK).map(mem => mem.text);
 }
 
-
+// A mock web search function. In a real app, this would call our backend server.
 async function performWebSearch(query) {
     console.log(`Performing simulated web search for: "${query}"`);
     await new Promise(resolve => setTimeout(resolve, 1500));
@@ -269,14 +323,14 @@ async function performWebSearch(query) {
     return `Web Search Results: No specific information found for "${query}".`;
 }
 
-// --- MODIFICATION 3: Enhance the Tool Generation Logic ---
+// Generates the JSON for a checklist using a dynamic prompt.
 async function generateChecklistFromContext(topic, context, history) {
     const modelToUse = getModelName();
     const historyString = historyToString(history);
     let listGenPrompt;
     const projectKeywords = ['plan', 'project', 'organize', 'goal', 'schedule', 'trip'];
 
-    // Check if the topic is project-related
+    // This logic creates a more tailored checklist depending on the topic.
     if (projectKeywords.some(keyword => topic.toLowerCase().includes(keyword))) {
         listGenPrompt = `You are an expert project manager AI. Based on the user's conversation history AND the provided web search results, generate a highly personalized JSON object for a checklist to help the user with the project: "${topic}". The JSON object must have the following structure: { "type": "checklist", "id": "checklist-${Date.now()}", "title": "A friendly, encouraging title for the project plan", "items": [{"text": "A clear, actionable step or milestone", "done": false}] } Create between 3 and 5 simple, encouraging checklist items that are directly relevant to the user's project described in the history.
 
@@ -286,7 +340,7 @@ ${historyString}
 Web Search Results:
 ${context}`;
     } else {
-        // The original mental-health focused prompt
+        // This is the original, more general-purpose prompt.
         listGenPrompt = `You are an AI assistant that creates helpful, actionable checklists. Based on the user's conversation history AND the provided web search results, generate a highly personalized JSON object for a checklist to help the user with the topic: "${topic}". The JSON object must have the following structure: { "type": "checklist", "id": "checklist-${Date.now()}", "title": "A friendly, encouraging title for the list", "items": [{"text": "A short, actionable step", "done": false}] } Create between 3 and 5 simple, encouraging checklist items that are directly relevant to the user's situation described in the history.
 
 Conversation History:
@@ -299,7 +353,7 @@ ${context}`;
     return await generateToolJson(listGenPrompt);
 }
 
-
+// A generic function to get a JSON response from the AI.
 async function generateToolJson(prompt) {
     const modelToUse = getModelName();
     try {
@@ -317,6 +371,7 @@ async function generateToolJson(prompt) {
     }
 }
 
+// Brainstorms and adds more items to an existing checklist.
 async function generateMoreChecklistItems(history, existingChecklist, completedTasks) {
     const modelToUse = getModelName();
     const historyString = historyToString(history);
@@ -339,11 +394,15 @@ Generate a JSON array of the new item objects to add. Each object must have the 
     return await generateToolJson(brainstormPrompt);
 }
 
-// --- MODIFICATION 2: Update the Agentic Router ---
+/**
+ * The "Agentic Router". This is a core function where an AI model is used
+ * to decide which action to take based on the user's message.
+ */
 async function decideAndExecuteTool(userPrompt, history) {
     const modelToUse = getModelName();
     const historyString = historyToString(history);
     
+    // This prompt is a set of strict rules for the AI to follow.
     const routerPrompt = `You are a strict, rules-based AI router. Your job is to analyze the user's latest message and choose the single most appropriate tool. Follow these rules in order of priority.
 
 **Strict Rules - Follow these in order:**
@@ -382,6 +441,8 @@ Based on the strict rules, which tool is MOST appropriate? Respond ONLY with one
         const data = await response.json();
         const decision = data.response.trim();
 
+        // --- Execute the chosen tool based on the router's decision ---
+
         if (decision.startsWith('SEARCH:')) {
             const searchQuery = decision.substring(8).trim();
             const searchResults = await performWebSearch(searchQuery);
@@ -413,30 +474,36 @@ Based on the strict rules, which tool is MOST appropriate? Respond ONLY with one
             const toolJson = await generateToolJson(`Create a JSON for a mood tracker based on the user's statement. Structure: { "type": "mood_tracker", "id": "mood-${Date.now()}", "title": "How are you feeling right now?", "options": ["Happy", "Okay", "Neutral", "Sad", "Angry"] }`);
             return { tool: 'mood_tracker', content: toolJson };
         }
+        // This prompt now asks the AI to create a card with multiple affirmation points.
         if (decision.startsWith('AFFIRMATION_CARD:')) {
             const theme = decision.substring(17).trim();
-            const toolJson = await generateToolJson(`Based on the theme "${theme}", create a JSON object for an affirmation card. Structure: { "type": "affirmation_card", "id": "affirm-${Date.now()}", "text": "A short, powerful affirmation", "buttonText": "I will remember this." }`);
+            const toolJson = await generateToolJson(`Based on the theme "${theme}", create a JSON object for an affirmation card. The 'text' property MUST be an array of short, powerful affirmation strings (between 2 and 4). Structure: { "type": "affirmation_card", "id": "affirm-${Date.now()}", "title": "A Title for Your Card", "text": ["Affirmation 1.", "Affirmation 2."], "buttonText": "I will remember this." }`);
             return { tool: 'affirmation_card', content: toolJson };
         }
         
+        // If no other tool matches, just continue the conversation.
         return { tool: 'chat' };
     } catch (error) {
         console.error('Error in agentic router:', error);
-        return { tool: 'chat' };
+        return { tool: 'chat' }; // Fail gracefully to a chat response.
     }
 }
 
+// Main function to generate the AI's conversational response.
 async function getOllamaResponse(prompt, toolFollowUp = null) {
     const modelToUse = getModelName();
     const systemPrompt = getSystemPrompt();
     const chatHistory = chatManager.getActiveChatHistory();
     
+    // Find relevant memories to provide better context to the AI.
     const relevantMemoryTexts = await findRelevantMemories(prompt);
     const memory = relevantMemoryTexts.join('\n');
     
     let userPromptWithNotes = `User: ${prompt}`;
     let contextBlock = '';
 
+    // This block adds "System Notes" to the prompt to give the AI context about
+    // a tool action that just happened, so it can respond appropriately.
     if (toolFollowUp) {
         if (toolFollowUp.type === 'search') {
             contextBlock = `[Additional Context from a Web Search]:\n${toolFollowUp.results}\n\n`;
@@ -457,6 +524,7 @@ async function getOllamaResponse(prompt, toolFollowUp = null) {
         }
     }
     
+    // Assemble the final, complete prompt to send to the AI.
     const fullPrompt = `${systemPrompt}\n\n[Conversation History]:\n${historyToString(chatHistory)}\n\n[Relevant Memories for this Chat]:\n${memory}\n\n${contextBlock}${userPromptWithNotes}`;
 
     try {
@@ -472,6 +540,7 @@ async function getOllamaResponse(prompt, toolFollowUp = null) {
         chatManager.addMessageToActiveChat('ai', aiResponse);
         const conversationSnippet = `User: ${prompt}\nAssistant: ${aiResponse}`;
         
+        // Asynchronously extract and save memories from the latest exchange.
         extractAndSaveMemoriesForActiveChat(conversationSnippet);
         
         return aiResponse;
@@ -481,6 +550,7 @@ async function getOllamaResponse(prompt, toolFollowUp = null) {
     }
 }
 
+// Helper to convert the chat history array into a plain string.
 function historyToString(history) {
     return history.map(m => {
         if (typeof m.content === 'object' && m.content.type) {
@@ -490,6 +560,7 @@ function historyToString(history) {
     }).join('\n');
 }
 
+// This function uses an AI model to summarize a conversation snippet into key facts.
 async function extractAndSaveMemoriesForActiveChat(snippet) {
     const modelToUse = getModelName();
     const summarizerPrompt = `You are a memory extraction bot. Analyze the following conversation snippet and extract key facts about the user that would be useful for a conversational AI to remember. Focus on personal details, preferences, and important context. If there are no key facts to remember, respond with "NONE". Format each fact as a single line, starting with a hyphen. Example: - The user's favorite color is blue.
@@ -532,4 +603,5 @@ function getModelName() { return localStorage.getItem(MODEL_STORAGE_KEY) || DEFA
 function saveModelName(modelName) { localStorage.setItem(MODEL_STORAGE_KEY, modelName); }
 
 // --- Initialization ---
+// Create the single instance of the ChatManager that the app will use.
 const chatManager = new ChatManager();
