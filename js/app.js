@@ -1,3 +1,7 @@
+// app.js
+// This is the main entry point for the application. It connects all the pieces:
+// UI elements, chat logic, and user event handling.
+
 document.addEventListener('DOMContentLoaded', () => {
     // --- Element References ---
     const userInput = document.getElementById('userInput');
@@ -8,6 +12,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const settingsButton = document.getElementById('settingsButton');
     const cancelSettingsButton = document.getElementById('cancelSettingsButton');
     const saveSettingsButton = document.getElementById('saveSettingsButton');
+    const resetSettingsButton = document.getElementById('resetSettingsButton');
     const systemPromptTextarea = document.getElementById('systemPromptTextarea');
     const voiceSelectDropdown = document.getElementById('voiceSelectDropdown');
     const modelSelectDropdown = document.getElementById('modelSelectDropdown');
@@ -16,7 +21,6 @@ document.addEventListener('DOMContentLoaded', () => {
     const toolsModalContent = document.getElementById('toolsModalContent');
     const chatMessages = document.getElementById('chatMessages');
 
-    // List of curated models for the dropdown
     const availableModels = [
         'gemma3:4b',
         'gemma3:4b-it-qat',
@@ -29,7 +33,6 @@ document.addEventListener('DOMContentLoaded', () => {
         'gpt-oss:120b-cloud'
     ];
 
-    // --- State Variables ---
     let isRecording = false;
     let recognition;
     let voices = [];
@@ -37,7 +40,6 @@ document.addEventListener('DOMContentLoaded', () => {
     let lastInputMode = 'text';
     let breathInterval;
 
-    // --- Speech Synthesis (TTS) Setup ---
     function populateVoiceDropdown() {
         voices = synth.getVoices();
         voiceSelectDropdown.innerHTML = '';
@@ -53,13 +55,10 @@ document.addEventListener('DOMContentLoaded', () => {
     if (speechSynthesis.onvoiceschanged !== undefined) {
         speechSynthesis.onvoiceschanged = populateVoiceDropdown;
     }
+
     function speakResponse(text) {
-        // More aggressive sanitization to remove any character that isn't a letter,
-        // number, or basic punctuation. This reliably strips all emojis.
         const cleanedText = text.replace(/[^\w\s.,?!'"-]/g, '').trim();
-
-        if (!cleanedText) return; // Don't speak if the string is empty after cleaning
-
+        if (!cleanedText) return;
         const selectedVoiceName = getVoiceName();
         const utterance = new SpeechSynthesisUtterance(cleanedText);
         if (selectedVoiceName) {
@@ -69,21 +68,28 @@ document.addEventListener('DOMContentLoaded', () => {
         synth.speak(utterance);
     }
 
-    // --- Speech Recognition Setup ---
     function setupSpeechRecognition() {
         const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-        if (!SpeechRecognition) { micButton.style.display = 'none'; return; }
+        if (!SpeechRecognition) {
+            micButton.style.display = 'none';
+            return;
+        }
         recognition = new SpeechRecognition();
         recognition.interimResults = false;
         recognition.lang = 'en-US';
         recognition.onstart = () => { isRecording = true; setMicButtonState('listening'); };
-        recognition.onresult = (event) => { const transcript = event.results[0][0].transcript; userInput.value = transcript; handleSendMessage('voice'); };
+        recognition.onresult = (event) => {
+            userInput.value = event.results[0][0].transcript;
+            handleSendMessage('voice');
+        };
         recognition.onend = () => { isRecording = false; setMicButtonState('idle'); };
-        recognition.onerror = (event) => { console.error('Speech recognition error', event.error); isRecording = false; setMicButtonState('idle'); };
+        recognition.onerror = (event) => {
+            console.error('Speech recognition error', event.error);
+            isRecording = false;
+            setMicButtonState('idle');
+        };
     }
-    setupSpeechRecognition();
 
-    // --- Core Logic ---
     async function handleSendMessage(inputMode = 'text') {
         lastInputMode = inputMode;
         const message = userInput.value.trim();
@@ -94,62 +100,60 @@ document.addEventListener('DOMContentLoaded', () => {
         userInput.value = '';
         showTypingIndicator();
 
-        const history = chatManager.getActiveChatHistory();
-        const toolDecision = await decideAndExecuteTool(message, history);
+        const rawResponse = await getOllamaResponse(message);
         
+        const toolTagRegex = /<tool_create\s+type="([^"]+)"(?:\s+theme="([^"]+)")?\s*\/>/g;
+        let cleanedResponse = rawResponse;
+        const matchedTags = [...rawResponse.matchAll(toolTagRegex)];
+
         hideTypingIndicator();
-        
-        let followUp = null;
-        switch (toolDecision.tool) {
-            case 'checklist':
-                chatManager.addOrUpdateToolInActiveChat('checklist', toolDecision.content);
-                followUp = { type: 'persistent_tool_created', toolName: 'checklist' };
-                break;
-            case 'breathing_exercise':
-                chatManager.addOrUpdateToolInActiveChat('breathing_exercise', toolDecision.content);
-                followUp = { type: 'persistent_tool_created', toolName: 'breathing exercise' };
-                break;
-            case 'affirmation_card':
-                chatManager.addOrUpdateToolInActiveChat('affirmation_card', toolDecision.content);
-                followUp = { type: 'persistent_tool_created', toolName: 'affirmation card' };
-                break;
-            case 'add_to_checklist':
-                chatManager.addItemToActiveChecklist(toolDecision.itemText);
-                followUp = { type: 'item_added', text: toolDecision.itemText };
-                break;
-            case 'generate_more_items':
-                if (toolDecision.newItems && toolDecision.newItems.length > 0) {
-                    chatManager.addItemToActiveChecklist(toolDecision.newItems);
-                    followUp = { type: 'more_items_added', count: toolDecision.newItems.length };
-                }
-                break;
-            case 'mood_tracker':
-                chatManager.addMessageToActiveChat('ai', toolDecision.content);
-                addMessage('ai', toolDecision.content);
-                break;
-            case 'search':
-                followUp = { type: 'search', results: toolDecision.results };
-                break;
-            case 'chat':
-            default:
-                break;
+
+        if (matchedTags.length > 0) {
+            // Extract all tool types from the matches
+            const toolTypes = matchedTags.map(match => match[1]);
+            // Get a unique set of tool types to avoid duplicate bubbles
+            const uniqueToolTypes = new Set(toolTypes);
+            // Add one status bubble for each unique tool type being used
+            uniqueToolTypes.forEach(toolType => {
+                addToolStatusMessage(toolType);
+            });
         }
 
-        if (toolDecision.tool !== 'mood_tracker') {
-             await triggerAIFollowUp(message, followUp);
+        for (const match of matchedTags) {
+            const toolType = match[1];
+            const toolTheme = match[2] || '';
+            
+            const toolData = await createToolByType(toolType, toolTheme);
+            if (toolData) {
+                chatManager.addOrUpdateToolInActiveChat(toolType, toolData);
+            }
+            cleanedResponse = cleanedResponse.replace(match[0], '').trim();
+        }
+
+        removeToolStatusMessages();
+
+        addMessage('ai', cleanedResponse);
+        chatManager.addMessageToActiveChat('ai', cleanedResponse);
+
+        if (lastInputMode === 'voice') {
+            speakResponse(cleanedResponse);
         }
 
         refreshUI();
     }
-
-    async function triggerAIFollowUp(prompt, toolFollowUp) {
+    
+    async function triggerAIFollowUp(followUp) {
         showTypingIndicator();
-        const response = await getOllamaResponse(prompt, toolFollowUp);
+        const response = await getOllamaResponse('', followUp);
         hideTypingIndicator();
+
         addMessage('ai', response);
+        chatManager.addMessageToActiveChat('ai', response);
+
         if (lastInputMode === 'voice') {
             speakResponse(response);
         }
+        refreshUI();
     }
 
     function refreshUI() {
@@ -159,7 +163,8 @@ document.addEventListener('DOMContentLoaded', () => {
         const history = chatManager.getActiveChatHistory();
         displayChat(history);
         const activeTools = chatManager.getActiveChatTools();
-        toggleToolsButton(Object.keys(activeTools).length > 0);
+        const hasAnyTools = Object.values(activeTools).some(toolArray => toolArray && toolArray.length > 0);
+        toggleToolsButton(hasAnyTools);
     }
 
     function populateModelDropdown() {
@@ -176,11 +181,24 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    // --- Event Listeners ---
-    userInput.addEventListener('keypress', (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSendMessage('text'); } });
+    userInput.addEventListener('keypress', (e) => {
+        if (e.key === 'Enter' && !e.shiftKey) {
+            e.preventDefault();
+            handleSendMessage('text');
+        }
+    });
     sendButton.addEventListener('click', () => handleSendMessage('text'));
-    micButton.addEventListener('click', () => { if (isRecording) { recognition.stop(); } else { recognition.start(); } });
-    newChatButton.addEventListener('click', () => { chatManager.createNewChat(); refreshUI(); });
+    micButton.addEventListener('click', () => {
+        if (isRecording) {
+            recognition.stop();
+        } else {
+            recognition.start();
+        }
+    });
+    newChatButton.addEventListener('click', () => {
+        chatManager.createNewChat();
+        refreshUI();
+    });
     
     chatListContainer.addEventListener('click', (event) => {
         const deleteButton = event.target.closest('.delete-chat-button');
@@ -198,26 +216,22 @@ document.addEventListener('DOMContentLoaded', () => {
     });
     
     toolsButton.addEventListener('click', () => {
-        const tools = chatManager.getActiveChatTools();
-        renderToolsInModal(tools);
+        renderToolsInModal(chatManager.getActiveChatTools());
         openToolsModal();
     });
     closeToolsButton.addEventListener('click', closeToolsModal);
     
-    // THIS IS THE CORRECTED LISTENER FOR CHECKLIST INTERACTION
     toolsModalContent.addEventListener('change', async (event) => {
         const target = event.target;
         if (target.type === 'checkbox' && target.dataset.toolType === 'checklist') {
             const itemIndex = parseInt(target.dataset.itemIndex);
-            if (target.checked) {
-                const itemText = chatManager.completeAndRemoveChecklistItem(itemIndex);
-                renderToolsInModal(chatManager.getActiveChatTools()); // Re-render modal to show removal
+            const toolId = target.dataset.toolId;
+            if (target.checked && toolId) {
+                const itemText = chatManager.completeAndRemoveChecklistItem(toolId, itemIndex);
+                renderToolsInModal(chatManager.getActiveChatTools());
                 if (itemText) {
-                    closeToolsModal(); // The "jump"
-                    await triggerAIFollowUp( // The "conversation"
-                        `The user just completed a task.`, 
-                        { type: 'checklist_item_completed', text: itemText }
-                    );
+                    closeToolsModal();
+                    await triggerAIFollowUp({ type: 'checklist_item_completed', text: itemText });
                 }
             }
         }
@@ -228,19 +242,19 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!target) return;
 
         const action = target.dataset.action;
-        let followUp = null;
 
         switch (action) {
             case 'log_mood': {
-                target.closest('.mood-tracker-container').querySelectorAll('button').forEach(btn => btn.disabled = true);
-                target.style.transform = 'scale(1.2)';
-                followUp = { type: 'mood_logged', mood: target.dataset.mood };
+                const mood = target.dataset.mood;
+                chatManager.logMoodToTracker(mood);
+                renderToolsInModal(chatManager.getActiveChatTools());
+                closeToolsModal();
+                await triggerAIFollowUp({ type: 'mood_logged', mood: mood });
                 break;
             }
             case 'commit_affirmation': {
                 target.textContent = 'Committed!';
                 target.disabled = true;
-                followUp = { type: 'affirmation_committed', text: target.dataset.affirmationText };
                 break;
             }
             case 'start_breathing': {
@@ -264,10 +278,8 @@ document.addEventListener('DOMContentLoaded', () => {
                         clearInterval(breathInterval);
                         status.textContent = 'Complete!';
                         target.disabled = false;
-                        if (target.closest('#toolsModalContent')) {
-                           closeToolsModal();
-                        }
-                        triggerAIFollowUp('', { type: 'breathing_complete' });
+                        closeToolsModal();
+                        triggerAIFollowUp({ type: 'breathing_complete' });
                         return;
                     }
                     status.textContent = 'Breathe In...';
@@ -287,16 +299,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 break;
             }
         }
-
-        if (followUp) {
-            if (target.closest('#toolsModalContent')) {
-                closeToolsModal();
-            }
-            await triggerAIFollowUp('', followUp);
-        }
     };
 
-    chatMessages.addEventListener('click', toolInteractionListener);
     toolsModalContent.addEventListener('click', toolInteractionListener);
     
     settingsButton.addEventListener('click', () => {
@@ -305,9 +309,9 @@ document.addEventListener('DOMContentLoaded', () => {
         populateModelDropdown();
         openSettingsModal();
     });
-    cancelSettingsButton.addEventListener('click', () => {
-        closeSettingsModal();
-    });
+
+    cancelSettingsButton.addEventListener('click', closeToolsModal);
+
     saveSettingsButton.addEventListener('click', () => {
         saveSystemPrompt(systemPromptTextarea.value);
         saveVoiceName(voiceSelectDropdown.value);
@@ -315,6 +319,13 @@ document.addEventListener('DOMContentLoaded', () => {
         closeSettingsModal();
     });
 
-    // Initial load
+    resetSettingsButton.addEventListener('click', () => {
+        if (confirm('Are you sure you want to reset the prompt to its default state? Any custom changes in this text box will be lost.')) {
+            systemPromptTextarea.value = getDefaultSystemPrompt();
+            localStorage.removeItem(PROMPT_STORAGE_KEY);
+        }
+    });
+
+    setupSpeechRecognition();
     refreshUI();
 });
