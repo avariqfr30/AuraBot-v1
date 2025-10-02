@@ -4,8 +4,6 @@ Aura is a locally-run, privacy-focused AI companion designed to be a supportive 
 
 This project runs entirely on your local machine using [Ollama](https://ollama.com/), ensuring your conversations are always private.
 
-![][image1]
-
 ## **What's Inside?**
 
 Aura is more than just a chatbot. It's an "agentic" AI that uses a set of built-in tools to actively help you.
