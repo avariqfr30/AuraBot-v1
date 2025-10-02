@@ -118,55 +118,67 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // Let the agentic router decide what to do.
         const history = chatManager.getActiveChatHistory();
-        const toolDecision = await decideAndExecuteTool(message, history);
+        const toolDecisions = await decideAndExecuteTool(message, history);
         
         hideTypingIndicator();
         
         let followUp = null;
-        switch (toolDecision.tool) {
-            case 'checklist':
-                chatManager.addOrUpdateToolInActiveChat('checklist', toolDecision.content);
-                followUp = { type: 'persistent_tool_created', toolName: 'checklist' };
-                break;
-            case 'breathing_exercise':
-                chatManager.addOrUpdateToolInActiveChat('breathing_exercise', toolDecision.content);
-                followUp = { type: 'persistent_tool_created', toolName: 'breathing exercise' };
-                break;
-            case 'affirmation_card':
-                chatManager.addOrUpdateToolInActiveChat('affirmation_card', toolDecision.content);
-                followUp = { type: 'persistent_tool_created', toolName: 'affirmation card' };
-                break;
-            case 'add_to_checklist':
-                chatManager.addItemToActiveChecklist(toolDecision.itemText);
-                followUp = { type: 'item_added', text: toolDecision.itemText };
-                break;
-            case 'generate_more_items':
-                if (toolDecision.newItems && toolDecision.newItems.length > 0) {
-                    chatManager.addItemToActiveChecklist(toolDecision.newItems);
-                    followUp = { type: 'more_items_added', count: toolDecision.newItems.length };
-                }
-                break;
-            case 'mood_tracker':
-                // Mood tracker is a special case that displays in chat, not in the toolbox.
-                chatManager.addMessageToActiveChat('ai', toolDecision.content);
-                addMessage('ai', toolDecision.content);
-                break;
-            case 'search':
-                followUp = { type: 'search', results: toolDecision.results };
-                break;
-            case 'chat':
-            default:
-                // No tool action needed, just a conversational reply.
-                break;
+        let persistentToolsCreated = [];
+
+        for (const toolDecision of toolDecisions) {
+            switch (toolDecision.tool) {
+                case 'checklist':
+                    chatManager.addOrUpdateToolInActiveChat('checklist', toolDecision.content);
+                    persistentToolsCreated.push('checklist');
+                    break;
+                case 'breathing_exercise':
+                    chatManager.addOrUpdateToolInActiveChat('breathing_exercise', toolDecision.content);
+                    persistentToolsCreated.push('breathing exercise');
+                    break;
+                case 'affirmation_card':
+                    chatManager.addOrUpdateToolInActiveChat('affirmation_card', toolDecision.content);
+                    persistentToolsCreated.push('affirmation card');
+                    break;
+                case 'add_to_checklist':
+                    chatManager.addItemToActiveChecklist(toolDecision.itemText);
+                    followUp = { type: 'item_added', text: toolDecision.itemText };
+                    break;
+                case 'generate_more_items':
+                    if (toolDecision.newItems && toolDecision.newItems.length > 0) {
+                        chatManager.addItemToActiveChecklist(toolDecision.newItems);
+                        followUp = { type: 'more_items_added', count: toolDecision.newItems.length };
+                    }
+                    break;
+                case 'mood_tracker':
+                    // Mood tracker is a special case that displays in chat, not in the toolbox.
+                    chatManager.addMessageToActiveChat('ai', toolDecision.content);
+                    addMessage('ai', toolDecision.content);
+                    break;
+                case 'search':
+                    followUp = { type: 'search', results: toolDecision.results };
+                    break;
+                case 'chat':
+                default:
+                    // No tool action needed, just a conversational reply.
+                    break;
+            }
         }
 
+        // If any persistent tools were created, bundle them into a single follow-up.
+        if (persistentToolsCreated.length > 0) {
+            followUp = { type: 'persistent_tool_created', toolNames: persistentToolsCreated };
+        }
+        
         // If a tool was used (other than mood tracker), get a follow-up response from the AI.
-        if (toolDecision.tool !== 'mood_tracker') {
+        // Or if there was no tool action at all (pure chat).
+        const wasMoodTrackerOnly = toolDecisions.length === 1 && toolDecisions[0].tool === 'mood_tracker';
+        if (!wasMoodTrackerOnly) {
              await triggerAIFollowUp(message, followUp);
         }
 
         refreshUI();
     }
+
 
     // Triggers a conversational response from the AI, providing context about any tool actions.
     async function triggerAIFollowUp(prompt, toolFollowUp) {

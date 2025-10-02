@@ -176,8 +176,9 @@ class ChatManager {
     // A helper to get the *first* checklist in the toolbox.
     getActiveChatChecklist() {
         const tools = this.getActiveChatTools();
+        // Return the most recently added checklist
         if (tools.checklist && tools.checklist.length > 0) {
-            return tools.checklist[0];
+            return tools.checklist[tools.checklist.length - 1];
         }
         return null;
     }
@@ -212,18 +213,19 @@ class ChatManager {
         return completedItem.text;
     }
 
-    // Adds a new item to the *first* checklist.
+    // Adds a new item to the *most recent* checklist.
     addItemToActiveChecklist(itemsToAdd) {
         const checklist = this.getActiveChatChecklist();
         if (!checklist) return;
 
-        if (Array.isArray(itemsToAdd)) {
-            checklist.items.push(...itemsToAdd);
-        } else {
-            checklist.items.push({ text: itemsToAdd, done: false });
-        }
+        const newItems = Array.isArray(itemsToAdd) 
+            ? itemsToAdd 
+            : [{ text: itemsToAdd, done: false }];
+
+        checklist.items.push(...newItems);
         this.saveState();
     }
+
 
     // Adds a memory (text and its vector embedding) to the active chat.
     addMemoryToActiveChat(memoryObject) {
@@ -403,33 +405,24 @@ async function decideAndExecuteTool(userPrompt, history) {
     const historyString = historyToString(history);
     
     // This prompt is a set of strict rules for the AI to follow.
-    const routerPrompt = `You are a strict, rules-based AI router. Your job is to analyze the user's latest message and choose the single most appropriate tool. Follow these rules in order of priority.
+    const routerPrompt = `You are a tool-selection AI. Analyze the user's last message and respond ONLY with the single most appropriate tool command.
 
-**Strict Rules - Follow these in order:**
-1.  If the user's message contains keywords of high distress like "anxious", "panicked", "can't breathe", or "freaking out", you MUST choose **BREATHING_EXERCISE**.
-2.  If the user explicitly asks to add a COMPLETE, SPECIFIC, ACTIONABLE task to a list (e.g., "add 'Call the doctor's office' to my list"), you MUST choose **ADD_TO_CHECKLIST**. Do NOT use this tool for vague requests like "add an item".
-3.  If the user asks for MORE items for a list (e.g., "add more to the list", "can you give me more ideas?", "add something else", "what else can I do?"), you MUST choose **GENERATE_MORE_ITEMS**.
-4.  If the user asks for a NEW plan, or to "change," "update," or "replace" the whole list, you MUST choose **CHECKLIST**.
-5.  If the user wants to plan a project, set a goal, or organize tasks (e.g., "help me plan my app launch," "I need to organize my study schedule"), you MUST choose **CHECKLIST: [the specific topic of the project or goal]**.
-6.  If the user expresses feeling lost, stuck, overwhelmed, or says "I don't know what to do", you MUST choose **CHECKLIST** to provide a concrete plan.
-7.  If the user states a strong emotion ("I feel sad," "I'm so happy"), choose **MOOD_TRACKER**.
-8.  If the user expresses self-doubt or needs motivation, choose **AFFIRMATION_CARD**.
-9.  If none of the above rules apply, decide between **SEARCH** (for facts/recommendations) or **CHAT** (for conversation).
+**Tool Commands & Triggers:**
+- **BREATHING_EXERCISE**: User is expressing high stress, anxiety, or panic ("anxious", "panicked", "overwhelmed", "freaking out").
+- **AFFIRMATION_CARD:[theme]**: User has self-doubt, needs motivation, or is setting a goal.
+- **MOOD_TRACKER**: User is stating a simple, direct emotion ("sad", "happy", "angry", "feel down", "feeling great").
+- **CHECKLIST:[topic]**: User wants a plan, a list, to organize something, or feels stuck.
+- **ADD_TO_CHECKLIST:[item]**: User wants to add a specific, complete item to a list.
+- **GENERATE_MORE_ITEMS**: User wants more ideas for an existing list.
+- **SEARCH:[query]**: User is asking for facts or recommendations.
+- **CHAT**: Use ONLY if no other tool applies.
 
 **Conversation History:**
 ${historyString}
 
 **User's Latest Message:** "${userPrompt}"
 
-Based on the strict rules, which tool is MOST appropriate? Respond ONLY with one of the following formats:
-- CHAT
-- SEARCH: [search query]
-- CHECKLIST: [topic for the new list]
-- ADD_TO_CHECKLIST: [the specific, actionable item to add]
-- GENERATE_MORE_ITEMS
-- BREATHING_EXERCISE
-- MOOD_TRACKER
-- AFFIRMATION_CARD: [theme for the card]`;
+**Your Command:**`;
 
     try {
         const response = await fetch(`${OLLAMA_API_BASE_URL}/api/generate`, {
@@ -439,54 +432,106 @@ Based on the strict rules, which tool is MOST appropriate? Respond ONLY with one
         });
         if (!response.ok) throw new Error("Router model failed");
         const data = await response.json();
-        const decision = data.response.trim();
+        const decisions = data.response.trim().split('&&').map(d => d.trim());
 
-        // --- Execute the chosen tool based on the router's decision ---
+        // --- Execute the chosen tools based on the router's decisions ---
+        let allToolResults = [];
 
-        if (decision.startsWith('SEARCH:')) {
-            const searchQuery = decision.substring(8).trim();
-            const searchResults = await performWebSearch(searchQuery);
-            return { tool: 'search', query: searchQuery, results: searchResults };
-        } 
-        if (decision.startsWith('CHECKLIST:')) {
-            const topic = decision.substring(11).trim();
-            const searchResults = await performWebSearch(topic);
-            const checklistJson = await generateChecklistFromContext(topic, searchResults, history);
-            return { tool: 'checklist', content: checklistJson };
-        }
-        if (decision.startsWith('ADD_TO_CHECKLIST:')) {
-            const itemText = decision.substring(18).trim();
-            return { tool: 'add_to_checklist', itemText: itemText };
-        }
-        if (decision === 'GENERATE_MORE_ITEMS') {
-            const checklist = chatManager.getActiveChatChecklist();
-            const completedTasks = chatManager.getActiveChatCompletedTasks();
-            if (checklist) {
-                const newItems = await generateMoreChecklistItems(history, checklist, completedTasks);
-                return { tool: 'generate_more_items', newItems: newItems };
+        for (const decision of decisions) {
+            let result = { tool: 'chat' }; // Default to chat
+            if (decision.startsWith('SEARCH:')) {
+                const searchQuery = decision.substring(8).trim();
+                const searchResults = await performWebSearch(searchQuery);
+                result = { tool: 'search', query: searchQuery, results: searchResults };
+            } 
+            else if (decision.startsWith('CHECKLIST:')) {
+                const topic = decision.substring(11).trim();
+                const searchResults = await performWebSearch(topic);
+                const checklistJson = await generateChecklistFromContext(topic, searchResults, history);
+                if (checklistJson) result = { tool: 'checklist', content: checklistJson };
             }
-        }
-        if (decision === 'BREATHING_EXERCISE') {
-            const toolJson = await generateToolJson(`Create a JSON object for a breathing exercise. Structure: { "type": "breathing_exercise", "id": "breathe-${Date.now()}", "title": "A Quick Breathing Exercise", "cycle": { "inhale": 4, "hold": 4, "exhale": 6 } }`);
-            return { tool: 'breathing_exercise', content: toolJson };
-        }
-        if (decision === 'MOOD_TRACKER') {
-            const toolJson = await generateToolJson(`Create a JSON for a mood tracker based on the user's statement. Structure: { "type": "mood_tracker", "id": "mood-${Date.now()}", "title": "How are you feeling right now?", "options": ["Happy", "Okay", "Neutral", "Sad", "Angry"] }`);
-            return { tool: 'mood_tracker', content: toolJson };
-        }
-        if (decision.startsWith('AFFIRMATION_CARD:')) {
-            const theme = decision.substring(17).trim();
-            const toolJson = await generateToolJson(`Based on the theme "${theme}", create a JSON object for an affirmation card. The 'text' property MUST be an array of short, powerful affirmation strings (between 2 and 4). Structure: { "type": "affirmation_card", "id": "affirm-${Date.now()}", "title": "A Title for Your Card", "text": ["Affirmation 1.", "Affirmation 2."], "buttonText": "I will remember this." }`);
-            return { tool: 'affirmation_card', content: toolJson };
+            else if (decision.startsWith('ADD_TO_CHECKLIST:')) {
+                const itemText = decision.substring(18).trim();
+                result = { tool: 'add_to_checklist', itemText: itemText };
+            }
+            else if (decision === 'GENERATE_MORE_ITEMS') {
+                const checklist = chatManager.getActiveChatChecklist();
+                const completedTasks = chatManager.getActiveChatCompletedTasks();
+                if (checklist) {
+                    const newItems = await generateMoreChecklistItems(history, checklist, completedTasks);
+                    result = { tool: 'generate_more_items', newItems: newItems };
+                }
+            }
+            else if (decision === 'BREATHING_EXERCISE') {
+                const toolJson = await generateToolJson(`Create a JSON object for a breathing exercise. Structure: { "type": "breathing_exercise", "id": "breathe-${Date.now()}", "title": "A Quick Breathing Exercise", "cycle": { "inhale": 4, "hold": 4, "exhale": 6 } }`);
+                if (toolJson) result = { tool: 'breathing_exercise', content: toolJson };
+            }
+            else if (decision === 'MOOD_TRACKER') {
+                const toolJson = await generateToolJson(`Create a JSON for a mood tracker based on the user's statement. Structure: { "type": "mood_tracker", "id": "mood-${Date.now()}", "title": "How are you feeling right now?", "options": ["Happy", "Okay", "Neutral", "Sad", "Angry"] }`);
+                if (toolJson) result = { tool: 'mood_tracker', content: toolJson };
+            }
+            else if (decision.startsWith('AFFIRMATION_CARD:')) {
+                const theme = decision.substring(17).trim();
+                const newAffirmationPrompt = `You are an AI assistant that creates JSON for an "Affirmation Card".
+- The theme is: "${theme}".
+- Generate a friendly, encouraging title.
+- Generate an array of 2-3 short, powerful affirmation strings for the "text" property.
+- Your output MUST be only the raw JSON object with this exact structure: { "type": "affirmation_card", "id": "affirm-${Date.now()}", "title": "...", "text": ["...", "..."], "buttonText": "I will remember this." }`;
+                const toolJson = await generateToolJson(newAffirmationPrompt);
+                if (toolJson) result = { tool: 'affirmation_card', content: toolJson };
+            }
+            allToolResults.push(result);
         }
         
-        // If no other tool matches, just continue the conversation.
-        return { tool: 'chat' };
+        return allToolResults;
     } catch (error) {
         console.error('Error in agentic router:', error);
-        return { tool: 'chat' }; // Fail gracefully to a chat response.
+        return [{ tool: 'chat' }]; // Fail gracefully to a chat response.
     }
 }
+
+// ===================================================================================
+// --- NEW FUNCTION TO PROVIDE TOOL CONTEXT TO THE AI ---
+// ===================================================================================
+
+/**
+ * Converts the current state of all active tools into a readable string for the AI.
+ * @param {object} tools - The tools object from the active chat state.
+ * @returns {string} A formatted string describing the tools, or "None" if empty.
+ */
+function toolsToString(tools) {
+    let toolString = '';
+    const toolOrder = ['checklist', 'affirmation_card', 'breathing_exercise'];
+
+    toolOrder.forEach(toolName => {
+        if (tools[toolName] && tools[toolName].length > 0) {
+            tools[toolName].forEach(toolInstance => {
+                switch (toolName) {
+                    case 'checklist':
+                        toolString += `- Checklist: "${toolInstance.title}"\n`;
+                        toolInstance.items.forEach((item, index) => {
+                            toolString += `  ${index + 1}. ${item.text}\n`;
+                        });
+                        break;
+                    case 'affirmation_card':
+                        toolString += `- Affirmation Card: "${toolInstance.title}"\n`;
+                        if (Array.isArray(toolInstance.text)) {
+                            toolInstance.text.forEach(affirmation => {
+                                toolString += `  - "${affirmation}"\n`;
+                            });
+                        }
+                        break;
+                    case 'breathing_exercise':
+                        toolString += `- Breathing Exercise: "${toolInstance.title}" (Inhale: ${toolInstance.cycle.inhale}s, Hold: ${toolInstance.cycle.hold}s, Exhale: ${toolInstance.cycle.exhale}s)\n`;
+                        break;
+                }
+            });
+        }
+    });
+
+    return toolString.trim() || 'None';
+}
+
 
 // Main function to generate the AI's conversational response.
 async function getOllamaResponse(prompt, toolFollowUp = null) {
@@ -497,6 +542,12 @@ async function getOllamaResponse(prompt, toolFollowUp = null) {
     // Find relevant memories to provide better context to the AI.
     const relevantMemoryTexts = await findRelevantMemories(prompt);
     const memory = relevantMemoryTexts.join('\n');
+
+    // --- CONTEXT FIX STARTS HERE ---
+    // Get the current state of all tools and convert them to a string.
+    const activeTools = chatManager.getActiveChatTools();
+    const toolsStateString = toolsToString(activeTools);
+    // --- CONTEXT FIX ENDS HERE ---
     
     let userPromptWithNotes = `User: ${prompt}`;
     let contextBlock = '';
@@ -507,7 +558,8 @@ async function getOllamaResponse(prompt, toolFollowUp = null) {
         if (toolFollowUp.type === 'search') {
             contextBlock = `[Additional Context from a Web Search]:\n${toolFollowUp.results}\n\n`;
         } else if (toolFollowUp.type === 'persistent_tool_created') {
-             userPromptWithNotes = `[System Note: You just created a new "${toolFollowUp.toolName.replace(/_/g, ' ')}" tool for the user. Inform them it's available in their Toolbox and continue the conversation.]\n\nUser: ${prompt}`;
+             const toolNames = toolFollowUp.toolNames.map(name => `"${name.replace(/_/g, ' ')}"`).join(' and ');
+             userPromptWithNotes = `[System Note: You just created ${toolNames} tool(s) for the user. Inform them they are available in their Toolbox and continue the conversation.]\n\nUser: ${prompt}`;
         } else if (toolFollowUp.type === 'item_added') {
             userPromptWithNotes = `[System Note: You added "${toolFollowUp.text}" to the user's checklist. Briefly confirm this and continue the conversation.]\n\nUser: ${prompt}`;
         } else if (toolFollowUp.type === 'more_items_added') {
@@ -523,8 +575,8 @@ async function getOllamaResponse(prompt, toolFollowUp = null) {
         }
     }
     
-    // Assemble the final, complete prompt to send to the AI.
-    const fullPrompt = `${systemPrompt}\n\n[Conversation History]:\n${historyToString(chatHistory)}\n\n[Relevant Memories for this Chat]:\n${memory}\n\n${contextBlock}${userPromptWithNotes}`;
+    // Assemble the final, complete prompt to send to the AI, now including the tool state.
+    const fullPrompt = `${systemPrompt}\n\n[Conversation History]:\n${historyToString(chatHistory)}\n\n[Relevant Memories for this Chat]:\n${memory}\n\n[Current Toolbox State]:\n${toolsStateString}\n\n${contextBlock}${userPromptWithNotes}`;
 
     try {
         const response = await fetch(`${OLLAMA_API_BASE_URL}/api/generate`, {
