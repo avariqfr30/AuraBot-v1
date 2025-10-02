@@ -15,40 +15,10 @@ function clearChatMessages() {
     chatMessages.innerHTML = '';
 }
 
-// --- Rendering functions for IN-CHAT tools ---
-
-// Renders the interactive mood tracker buttons inside a chat bubble.
-function renderMoodTracker(tool) {
-    const container = document.createElement('div');
-    const title = document.createElement('p');
-    title.className = 'font-semibold mb-2';
-    title.textContent = tool.title;
-    container.appendChild(title);
-
-    const buttonContainer = document.createElement('div');
-    buttonContainer.className = 'mood-tracker-container';
-    
-    const emojis = { "Happy": '😊', "Okay": '🙂', "Neutral": '😐', "Sad": '😔', "Angry": '😠' };
-
-    tool.options.forEach(option => {
-        const button = document.createElement('button');
-        button.className = 'mood-button';
-        button.textContent = emojis[option] || '❓';
-        button.dataset.action = 'log_mood';
-        button.dataset.mood = option;
-        buttonContainer.appendChild(button);
-    });
-
-    container.appendChild(buttonContainer);
-    return container;
-}
-
 // --- Rendering functions for the TOOLS MODAL ---
 
-// Renders a single checklist instance in the toolbox modal.
 function renderChecklistInModal(checklist, container) {
     const section = document.createElement('div');
-    // We add a wrapper div that will handle scrolling and styling for the list.
     let html = `
         <h4 class="text-xl font-bold mb-3 text-gray-200">${checklist.title}</h4>
         <div class="checklist-scroll-container">
@@ -67,16 +37,11 @@ function renderChecklistInModal(checklist, container) {
         </li>`;
     });
 
-    // Close the new wrapper elements.
-    html += `
-            </ul>
-        </div>`;
-        
+    html += `</ul></div>`;
     section.innerHTML = html;
     container.appendChild(section);
 }
 
-// Renders a single breathing exercise instance in the toolbox modal.
 function renderBreathingExerciseInModal(exercise, container) {
     const section = document.createElement('div');
     section.className = 'breathing-exercise-container';
@@ -89,19 +54,13 @@ function renderBreathingExerciseInModal(exercise, container) {
     container.appendChild(section);
 }
 
-// Renders a single affirmation card instance in the toolbox modal.
 function renderAffirmationCardInModal(card, container) {
     const section = document.createElement('div');
     section.className = 'affirmation-card mt-4';
     
-    let affirmationHTML = '';
-    // This now handles the new format where 'text' is an array of strings,
-    // but it also includes a fallback for the old single-string format.
-    if (Array.isArray(card.text)) {
-        affirmationHTML = `<ul class="space-y-2 list-disc list-inside affirmation-text">${card.text.map(t => `<li>"${t}"</li>`).join('')}</ul>`;
-    } else {
-        affirmationHTML = `<p class="affirmation-text">"${card.text}"</p>`;
-    }
+    let affirmationHTML = Array.isArray(card.text)
+        ? `<ul class="space-y-2 list-disc list-inside affirmation-text">${card.text.map(t => `<li>"${t}"</li>`).join('')}</ul>`
+        : `<p class="affirmation-text">"${card.text}"</p>`;
 
     section.innerHTML = `
         <h4 class="text-xl font-bold mb-3 text-gray-200">${card.title || "Your Affirmation"}</h4>
@@ -111,22 +70,48 @@ function renderAffirmationCardInModal(card, container) {
     container.appendChild(section);
 }
 
-/**
- * The main function for rendering the toolbox content. It now iterates through
- * arrays of tools, allowing multiple instances of each type to be displayed.
- */
+function renderMoodTrackerInModal(tracker, container) {
+    const section = document.createElement('div');
+    const emojis = { "Happy": '😊', "Okay": '🙂', "Neutral": '😐', "Sad": '😔', "Angry": '😠' };
+    
+    let buttonsHTML = '<div class="mood-tracker-container">';
+    tracker.options.forEach(option => {
+        buttonsHTML += `<button class="mood-button" data-action="log_mood" data-mood="${option}">${emojis[option] || '❓'}</button>`;
+    });
+    buttonsHTML += '</div>';
+
+    let historyHTML = '<div class="mt-4"><h5 class="text-lg font-semibold text-gray-300 mb-2">Recent Moods</h5>';
+    if (tracker.history && tracker.history.length > 0) {
+        historyHTML += '<ul class="text-gray-400 space-y-1 text-sm">';
+        tracker.history.slice(-5).reverse().forEach(entry => {
+            const date = new Date(entry.timestamp);
+            const formattedDate = date.toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+            historyHTML += `<li class="flex justify-between"><span>${emojis[entry.mood]} ${entry.mood}</span> <span>${formattedDate}</span></li>`;
+        });
+        historyHTML += '</ul>';
+    } else {
+        historyHTML += '<p class="text-gray-500 text-sm">No moods logged yet.</p>';
+    }
+    historyHTML += '</div>';
+
+    section.innerHTML = `
+        <h4 class="text-xl font-bold mb-3 text-gray-200">${tracker.title}</h4>
+        <p class="text-gray-400 mb-3">How are you feeling right now?</p>
+        ${buttonsHTML}
+        ${historyHTML}
+    `;
+    container.appendChild(section);
+}
+
 function renderToolsInModal(tools) {
     toolsModalContent.innerHTML = '';
     let hasTools = false;
-    // We'll render tools in a specific order for consistency in the UI.
-    const renderOrder = ['checklist', 'breathing_exercise', 'affirmation_card'];
+    const renderOrder = ['mood_tracker', 'checklist', 'breathing_exercise', 'affirmation_card'];
 
     renderOrder.forEach(toolName => {
-        // Check if the array for the tool type exists and has items.
         if (tools[toolName] && tools[toolName].length > 0) {
-            // Loop through each instance of the tool (e.g., each checklist).
             tools[toolName].forEach(toolInstance => {
-                if (hasTools) { // Add a divider between each tool for visual separation.
+                if (hasTools) {
                     const divider = document.createElement('hr');
                     divider.className = 'my-6 border-gray-700';
                     toolsModalContent.appendChild(divider);
@@ -134,6 +119,9 @@ function renderToolsInModal(tools) {
                 hasTools = true;
                 
                 switch (toolName) {
+                    case 'mood_tracker':
+                        renderMoodTrackerInModal(toolInstance, toolsModalContent);
+                        break;
                     case 'checklist':
                         renderChecklistInModal(toolInstance, toolsModalContent);
                         break;
@@ -153,8 +141,6 @@ function renderToolsInModal(tools) {
     }
 }
 
-
-// Adds a message bubble to the chat window.
 function addMessage(sender, content) {
     const messageDiv = document.createElement('div');
     const isUser = sender === 'user';
@@ -162,39 +148,51 @@ function addMessage(sender, content) {
     const chatBubble = document.createElement('div');
     chatBubble.className = `chat-bubble max-w-[75%] p-4 rounded-xl shadow-md ${isUser ? 'user' : 'ai'}`;
 
-    // --- FIX STARTS HERE ---
-    // If the content is an object from the AI, it's an interactive tool.
-    if (sender === 'ai' && typeof content === 'object' && content !== null && content.type) {
-        switch(content.type) {
-            case 'mood_tracker':
-                // This now correctly calls the function to build the mood tracker UI
-                chatBubble.appendChild(renderMoodTracker(content));
-                break;
-            default:
-                // If we don't recognize the tool, we just show a placeholder to avoid errors.
-                chatBubble.textContent = `[Received an unknown tool type: ${content.type}]`;
-                break; 
-        }
+    if (isUser) {
+        const p = document.createElement('p');
+        p.textContent = content;
+        chatBubble.appendChild(p);
     } else {
-        // Otherwise, it's a regular text message.
-        // This part handles both user text and AI text responses.
-        if (isUser) {
-            const p = document.createElement('p');
-            p.textContent = content;
-            chatBubble.appendChild(p);
-        } else {
-             // Use Marked and DOMPurify to safely render Markdown from the AI.
-             chatBubble.innerHTML = DOMPurify.sanitize(marked.parse(String(content)));
-        }
+        chatBubble.innerHTML = DOMPurify.sanitize(marked.parse(String(content)));
     }
-    // --- FIX ENDS HERE ---
     
     messageDiv.appendChild(chatBubble);
     chatMessages.appendChild(messageDiv);
-    chatMessages.scrollTop = chatMessages.scrollHeight; // Auto-scroll to the bottom.
+    chatMessages.scrollTop = chatMessages.scrollHeight;
 }
 
-// Renders the entire chat history for the active conversation.
+// --- NEW: Functions for the tool status bubble ---
+
+/**
+ * Adds a temporary status message to the chat indicating a tool is being used.
+ * @param {string} toolType The type of tool being used (e.g., 'checklist').
+ */
+function addToolStatusMessage(toolType) {
+    const formattedName = toolType.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+
+    const statusDiv = document.createElement('div');
+    statusDiv.className = 'flex justify-start tool-status-message'; // Added class for easy removal
+    statusDiv.innerHTML = `
+        <div class="chat-bubble max-w-[75%] p-3 rounded-xl shadow-md bg-gray-800 text-gray-400 flex items-center space-x-3">
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 animate-spin" viewBox="0 0 20 20" fill="currentColor">
+                <path fill-rule="evenodd" d="M11.49 3.17c-.38-1.56-2.6-1.56-2.98 0a1.532 1.532 0 01-2.286.948c-1.372-.836-2.942.734-2.106 2.106.54.886.061 2.042-.947 2.287-1.561.379-1.561 2.6 0 2.978a1.532 1.532 0 01.947 2.287c-.836 1.372.734 2.942 2.106 2.106a1.532 1.532 0 012.287.947c.379 1.561 2.6 1.561 2.978 0a1.532 1.532 0 012.287-.947c1.372.836 2.942-.734 2.106-2.106a1.532 1.532 0 01-.947-2.287c1.561-.379 1.561-2.6 0-2.978a1.532 1.532 0 01-.947-2.287c.836-1.372-.734-2.942-2.106-2.106a1.532 1.532 0 01-2.287-.947zM10 13a3 3 0 100-6 3 3 0 000 6z" clip-rule="evenodd" />
+            </svg>
+            <i>Aura is using the <strong>${formattedName}</strong> tool...</i>
+        </div>
+    `;
+    chatMessages.appendChild(statusDiv);
+    chatMessages.scrollTop = chatMessages.scrollHeight;
+}
+
+/**
+ * Removes all tool status messages from the chat.
+ */
+function removeToolStatusMessages() {
+    const statusMessages = document.querySelectorAll('.tool-status-message');
+    statusMessages.forEach(msg => msg.remove());
+}
+
+
 function displayChat(history) {
     clearChatMessages();
     history.forEach(message => {
@@ -202,11 +200,10 @@ function displayChat(history) {
     });
 }
 
-// Renders the list of conversations in the sidebar.
 function renderChatList(chats, activeChatId) {
     chatList.innerHTML = '';
     const validChats = Object.values(chats).filter(chat => chat && chat.id && chat.title);
-    const sortedChats = validChats.sort((a, b) => b.id - a.id); // Show newest first.
+    const sortedChats = validChats.sort((a, b) => b.id - a.id);
     sortedChats.forEach(chat => {
         const chatTab = document.createElement('div');
         chatTab.className = `flex justify-between items-center p-3 rounded-md cursor-pointer transition duration-200 ${chat.id === activeChatId ? 'bg-gray-800' : 'hover:bg-gray-800'}`;
@@ -227,7 +224,6 @@ function renderChatList(chats, activeChatId) {
     });
 }
 
-// Shows or hides the toolbox button based on whether tools exist.
 function toggleToolsButton(hasTools) {
     if (hasTools) {
         toolsButton.classList.remove('hidden');
@@ -236,11 +232,9 @@ function toggleToolsButton(hasTools) {
     }
 }
 
-// --- Modal Management ---
 function openToolsModal() { toolsModal.classList.remove('hidden'); }
 function closeToolsModal() { toolsModal.classList.add('hidden'); }
 
-// Shows the "..." typing indicator.
 function showTypingIndicator() {
     const typingDiv = document.createElement('div');
     typingDiv.id = 'typingIndicator';
@@ -250,13 +244,11 @@ function showTypingIndicator() {
     chatMessages.scrollTop = chatMessages.scrollHeight;
 }
 
-// Hides the typing indicator.
 function hideTypingIndicator() {
     const typingDiv = document.getElementById('typingIndicator');
     if (typingDiv) typingDiv.remove();
 }
 
-// Changes the microphone button's color to indicate recording status.
 function setMicButtonState(state = 'idle') {
     const micButton = document.getElementById('micButton');
     if (state === 'listening') {
@@ -268,6 +260,5 @@ function setMicButtonState(state = 'idle') {
     }
 }
 
-// --- Settings Modal Management ---
 function openSettingsModal() { settingsModal.classList.remove('hidden'); }
 function closeSettingsModal() { settingsModal.classList.add('hidden'); }

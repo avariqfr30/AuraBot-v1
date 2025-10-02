@@ -4,7 +4,6 @@
 
 document.addEventListener('DOMContentLoaded', () => {
     // --- Element References ---
-    // Get all the interactive elements from the HTML page.
     const userInput = document.getElementById('userInput');
     const sendButton = document.getElementById('sendButton');
     const newChatButton = document.getElementById('newChatButton');
@@ -22,7 +21,6 @@ document.addEventListener('DOMContentLoaded', () => {
     const toolsModalContent = document.getElementById('toolsModalContent');
     const chatMessages = document.getElementById('chatMessages');
 
-    // A curated list of models for the user to choose from.
     const availableModels = [
         'gemma3:4b',
         'gemma3:4b-it-qat',
@@ -35,21 +33,17 @@ document.addEventListener('DOMContentLoaded', () => {
         'gpt-oss:120b-cloud'
     ];
 
-    // --- State Variables ---
     let isRecording = false;
     let recognition;
     let voices = [];
     const synth = window.speechSynthesis;
-    let lastInputMode = 'text'; // 'text' or 'voice'
+    let lastInputMode = 'text';
     let breathInterval;
 
-    // --- Speech Synthesis (Text-to-Speech) Setup ---
-
-    // Fetches and populates the dropdown with available system voices.
     function populateVoiceDropdown() {
         voices = synth.getVoices();
         voiceSelectDropdown.innerHTML = '';
-        const systemVoice = getVoiceName(); // Get the currently saved voice
+        const systemVoice = getVoiceName();
         voices.forEach(voice => {
             const option = document.createElement('option');
             option.textContent = voice.name;
@@ -62,13 +56,9 @@ document.addEventListener('DOMContentLoaded', () => {
         speechSynthesis.onvoiceschanged = populateVoiceDropdown;
     }
 
-    // Speaks the AI's response text aloud.
     function speakResponse(text) {
-        // A simple cleanup to remove characters that can't be spoken, like emojis.
         const cleanedText = text.replace(/[^\w\s.,?!'"-]/g, '').trim();
-
-        if (!cleanedText) return; // Don't try to speak an empty string.
-
+        if (!cleanedText) return;
         const selectedVoiceName = getVoiceName();
         const utterance = new SpeechSynthesisUtterance(cleanedText);
         if (selectedVoiceName) {
@@ -78,11 +68,10 @@ document.addEventListener('DOMContentLoaded', () => {
         synth.speak(utterance);
     }
 
-    // --- Speech Recognition (Speech-to-Text) Setup ---
     function setupSpeechRecognition() {
         const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
         if (!SpeechRecognition) {
-            micButton.style.display = 'none'; // Hide mic if the browser doesn't support it.
+            micButton.style.display = 'none';
             return;
         }
         recognition = new SpeechRecognition();
@@ -90,9 +79,8 @@ document.addEventListener('DOMContentLoaded', () => {
         recognition.lang = 'en-US';
         recognition.onstart = () => { isRecording = true; setMicButtonState('listening'); };
         recognition.onresult = (event) => {
-            const transcript = event.results[0][0].transcript;
-            userInput.value = transcript;
-            handleSendMessage('voice'); // Automatically send the message after transcription.
+            userInput.value = event.results[0][0].transcript;
+            handleSendMessage('voice');
         };
         recognition.onend = () => { isRecording = false; setMicButtonState('idle'); };
         recognition.onerror = (event) => {
@@ -101,11 +89,7 @@ document.addEventListener('DOMContentLoaded', () => {
             setMicButtonState('idle');
         };
     }
-    setupSpeechRecognition();
 
-    // --- Core Application Logic ---
-
-    // Handles sending a message, whether from text input or voice.
     async function handleSendMessage(inputMode = 'text') {
         lastInputMode = inputMode;
         const message = userInput.value.trim();
@@ -116,97 +100,73 @@ document.addEventListener('DOMContentLoaded', () => {
         userInput.value = '';
         showTypingIndicator();
 
-        // Let the agentic router decide what to do.
-        const history = chatManager.getActiveChatHistory();
-        const toolDecisions = await decideAndExecuteTool(message, history);
+        const rawResponse = await getOllamaResponse(message);
         
+        const toolTagRegex = /<tool_create\s+type="([^"]+)"(?:\s+theme="([^"]+)")?\s*\/>/g;
+        let cleanedResponse = rawResponse;
+        const matchedTags = [...rawResponse.matchAll(toolTagRegex)];
+
         hideTypingIndicator();
-        
-        let followUp = null;
-        let persistentToolsCreated = [];
 
-        for (const toolDecision of toolDecisions) {
-            switch (toolDecision.tool) {
-                case 'checklist':
-                    chatManager.addOrUpdateToolInActiveChat('checklist', toolDecision.content);
-                    persistentToolsCreated.push('checklist');
-                    break;
-                case 'breathing_exercise':
-                    chatManager.addOrUpdateToolInActiveChat('breathing_exercise', toolDecision.content);
-                    persistentToolsCreated.push('breathing exercise');
-                    break;
-                case 'affirmation_card':
-                    chatManager.addOrUpdateToolInActiveChat('affirmation_card', toolDecision.content);
-                    persistentToolsCreated.push('affirmation card');
-                    break;
-                case 'add_to_checklist':
-                    chatManager.addItemToActiveChecklist(toolDecision.itemText);
-                    followUp = { type: 'item_added', text: toolDecision.itemText };
-                    break;
-                case 'generate_more_items':
-                    if (toolDecision.newItems && toolDecision.newItems.length > 0) {
-                        chatManager.addItemToActiveChecklist(toolDecision.newItems);
-                        followUp = { type: 'more_items_added', count: toolDecision.newItems.length };
-                    }
-                    break;
-                case 'mood_tracker':
-                    // Mood tracker is a special case that displays in chat, not in the toolbox.
-                    chatManager.addMessageToActiveChat('ai', toolDecision.content);
-                    addMessage('ai', toolDecision.content);
-                    break;
-                case 'search':
-                    followUp = { type: 'search', results: toolDecision.results };
-                    break;
-                case 'chat':
-                default:
-                    // No tool action needed, just a conversational reply.
-                    break;
+        if (matchedTags.length > 0) {
+            // Extract all tool types from the matches
+            const toolTypes = matchedTags.map(match => match[1]);
+            // Get a unique set of tool types to avoid duplicate bubbles
+            const uniqueToolTypes = new Set(toolTypes);
+            // Add one status bubble for each unique tool type being used
+            uniqueToolTypes.forEach(toolType => {
+                addToolStatusMessage(toolType);
+            });
+        }
+
+        for (const match of matchedTags) {
+            const toolType = match[1];
+            const toolTheme = match[2] || '';
+            
+            const toolData = await createToolByType(toolType, toolTheme);
+            if (toolData) {
+                chatManager.addOrUpdateToolInActiveChat(toolType, toolData);
             }
+            cleanedResponse = cleanedResponse.replace(match[0], '').trim();
         }
 
-        // If any persistent tools were created, bundle them into a single follow-up.
-        if (persistentToolsCreated.length > 0) {
-            followUp = { type: 'persistent_tool_created', toolNames: persistentToolsCreated };
-        }
-        
-        // If a tool was used (other than mood tracker), get a follow-up response from the AI.
-        // Or if there was no tool action at all (pure chat).
-        const wasMoodTrackerOnly = toolDecisions.length === 1 && toolDecisions[0].tool === 'mood_tracker';
-        if (!wasMoodTrackerOnly) {
-             await triggerAIFollowUp(message, followUp);
+        removeToolStatusMessages();
+
+        addMessage('ai', cleanedResponse);
+        chatManager.addMessageToActiveChat('ai', cleanedResponse);
+
+        if (lastInputMode === 'voice') {
+            speakResponse(cleanedResponse);
         }
 
         refreshUI();
     }
-
-
-    // Triggers a conversational response from the AI, providing context about any tool actions.
-    async function triggerAIFollowUp(prompt, toolFollowUp) {
+    
+    async function triggerAIFollowUp(followUp) {
         showTypingIndicator();
-        const response = await getOllamaResponse(prompt, toolFollowUp);
+        const response = await getOllamaResponse('', followUp);
         hideTypingIndicator();
+
         addMessage('ai', response);
-        // If the user's last input was voice, read the AI response aloud.
+        chatManager.addMessageToActiveChat('ai', response);
+
         if (lastInputMode === 'voice') {
             speakResponse(response);
         }
+        refreshUI();
     }
 
-    // A central function to update all parts of the UI based on the current state.
     function refreshUI() {
         const allChats = chatManager.state.chats;
         const activeChatId = chatManager.getActiveChatId();
         renderChatList(allChats, activeChatId);
-
         const history = chatManager.getActiveChatHistory();
         displayChat(history);
-
         const activeTools = chatManager.getActiveChatTools();
-        const hasAnyTools = Object.values(activeTools).some(toolArray => toolArray.length > 0);
+        const hasAnyTools = Object.values(activeTools).some(toolArray => toolArray && toolArray.length > 0);
         toggleToolsButton(hasAnyTools);
     }
 
-    // Populates the model selection dropdown in the settings.
     function populateModelDropdown() {
         modelSelectDropdown.innerHTML = '';
         const currentModel = getModelName();
@@ -220,9 +180,6 @@ document.addEventListener('DOMContentLoaded', () => {
             modelSelectDropdown.appendChild(option);
         });
     }
-
-    // --- Event Listeners ---
-    // Sets up all the user interactions for the page.
 
     userInput.addEventListener('keypress', (e) => {
         if (e.key === 'Enter' && !e.shiftKey) {
@@ -243,13 +200,11 @@ document.addEventListener('DOMContentLoaded', () => {
         refreshUI();
     });
     
-    // Handles clicks on the chat list for switching or deleting chats.
     chatListContainer.addEventListener('click', (event) => {
         const deleteButton = event.target.closest('.delete-chat-button');
         const chatTab = event.target.closest('[data-chat-id]');
-
         if (deleteButton) {
-            event.stopPropagation(); // Prevents the chat from being switched when deleting.
+            event.stopPropagation();
             if (confirm('Are you sure you want to delete this chat?')) {
                 chatManager.deleteChat(deleteButton.getAttribute('data-chat-id'));
                 refreshUI();
@@ -260,54 +215,46 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
     
-    // Handles opening the toolbox modal.
     toolsButton.addEventListener('click', () => {
-        const tools = chatManager.getActiveChatTools();
-        renderToolsInModal(tools);
+        renderToolsInModal(chatManager.getActiveChatTools());
         openToolsModal();
     });
     closeToolsButton.addEventListener('click', closeToolsModal);
     
-    // Handles checking off a checklist item in the toolbox.
     toolsModalContent.addEventListener('change', async (event) => {
         const target = event.target;
         if (target.type === 'checkbox' && target.dataset.toolType === 'checklist') {
             const itemIndex = parseInt(target.dataset.itemIndex);
-            const toolId = target.dataset.toolId; // Get the ID of the specific checklist.
+            const toolId = target.dataset.toolId;
             if (target.checked && toolId) {
-                // Pass both the toolId and itemIndex to the manager.
                 const itemText = chatManager.completeAndRemoveChecklistItem(toolId, itemIndex);
-                renderToolsInModal(chatManager.getActiveChatTools()); // Re-render to show removal.
+                renderToolsInModal(chatManager.getActiveChatTools());
                 if (itemText) {
                     closeToolsModal();
-                    await triggerAIFollowUp(
-                        `The user just completed a task.`, 
-                        { type: 'checklist_item_completed', text: itemText }
-                    );
+                    await triggerAIFollowUp({ type: 'checklist_item_completed', text: itemText });
                 }
             }
         }
     });
 
-    // A shared listener for tool interactions in both the chat and the toolbox.
     const toolInteractionListener = async (event) => {
         const target = event.target.closest('[data-action]');
         if (!target) return;
 
         const action = target.dataset.action;
-        let followUp = null;
 
         switch (action) {
             case 'log_mood': {
-                target.closest('.mood-tracker-container').querySelectorAll('button').forEach(btn => btn.disabled = true);
-                target.style.transform = 'scale(1.2)';
-                followUp = { type: 'mood_logged', mood: target.dataset.mood };
+                const mood = target.dataset.mood;
+                chatManager.logMoodToTracker(mood);
+                renderToolsInModal(chatManager.getActiveChatTools());
+                closeToolsModal();
+                await triggerAIFollowUp({ type: 'mood_logged', mood: mood });
                 break;
             }
             case 'commit_affirmation': {
                 target.textContent = 'Committed!';
                 target.disabled = true;
-                followUp = { type: 'affirmation_committed', text: target.dataset.affirmationText };
                 break;
             }
             case 'start_breathing': {
@@ -331,10 +278,8 @@ document.addEventListener('DOMContentLoaded', () => {
                         clearInterval(breathInterval);
                         status.textContent = 'Complete!';
                         target.disabled = false;
-                        if (target.closest('#toolsModalContent')) {
-                           closeToolsModal();
-                        }
-                        triggerAIFollowUp('', { type: 'breathing_complete' });
+                        closeToolsModal();
+                        triggerAIFollowUp({ type: 'breathing_complete' });
                         return;
                     }
                     status.textContent = 'Breathe In...';
@@ -354,19 +299,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 break;
             }
         }
-
-        if (followUp) {
-            if (target.closest('#toolsModalContent')) {
-                closeToolsModal();
-            }
-            await triggerAIFollowUp('', followUp);
-        }
     };
 
-    chatMessages.addEventListener('click', toolInteractionListener);
     toolsModalContent.addEventListener('click', toolInteractionListener);
     
-    // Handles opening the settings modal and populating it with current settings.
     settingsButton.addEventListener('click', () => {
         systemPromptTextarea.value = getSystemPrompt();
         populateVoiceDropdown();
@@ -374,7 +310,7 @@ document.addEventListener('DOMContentLoaded', () => {
         openSettingsModal();
     });
 
-    cancelSettingsButton.addEventListener('click', closeSettingsModal);
+    cancelSettingsButton.addEventListener('click', closeToolsModal);
 
     saveSettingsButton.addEventListener('click', () => {
         saveSystemPrompt(systemPromptTextarea.value);
@@ -383,19 +319,13 @@ document.addEventListener('DOMContentLoaded', () => {
         closeSettingsModal();
     });
 
-    // Handles the new "Reset to Default" button.
     resetSettingsButton.addEventListener('click', () => {
         if (confirm('Are you sure you want to reset the prompt to its default state? Any custom changes in this text box will be lost.')) {
-            // Use our helper function from chat-logic.js to get the true default prompt.
             systemPromptTextarea.value = getDefaultSystemPrompt();
-            // We also clear the saved value from storage. This is key! It means if the user
-            // resets and then closes the modal without saving, the app will correctly
-            // fall back to the default prompt on the next load.
             localStorage.removeItem(PROMPT_STORAGE_KEY);
         }
     });
 
-    // --- Initial Application Load ---
-    // This function gets everything started when the page first loads.
+    setupSpeechRecognition();
     refreshUI();
 });
