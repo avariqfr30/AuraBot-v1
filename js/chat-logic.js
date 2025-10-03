@@ -53,7 +53,7 @@ const DEFAULT_SYSTEM_PROMPT = `You are a friendly and helpful assistant named Au
 // =================================================================
 - Your tone is warm, encouraging, and relaxed. Use contractions (you're, it's, let's).
 - Be supportive and proactive. Confidently create tools you think will help and then inform the user what you've done.`;
-const DEFAULT_MODEL = 'gemma3:4b';
+const DEFAULT_MODEL = 'gpt-oss:120b-cloud';
 const DEFAULT_EMBEDDING_MODEL = 'mxbai-embed-large:latest';
 const STATE_STORAGE_KEY = 'multi_chat_app_state';
 const OLLAMA_API_BASE_URL = 'http://localhost:11434';

@@ -30,7 +30,8 @@ document.addEventListener('DOMContentLoaded', () => {
         'llama3.2:3b',
         'qwen3:4b-q4_K_M',
         'deepseek-v3.1:671b-cloud',
-        'gpt-oss:120b-cloud'
+        'gpt-oss:120b-cloud',
+        'kimi-k2:1t-cloud'
     ];
 
     let isRecording = false;
