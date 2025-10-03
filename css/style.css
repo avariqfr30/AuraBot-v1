@@ -82,11 +82,11 @@ body, #chatSidebar {
 
 /* --- 3. Unified Liquid Glass Style --- */
 /* Base properties for ALL glass elements */
-#settingsModal .relative, #toolsModal .relative, /* Panels */
+#settingsModal .relative, #toolsModal > div:first-child, /* Targets the direct child div of toolsModal for its background */
 #userInput, .flex-1 > header h1, /* Header/Footer Elements */
 button, /* ALL buttons */
 #chatList > div.bg-gray-800, /* Selected Chat Item */
-.affirmation-card, .checklist-scroll-container, /* Tool Panels */
+.affirmation-card, .checklist-scroll-container, .breathing-exercise-container, /* Tool Panels */
 #systemPromptTextarea, #voiceSelectDropdown, #modelSelectDropdown /* Form Fields */ {
     position: relative;
     z-index: 1;
@@ -99,11 +99,11 @@ button, /* ALL buttons */
     text-shadow: 0 0 5px rgba(0,0,0,0.5);
 }
 /* Reflection & Edge Layer */
-#settingsModal .relative::before, #toolsModal .relative::before,
+#settingsModal .relative::before, #toolsModal > div:first-child::before,
 #userInput::before, .flex-1 > header h1::before,
 button::before,
 #chatList > div.bg-gray-800::before,
-.affirmation-card::before, .checklist-scroll-container::before,
+.affirmation-card::before, .checklist-scroll-container::before, .breathing-exercise-container::before,
 #systemPromptTextarea::before, #voiceSelectDropdown::before, #modelSelectDropdown::before {
     content: '';
     position: absolute;
@@ -116,22 +116,22 @@ button::before,
 
 
 /* Hover effect */
-#settingsModal .relative:hover, #toolsModal .relative:hover,
+#settingsModal .relative:hover, #toolsModal > div:first-child:hover,
 #userInput:hover, .flex-1 > header h1:hover, button:hover {
     transform: translateY(-2px) !important;
     box-shadow: 0 12px 40px rgba(0,0,0,0.4) !important;
 }
 
 /* Neutral Dark Glass Tint */
-#settingsModal .relative, #toolsModal .relative,
+#settingsModal .relative, #toolsModal > div:first-child,
 #userInput, .flex-1 > header h1,
 #micButton, #settingsButton, #toolsButton, #cancelSettingsButton, #resetSettingsButton, #closeToolsButton, .tool-button, .mood-button,
 #chatList > div.bg-gray-800,
-.affirmation-card, .checklist-scroll-container,
+.affirmation-card, .checklist-scroll-container, .breathing-exercise-container,
 #systemPromptTextarea, #voiceSelectDropdown, #modelSelectDropdown {
     background-color: rgba(30, 30, 40, 0.3) !important;
 }
-#settingsModal .relative:hover, #toolsModal .relative:hover,
+#settingsModal .relative:hover, #toolsModal > div:first-child:hover,
 #userInput:hover, .flex-1 > header h1:hover, #micButton:hover, #settingsButton:hover, #toolsButton:hover, #cancelSettingsButton:hover, #resetSettingsButton:hover, #closeToolsButton:hover, .tool-button:hover, .mood-button:hover {
     background-color: rgba(30, 30, 40, 0.4) !important;
 }
@@ -162,8 +162,8 @@ button::before,
 
 /* Border Radii */
 #userInput, #micButton, #settingsButton, #toolsButton, #sendButton, #cancelSettingsButton, #resetSettingsButton, #closeToolsButton, .tool-button, .mood-button, #newChatButton { border-radius: 9999px !important; }
-.flex-1 > header h1, #saveSettingsButton, #systemPromptTextarea, #voiceSelectDropdown, #modelSelectDropdown, .affirmation-card, .checklist-scroll-container { border-radius: 0.75rem !important; }
-#settingsModal .relative, #toolsModal .relative, #chatList > div.bg-gray-800 { border-radius: 1.5rem; }
+.flex-1 > header h1, #saveSettingsButton, #systemPromptTextarea, #voiceSelectDropdown, #modelSelectDropdown, .affirmation-card, .checklist-scroll-container, .breathing-exercise-container { border-radius: 0.75rem !important; }
+#settingsModal .relative, #toolsModal > div:first-child, #chatList > div.bg-gray-800 { border-radius: 1.5rem; }
 #chatList > div.bg-gray-800 { margin: 0.25rem 0; } 
 
 /* Icon Readability */
@@ -198,4 +198,56 @@ button::before,
 #chatList > div:hover {
     background-color: rgba(255, 255, 255, 0.1) !important;
     border-radius: 0.75rem;
+}
+
+/* ================================================================= */
+/* --- Modal and Tool Specific Adjustments --- */
+/* ================================================================= */
+
+/* Added padding to the main tools modal content area */
+#toolsModal > div:first-child {
+    padding: 1.5rem;
+}
+
+/* Ensure headings inside tool sections inherit color */
+#toolsModal h2, #toolsModal h3, #toolsModal p {
+    color: #f9fafb !important;
+    text-shadow: 0 0 5px rgba(0,0,0,0.5);
+}
+
+/* ================================================================= */
+/* --- Tool Specific Animations & Styles --- */
+/* ================================================================= */
+
+.breathing-exercise-container {
+    text-align: center;
+    padding: 1.25rem;
+}
+
+.breathing-pacer {
+    width: 100px;
+    height: 100px;
+    background: radial-gradient(circle, rgba(99,102,241,1) 0%, rgba(219,39,119,1) 100%);
+    border-radius: 50%;
+    margin: 1.5rem auto;
+    transform: scale(0.5); /* Start smaller */
+    transition: transform 4s ease-in-out, background 4s ease-in-out;
+}
+
+.breathing-pacer.inhale {
+    transform: scale(1.2);
+}
+
+.breathing-pacer.hold {
+    transform: scale(1.2);
+}
+
+.breathing-pacer.exhale {
+    transform: scale(0.5);
+}
+
+.breathing-status {
+    font-size: 1.25rem;
+    font-weight: 500;
+    margin-bottom: 1rem;
 }
