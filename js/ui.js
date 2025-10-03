@@ -19,6 +19,7 @@ function clearChatMessages() {
 
 function renderChecklistInModal(checklist, container) {
     const section = document.createElement('div');
+    section.className = 'checklist-card'; // Added class for styling
     let html = `
         <h4 class="text-xl font-bold mb-3 text-gray-200">${checklist.title}</h4>
         <div class="checklist-scroll-container">
@@ -59,19 +60,20 @@ function renderAffirmationCardInModal(card, container) {
     section.className = 'affirmation-card mt-4';
     
     let affirmationHTML = Array.isArray(card.text)
-        ? `<ul class="space-y-2 list-disc list-inside affirmation-text">${card.text.map(t => `<li>"${t}"</li>`).join('')}</ul>`
+        ? `<ul class="space-y-2 list-disc list-outside ml-5 affirmation-text">${card.text.map(t => `<li>"${t}"</li>`).join('')}</ul>`
         : `<p class="affirmation-text">"${card.text}"</p>`;
 
     section.innerHTML = `
         <h4 class="text-xl font-bold mb-3 text-gray-200">${card.title || "Your Affirmation"}</h4>
         ${affirmationHTML}
-        <button class="tool-button" data-action="commit_affirmation" data-tool-type="affirmation_card" data-affirmation-text="${Array.isArray(card.text) ? card.text.join(' ') : card.text}">${card.buttonText}</button>
+        <button class="tool-button mt-4" data-action="commit_affirmation" data-tool-type="affirmation_card" data-affirmation-text="${Array.isArray(card.text) ? card.text.join(' ') : card.text}">${card.buttonText}</button>
     `;
     container.appendChild(section);
 }
 
 function renderMoodTrackerInModal(tracker, container) {
     const section = document.createElement('div');
+    section.className = 'mood-tracker-card'; // Added class for styling
     const emojis = { "Happy": '😊', "Okay": '🙂', "Neutral": '😐', "Sad": '😔', "Angry": '😠' };
     
     let buttonsHTML = '<div class="mood-tracker-container">';

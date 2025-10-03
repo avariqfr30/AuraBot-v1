@@ -34,37 +34,44 @@
 }
 
 /* ================================================================= */
-/* --- Tuxedo Cat Animation --- */
+/* --- Animations --- */
 /* ================================================================= */
+@keyframes bobbing-cat {
+    0%, 100% { transform: translateY(0); }
+    50% { transform: translateY(-4px); }
+}
 #animated-cat-container {
     animation: bobbing-cat 3s ease-in-out infinite;
 }
 
-@keyframes bobbing-cat {
-    0%, 100% {
-        transform: translateY(0);
+/* Animation for new chat bubbles */
+@keyframes liquid-fade-in {
+    from {
+        opacity: 0;
+        transform: translateY(15px) scale(0.98);
     }
-    50% {
-        transform: translateY(-4px);
+    to {
+        opacity: 1;
+        transform: translateY(0) scale(1);
     }
 }
 
+
 /* ================================================================= */
-/* --- Final Branded Liquid Glass UI --- */
+/* --- Core Layout & Design --- */
 /* ================================================================= */
 
-/* --- 1. Pitch Black Background & Font --- */
+/* --- Pitch Black Background & Font --- */
 body, #chatSidebar {
     background: #000000 !important;
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
 }
 #chatSidebar {
-    backdrop-filter: none !important; -webkit-backdrop-filter: none !important;
-    border: none !important; box-shadow: none !important;
+    background: transparent !important;
 }
 
 
-/* --- 2. Layout Fixes --- */
+/* --- Layout Fixes --- */
 .flex-1.flex.flex-col { position: relative; } 
 #chatMessages { 
     padding-top: 5rem; 
@@ -72,182 +79,121 @@ body, #chatSidebar {
     scroll-behavior: smooth; 
 }
 .flex-1 > header, .flex-1 > footer {
-    background-color: transparent !important; backdrop-filter: none !important; -webkit-backdrop-filter: none !important;
-    border: none !important; box-shadow: none !important;
+    background-color: transparent !important;
+    border: none !important;
     position: absolute; left: 0; width: 100%;
 }
 .flex-1 > header { top: 0; z-index: 20; }
 .flex-1 > footer { bottom: 0; z-index: 10; }
 
 
-/* --- 3. Unified Liquid Glass Style --- */
-/* Base properties for ALL glass elements */
-#settingsModal .relative, #toolsModal > div:first-child, /* Targets the direct child div of toolsModal for its background */
-#userInput, .flex-1 > header h1, /* Header/Footer Elements */
-button, /* ALL buttons */
-#chatList > div.bg-gray-800, /* Selected Chat Item */
-.affirmation-card, .checklist-scroll-container, .breathing-exercise-container, /* Tool Panels */
-#systemPromptTextarea, #voiceSelectDropdown, #modelSelectDropdown /* Form Fields */ {
+/* ================================================================= */
+/* --- Dark Frosted Glass UI --- */
+/* ================================================================= */
+/* Base container for all glass elements */
+#settingsModal .relative, #toolsModal .relative,
+#userInput, .flex-1 > header h1,
+button,
+#chatList > div.bg-gray-800,
+.affirmation-card, .checklist-card, .breathing-exercise-container, .mood-tracker-card,
+#systemPromptTextarea, #voiceSelectDropdown, #modelSelectDropdown {
     position: relative;
     z-index: 1;
-    backdrop-filter: blur(5px) brightness(1.2) !important;
-    -webkit-backdrop-filter: blur(5px) brightness(1.2) !important;
-    border: none !important;
+    background-color: rgba(30, 30, 40, 0.5) !important; /* Dark glass tint */
+    backdrop-filter: blur(15px) !important;
+    -webkit-backdrop-filter: blur(15px) !important;
     box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3) !important;
-    transition: all 0.2s ease-in-out, opacity 0.3s ease, transform 0.3s ease !important;
+    transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275), transform 0.2s ease !important;
     color: #f9fafb !important;
-    text-shadow: 0 0 5px rgba(0,0,0,0.5);
+    text-shadow: 0 0 5px rgba(0,0,0,0.5); /* Subtle glow for dark background */
+    border: none !important;
 }
-/* Reflection & Edge Layer */
-#settingsModal .relative::before, #toolsModal > div:first-child::before,
+
+/* Sharp Inner Highlight */
+#settingsModal .relative::before, #toolsModal .relative::before,
 #userInput::before, .flex-1 > header h1::before,
 button::before,
 #chatList > div.bg-gray-800::before,
-.affirmation-card::before, .checklist-scroll-container::before, .breathing-exercise-container::before,
+.affirmation-card::before, .checklist-card::before, .breathing-exercise-container::before, .mood-tracker-card::before,
 #systemPromptTextarea::before, #voiceSelectDropdown::before, #modelSelectDropdown::before {
     content: '';
     position: absolute;
-    top: 0; left: 0; right: 0; bottom: 0;
+    inset: 0;
     border-radius: inherit;
-    z-index: -1;
-    background: linear-gradient(to bottom, rgba(255,255,255,0.05) 0%, transparent 100%);
-    box-shadow: inset 0 0 0 0.5px rgba(255, 255, 255, 0.1);
+    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.1);
+    pointer-events: none;
 }
 
 
 /* Hover effect */
-#settingsModal .relative:hover, #toolsModal > div:first-child:hover,
+#settingsModal .relative:hover, #toolsModal .relative:hover,
 #userInput:hover, .flex-1 > header h1:hover, button:hover {
     transform: translateY(-2px) !important;
     box-shadow: 0 12px 40px rgba(0,0,0,0.4) !important;
 }
 
-/* Neutral Dark Glass Tint */
-#settingsModal .relative, #toolsModal > div:first-child,
-#userInput, .flex-1 > header h1,
-#micButton, #settingsButton, #toolsButton, #cancelSettingsButton, #resetSettingsButton, #closeToolsButton, .tool-button, .mood-button,
-#chatList > div.bg-gray-800,
-.affirmation-card, .checklist-scroll-container, .breathing-exercise-container,
-#systemPromptTextarea, #voiceSelectDropdown, #modelSelectDropdown {
-    background-color: rgba(30, 30, 40, 0.3) !important;
-}
-#settingsModal .relative:hover, #toolsModal > div:first-child:hover,
-#userInput:hover, .flex-1 > header h1:hover, #micButton:hover, #settingsButton:hover, #toolsButton:hover, #cancelSettingsButton:hover, #resetSettingsButton:hover, #closeToolsButton:hover, .tool-button:hover, .mood-button:hover {
-    background-color: rgba(30, 30, 40, 0.4) !important;
+/* "Squish" effect on click */
+#settingsModal .relative:active, #toolsModal .relative:active,
+#userInput:active, .flex-1 > header h1:active,
+button:active,
+#chatList > div.bg-gray-800:active,
+#systemPromptTextarea:active, #voiceSelectDropdown:active, #modelSelectDropdown:active {
+    transform: translateY(0) scale(0.97) !important;
+    transition-duration: 0.1s;
 }
 
-/* Bright Pink Liquid Glass Tint */
+
+/* Accent Pink for Primary Buttons */
 #newChatButton, #sendButton, #saveSettingsButton {
-    background-color: rgba(219, 39, 119, 0.25) !important;
+    background-color: rgba(219, 39, 119, 0.35) !important;
 }
 #newChatButton:hover, #sendButton:hover, #saveSettingsButton:hover {
-    background-color: rgba(219, 39, 119, 0.35) !important;
+    background-color: rgba(219, 39, 119, 0.45) !important;
     box-shadow: 0 12px 40px rgba(219, 39, 119, 0.4) !important;
 }
 
-/* --- 4. Element-Specific Adjustments & Overrides --- */
+/* ================================================================= */
+/* --- Element-Specific Adjustments & Opaque Bubbles --- */
+/* ================================================================= */
+
+/* General Adjustments */
 .flex-1 > header h1 { padding: 0.5rem 1.25rem; }
-.flex-1 > header h1.is-scrolled {
-    opacity: 0;
-    transform: translateY(-5px) !important;
-    pointer-events: none;
-}
-#userInput::placeholder { 
-    color: rgba(255, 255, 255, 0.7); 
-    text-shadow: 0 0 5px rgba(0,0,0,0.8);
-} 
-#userInput:focus {
-    box-shadow: 0 12px 40px rgba(0,0,0,0.4), 0 0 0 2px rgba(255, 255, 255, 0.2) !important;
-}
+.flex-1 > header h1.is-scrolled { opacity: 0; transform: translateY(-10px) scale(0.95) !important; pointer-events: none; }
+#userInput::placeholder { color: rgba(255, 255, 255, 0.7); text-shadow: 0 0 5px rgba(0,0,0,0.8); } 
+#userInput:focus { box-shadow: 0 12px 40px rgba(0,0,0,0.4), 0 0 0 2px rgba(255, 255, 255, 0.2) !important; }
 
 /* Border Radii */
 #userInput, #micButton, #settingsButton, #toolsButton, #sendButton, #cancelSettingsButton, #resetSettingsButton, #closeToolsButton, .tool-button, .mood-button, #newChatButton { border-radius: 9999px !important; }
-.flex-1 > header h1, #saveSettingsButton, #systemPromptTextarea, #voiceSelectDropdown, #modelSelectDropdown, .affirmation-card, .checklist-scroll-container, .breathing-exercise-container { border-radius: 0.75rem !important; }
-#settingsModal .relative, #toolsModal > div:first-child, #chatList > div.bg-gray-800 { border-radius: 1.5rem; }
+.flex-1 > header h1, #saveSettingsButton, #systemPromptTextarea, #voiceSelectDropdown, #modelSelectDropdown, .affirmation-card, .checklist-card, .breathing-exercise-container, .mood-tracker-card { border-radius: 0.75rem !important; }
+#settingsModal .relative, #toolsModal .relative, #chatList > div.bg-gray-800 { border-radius: 1.5rem; }
 #chatList > div.bg-gray-800 { margin: 0.25rem 0; } 
 
 /* Icon Readability */
-#sendButton svg, #micButton svg, #settingsButton svg, #toolsButton svg { 
-    filter: drop-shadow(0 0 3px rgba(0,0,0,0.8));
-}
+#sendButton svg, #micButton svg, #settingsButton svg, #toolsButton svg { filter: drop-shadow(0 0 3px rgba(0,0,0,0.8)); }
 #sendButton svg { fill: #FFF; }
 #micButton svg, #settingsButton svg, #toolsButton svg { stroke: #f9fafb; }
 
+/* Opaque Chat Bubbles */
+.chat-bubble.ai, .chat-bubble.user { box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2); color: #FFF; }
+.chat-bubble.ai { background-color: #1f2937; border-left: 3px solid #db2777; border-radius: 1.5rem 1.5rem 1.5rem 0.5rem; }
+.chat-bubble.user { background-color: #3b82f6; border-radius: 1.5rem 1.5rem 0.5rem 1.5rem; border: none; }
 
-/* --- 5. Opaque Chat Bubbles --- */
-.chat-bubble.ai, .chat-bubble.user {
-    backdrop-filter: none; -webkit-backdrop-filter: none;
-    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
-    color: #FFF; 
-}
-.chat-bubble.ai { /* AURA'S BUBBLE */
-    background-color: #1f2937; /* Dark Gray */
-    border-left: 3px solid #db2777;
-    border-radius: 1.5rem 1.5rem 1.5rem 0.5rem;
-}
-.chat-bubble.user { /* USER'S BUBBLE */
-    background-color: #3b82f6; /* Blue */
-    border-radius: 1.5rem 1.5rem 0.5rem 1.5rem;
-    border: none;
+/* Apply fade-in animation to the last chat message */
+#chatMessages > div:last-of-type {
+    animation: liquid-fade-in 0.4s cubic-bezier(0.25, 0.46, 0.45, 0.94) both;
 }
 
-/* --- 6. Chat List Adjustments --- */
-#chatList > div {
-    background-color: transparent !important;
-}
-#chatList > div:hover {
-    background-color: rgba(255, 255, 255, 0.1) !important;
-    border-radius: 0.75rem;
-}
 
-/* ================================================================= */
-/* --- Modal and Tool Specific Adjustments --- */
-/* ================================================================= */
+/* Chat List Adjustments */
+#chatList > div { background-color: transparent !important; }
+#chatList > div:hover { background-color: rgba(255, 255, 255, 0.1) !important; border-radius: 0.75rem; }
 
-/* Added padding to the main tools modal content area */
-#toolsModal > div:first-child {
-    padding: 1.5rem;
-}
-
-/* Ensure headings inside tool sections inherit color */
-#toolsModal h2, #toolsModal h3, #toolsModal p {
-    color: #f9fafb !important;
-    text-shadow: 0 0 5px rgba(0,0,0,0.5);
-}
-
-/* ================================================================= */
-/* --- Tool Specific Animations & Styles --- */
-/* ================================================================= */
-
-.breathing-exercise-container {
-    text-align: center;
-    padding: 1.25rem;
-}
-
-.breathing-pacer {
-    width: 100px;
-    height: 100px;
-    background: radial-gradient(circle, rgba(99,102,241,1) 0%, rgba(219,39,119,1) 100%);
-    border-radius: 50%;
-    margin: 1.5rem auto;
-    transform: scale(0.5); /* Start smaller */
-    transition: transform 4s ease-in-out, background 4s ease-in-out;
-}
-
-.breathing-pacer.inhale {
-    transform: scale(1.2);
-}
-
-.breathing-pacer.hold {
-    transform: scale(1.2);
-}
-
-.breathing-pacer.exhale {
-    transform: scale(0.5);
-}
-
-.breathing-status {
-    font-size: 1.25rem;
-    font-weight: 500;
-    margin-bottom: 1rem;
-}
+/* Tool Specific Styles */
+.affirmation-card, .checklist-card, .mood-tracker-card { padding: 1.25rem; }
+.breathing-exercise-container { text-align: center; padding: 1.25rem; }
+.breathing-pacer { width: 100px; height: 100px; background: radial-gradient(circle, rgba(99,102,241,1) 0%, rgba(219,39,119,1) 100%); border-radius: 50%; margin: 1.5rem auto; transform: scale(0.5); transition: transform 4s ease-in-out, background 4s ease-in-out; }
+.breathing-pacer.inhale, .breathing-pacer.hold { transform: scale(1.2); }
+.breathing-pacer.exhale { transform: scale(0.5); }
+.breathing-status { font-size: 1.25rem; font-weight: 500; margin-bottom: 1rem; }
+.checklist-columns { columns: 2 220px; column-gap: 2rem; }
+.checklist-columns li { break-inside: avoid-column; page-break-inside: avoid; }
