@@ -20,6 +20,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const closeToolsButton = document.getElementById('closeToolsButton');
     const toolsModalContent = document.getElementById('toolsModalContent');
     const chatMessages = document.getElementById('chatMessages');
+    const headerTitle = document.querySelector('.flex-1 > header h1'); // Added reference for header title
 
     const availableModels = [
         'gemma3:4b',
@@ -61,7 +62,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const cleanedText = text.replace(/[^\w\s.,?!'"-]/g, '').trim();
         if (!cleanedText) return;
         const selectedVoiceName = getVoiceName();
-        const utterance = new SpeechSynthesisUtterance(cleanedText);
+        const utterance = new SpeechSynthesisUttersance(cleanedText);
         if (selectedVoiceName) {
             const selectedVoice = voices.find(voice => voice.name === selectedVoiceName);
             if (selectedVoice) { utterance.voice = selectedVoice; }
@@ -326,6 +327,17 @@ document.addEventListener('DOMContentLoaded', () => {
             localStorage.removeItem(PROMPT_STORAGE_KEY);
         }
     });
+
+    // --- NEW: Scroll effect for header title ---
+    if (chatMessages && headerTitle) {
+        chatMessages.addEventListener('scroll', () => {
+            if (chatMessages.scrollTop > 50) { // Threshold of 50px
+                headerTitle.classList.add('is-scrolled');
+            } else {
+                headerTitle.classList.remove('is-scrolled');
+            }
+        });
+    }
 
     setupSpeechRecognition();
     refreshUI();
