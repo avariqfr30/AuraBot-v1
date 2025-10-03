@@ -91,6 +91,27 @@ body, #chatSidebar {
 /* --- Dark Frosted Glass UI --- */
 /* ================================================================= */
 /* Base container for all glass elements */
+:root {
+    /* Liquid glass tuning variables */
+    /* make base glass much more transparent so background/chat shows through */
+    --glass-bg: rgba(20,22,28,0.08);
+    /* base colors for panels (semi-opaque to match light-mode appearance) */
+    --glass-base-dark: rgba(18,20,26,0.55);
+    --glass-base-light: rgba(255,255,255,0.55);
+    --glass-accent: rgba(255,255,255,0.02);
+    --glass-border: rgba(255,255,255,0.03);
+    --glass-shadow: 0 10px 28px rgba(0,0,0,0.28);
+    /* darker, neutral sheen to avoid bright white streaks */
+    --glass-sheen: linear-gradient(120deg, rgba(255,255,255,0.01) 0%, rgba(0,0,0,0.06) 45%, rgba(0,0,0,0.08) 52%, rgba(0,0,0,0.06) 58%, rgba(255,255,255,0.01) 100%);
+    /* liquid-specific tuning */
+    --liquid-accent-1: rgba(219,39,119,0.038); /* pink */
+    --liquid-accent-2: rgba(59,130,246,0.028); /* blue */
+    --liquid-band-speed: 14s;
+    --liquid-sheen-speed: 6s;
+    --liquid-wave-speed: 7s;
+    --liquid-opacity: 0.85;
+}
+
 #settingsModal .relative, #toolsModal .relative,
 #userInput, .flex-1 > header h1,
 button,
@@ -99,37 +120,213 @@ button,
 #systemPromptTextarea, #voiceSelectDropdown, #modelSelectDropdown {
     position: relative;
     z-index: 1;
-    background-color: rgba(30, 30, 40, 0.5) !important; /* Dark glass tint */
-    backdrop-filter: blur(15px) !important;
-    -webkit-backdrop-filter: blur(15px) !important;
-    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3) !important;
-    transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275), transform 0.2s ease !important;
+    /* Match light-mode opacity: semi-opaque frosted base so both themes look consistent */
+    background-color: var(--glass-base-dark) !important;
     color: #f9fafb !important;
-    text-shadow: 0 0 5px rgba(0,0,0,0.5); /* Subtle glow for dark background */
-    border: none !important;
+    border: 1px solid rgba(255,255,255,0.03) !important;
+    /* small backdrop blur to keep depth; heavy refraction is handled by SVG filter on overlays */
+    -webkit-backdrop-filter: blur(2px) saturate(105%) contrast(0.98) !important;
+    backdrop-filter: blur(2px) saturate(105%) contrast(0.98) !important;
+    box-shadow: 0 6px 18px rgba(0,0,0,0.22) !important;
+    transition: transform 0.28s cubic-bezier(0.22, 1, 0.36, 1), box-shadow 0.28s ease, background-position 4s linear !important;
+    text-shadow: 0 0 4px rgba(0,0,0,0.45); /* subtle rim */
+    overflow: hidden; /* contain pseudo-elements */
+    border-radius: inherit;
 }
 
-/* Sharp Inner Highlight */
+/* Create layered liquid reflections with pseudo-elements */
 #settingsModal .relative::before, #toolsModal .relative::before,
 #userInput::before, .flex-1 > header h1::before,
 button::before,
 #chatList > div.bg-gray-800::before,
 .affirmation-card::before, .checklist-card::before, .breathing-exercise-container::before, .mood-tracker-card::before,
 #systemPromptTextarea::before, #voiceSelectDropdown::before, #modelSelectDropdown::before {
-    content: '';
+    content: "";
     position: absolute;
     inset: 0;
-    border-radius: inherit;
-    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.1);
     pointer-events: none;
+    /* very subtle reflection layer; largely transparent so content shows through */
+    background: radial-gradient(800px 250px at 10% 10%, rgba(255,255,255,0.01), rgba(0,0,0,0.06) 30%, transparent 60%),
+                linear-gradient(180deg, rgba(0,0,0,0.01), rgba(0,0,0,0.06));
+    mix-blend-mode: normal;
+    opacity: 0.18;
+    transform-origin: left top;
+    transition: opacity 0.6s ease, transform 0.6s ease;
+    z-index: 0;
 }
 
+/* Subtle moving sheen layer */
+#settingsModal .relative::after, #toolsModal .relative::after,
+#userInput::after, .flex-1 > header h1::after,
+button::after,
+#chatList > div.bg-gray-800::after,
+.affirmation-card::after, .checklist-card::after, .breathing-exercise-container::after, .mood-tracker-card::after,
+#systemPromptTextarea::after, #voiceSelectDropdown::after, #modelSelectDropdown::after {
+    content: "";
+    position: absolute;
+    left: -60%; top: -40%;
+    width: 220%; height: 220%;
+    pointer-events: none;
+    /* sheen kept very faint; keep small blur for hint of movement */
+    background: linear-gradient(120deg, rgba(255,255,255,0.005) 0%, rgba(0,0,0,0.04) 50%, rgba(255,255,255,0.005) 100%);
+    transform: rotate(-12deg) translateX(0);
+    filter: blur(10px);
+    opacity: 0.06;
+    z-index: 1;
+    animation: sheen-move 6s linear infinite;
+}
+
+/* Utility class for fully clear glass (use where you want underlying chat fully visible) */
+.glass-clear {
+    background-color: transparent !important;
+    background-image: none !important;
+    -webkit-backdrop-filter: none !important;
+    backdrop-filter: none !important;
+    box-shadow: none !important;
+    border: none !important;
+}
+
+/* Opt-in liquid glass variant inspired by the referenced video: soft flowing color bands + faint gloss */
+.glass-liquid {
+    /* Semi-opaque liquid: use same opacity as light mode for consistent appearance */
+    background-color: var(--glass-base-dark) !important;
+    border: 1px solid rgba(255,255,255,0.035) !important;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.26) !important;
+    -webkit-backdrop-filter: blur(6px) saturate(110%) contrast(0.98) !important;
+    backdrop-filter: blur(6px) saturate(110%) contrast(0.98) !important;
+}
+
+.glass-liquid::before {
+    /* visible flow bands and sheen rendered on top of opaque base */
+    content: "";
+    position: absolute; inset: 0; pointer-events: none; z-index: 1;
+    /* multi-layered moving bands and sheen */
+    background-image:
+        linear-gradient(110deg, var(--liquid-accent-1) 0%, rgba(255,255,255,0.0) 35%, rgba(255,255,255,0.0) 65%, var(--liquid-accent-2) 100%),
+        linear-gradient(110deg, rgba(255,255,255,0.06) 0%, rgba(255,255,255,0.02) 50%, rgba(255,255,255,0.06) 100%);
+    mix-blend-mode: overlay;
+    background-repeat: repeat-x, repeat-x;
+    background-size: 200% 140%, 360% 100%;
+    /* use an SVG displacement filter to simulate liquid refraction where supported */
+    /* backdrop-filter supports url() in some browsers; include as a best-effort enhancement */
+    -webkit-backdrop-filter: url(#liquid-distort) blur(0.6px) !important;
+    backdrop-filter: url(#liquid-distort) blur(0.6px) !important;
+    /* fallback visual filter for non-backdrop-filter browsers */
+    filter: url(#liquid-distort) blur(0.6px);
+    opacity: 0.18;
+    will-change: transform, opacity;
+    transform: translateX(-8%);
+    transition: opacity 0.45s ease, transform 0.6s ease;
+    animation: band-slide calc(var(--liquid-band-speed) / 1.2) linear infinite,
+               sheen-swipe var(--liquid-sheen-speed) ease-in-out infinite,
+               liquid-wave var(--liquid-wave-speed) ease-in-out infinite;
+    background-position: -20% 50%, -10% 50%;
+}
+
+.glass-liquid::after {
+    /* thin gloss highlight to suggest liquid surface */
+    content: "";
+    position: absolute; left: 0; right: 0; top: 0; height: 18%;
+    pointer-events: none; z-index: 2;
+    background: linear-gradient(180deg, rgba(255,255,255,0.08), rgba(255,255,255,0.02));
+    mix-blend-mode: screen;
+    filter: blur(3px);
+    opacity: 0.6;
+}
+
+@keyframes liquid-flow {
+    0% { transform: translateX(-12%); }
+    50% { transform: translateX(8%); }
+    100% { transform: translateX(-12%); }
+}
+
+@keyframes liquid-wave {
+    0% { transform: translateX(-8%) translateY(0) scaleY(1); }
+    50% { transform: translateX(2%) translateY(-3px) scaleY(1.006); }
+    100% { transform: translateX(-8%) translateY(0) scaleY(1); }
+}
+
+/* sheen-slide: animate background-position for the two layered gradients */
+@keyframes sheen-slide {
+    0% { background-position: -40% 50%, -20% 50%; }
+    50% { background-position: 30% 50%, 60% 50%; }
+    100% { background-position: -40% 50%, -20% 50%; }
+}
+
+@keyframes band-slide {
+    0% { background-position: -30% 50%, -10% 50%; }
+    40% { background-position: 20% 48%, 40% 52%; }
+    70% { background-position: 60% 52%, 80% 50%; }
+    100% { background-position: -30% 50%, -10% 50%; }
+}
+
+@keyframes sheen-swipe {
+    0% { background-position: -10% 50%, -40% 50%; opacity: 0.6; }
+    50% { background-position: 40% 50%, 30% 50%; opacity: 0.9; }
+    100% { background-position: -10% 50%, -40% 50%; opacity: 0.6; }
+}
+
+/* subtle pulse for depth */
+@keyframes glass-pulse {
+    0% { box-shadow: 0 6px 18px rgba(0,0,0,0.18); }
+    50% { box-shadow: 0 10px 26px rgba(0,0,0,0.22); }
+    100% { box-shadow: 0 6px 18px rgba(0,0,0,0.18); }
+}
+
+/* Respect users who prefer reduced motion */
+@media (prefers-reduced-motion: reduce) {
+    .glass-liquid::before, .glass-liquid::after {
+        animation: none !important;
+        transition: none !important;
+    }
+    .glass-liquid { animation: none !important; }
+}
+
+/* Slightly increase sheen on hover to reveal surface motion */
+.glass-liquid:hover::before { transform: translateX(4%); opacity: 1; }
+
+/* Slight ripple when hovering or focusing to simulate liquid surface */
+#settingsModal .relative:hover::before, #toolsModal .relative:hover::before,
+#userInput:hover::before, .flex-1 > header h1:hover::before,
+button:hover::before,
+#chatList > div.bg-gray-800:hover::before,
+.affirmation-card:hover::before, .checklist-card:hover::before, .breathing-exercise-container:hover::before, .mood-tracker-card:hover::before,
+#systemPromptTextarea:focus::before, #voiceSelectDropdown:focus::before, #modelSelectDropdown:focus::before {
+    transform: scale(1.02) translateY(-4px);
+    opacity: 1;
+}
+
+/* Make Toolbox modal readable: disable heavy pseudo overlays inside the modal */
+#toolsModal .relative::before, #toolsModal .relative::after {
+    /* remove decorative overlays that can wash out text */
+    background: transparent !important;
+    opacity: 0 !important;
+    filter: none !important;
+    display: none !important;
+}
+
+/* Also for settings modal in case similar issue appears */
+#settingsModal .relative::before, #settingsModal .relative::after {
+    background: transparent !important;
+    opacity: 0 !important;
+    filter: none !important;
+    display: none !important;
+}
+
+/* Make sure content sits above pseudo-elements */
+#settingsModal .relative > *, #toolsModal .relative > *,
+#userInput > *, .flex-1 > header h1 > *,
+button > *, #chatList > div.bg-gray-800 > *,
+.affirmation-card > *, .checklist-card > *, .breathing-exercise-container > *, .mood-tracker-card > *,
+#systemPromptTextarea > *, #voiceSelectDropdown > *, #modelSelectDropdown > * {
+    position: relative; z-index: 2;
+}
 
 /* Hover effect */
 #settingsModal .relative:hover, #toolsModal .relative:hover,
 #userInput:hover, .flex-1 > header h1:hover, button:hover {
-    transform: translateY(-2px) !important;
-    box-shadow: 0 12px 40px rgba(0,0,0,0.4) !important;
+    transform: translateY(-3px) scale(1.004) !important;
+    box-shadow: 0 18px 50px rgba(0,0,0,0.45) !important;
 }
 
 /* "Squish" effect on click */
@@ -142,15 +339,66 @@ button:active,
     transition-duration: 0.1s;
 }
 
+/* Sheen animation */
+@keyframes sheen-move {
+    0% { transform: translateX(-10%) rotate(-18deg); opacity: 0.5; }
+    50% { transform: translateX(10%) rotate(-18deg); opacity: 0.7; }
+    100% { transform: translateX(-10%) rotate(-18deg); opacity: 0.5; }
+}
+
+/* Optional subtle background parallax ripple to hint at depth */
+@keyframes liquid-ripple {
+    0% { transform: translateY(0) scale(1); }
+    50% { transform: translateY(-2px) scale(1.002); }
+    100% { transform: translateY(0) scale(1); }
+}
+
 
 /* Accent Pink for Primary Buttons */
-#newChatButton, #sendButton, #saveSettingsButton {
-    background-color: rgba(219, 39, 119, 0.35) !important;
+/* Liquid-style rounded buttons */
+.liquid-btn {
+    display: inline-flex; align-items: center; justify-content: center;
+    padding: 0.6rem 1rem; min-width: 44px; height: 44px;
+    border-radius: 9999px; /* fully rounded */
+    position: relative; overflow: hidden;
+    background-color: rgba(255,255,255,0.04); /* default subtle */
+    color: inherit; border: 1px solid rgba(255,255,255,0.06);
+    box-shadow: 0 6px 18px rgba(0,0,0,0.22) inset, 0 6px 18px rgba(0,0,0,0.18);
+    transition: transform 220ms cubic-bezier(.2,.9,.2,1), box-shadow 220ms ease, background-color 180ms ease;
 }
-#newChatButton:hover, #sendButton:hover, #saveSettingsButton:hover {
-    background-color: rgba(219, 39, 119, 0.45) !important;
-    box-shadow: 0 12px 40px rgba(219, 39, 119, 0.4) !important;
+.liquid-btn::before {
+    /* sheen overlay */
+    content: ""; position: absolute; left: -50%; top: -40%; width: 200%; height: 220%;
+    background: linear-gradient(120deg, rgba(255,255,255,0.06) 0%, rgba(255,255,255,0.02) 50%, rgba(255,255,255,0.06) 100%);
+    transform: rotate(-12deg) translateX(0); filter: blur(6px); opacity: 0.35; pointer-events: none;
+    transition: transform 600ms ease, opacity 260ms ease;
+    mix-blend-mode: overlay; z-index: 0;
 }
+.liquid-btn > * { position: relative; z-index: 2; }
+.liquid-btn:hover { transform: translateY(-3px); box-shadow: 0 14px 40px rgba(0,0,0,0.28); }
+.liquid-btn:active { transform: translateY(0) scale(0.98); box-shadow: 0 8px 26px rgba(0,0,0,0.22); }
+.liquid-btn:focus { outline: none; box-shadow: 0 0 0 3px rgba(219,39,119,0.12); }
+
+/* Primary accent variant */
+.liquid-btn.primary { background-color: rgba(219,39,119,0.35); border-color: rgba(219,39,119,0.25); color: #fff; }
+.liquid-btn.primary::before { opacity: 0.45; mix-blend-mode: screen; }
+.liquid-btn.primary:hover { background-color: rgba(219,39,119,0.45); box-shadow: 0 18px 60px rgba(219,39,119,0.18); }
+
+/* Neutral variant */
+.liquid-btn.ghost { background-color: rgba(255,255,255,0.02); border-color: rgba(255,255,255,0.06); color: inherit; }
+.liquid-btn.ghost:hover { background-color: rgba(255,255,255,0.04); }
+
+/* Apply liquid button class to existing button IDs */
+#newChatButton, #sendButton, #saveSettingsButton, #cancelSettingsButton, #resetSettingsButton, #closeToolsButton, #micButton, #settingsButton, #toolsButton, #themeToggleButton {
+    /* add base liquid appearance */
+    border-radius: 9999px !important; padding: 0.6rem 1rem !important; height: 44px !important;
+}
+#newChatButton, #sendButton, #saveSettingsButton { background-color: rgba(219, 39, 119, 0.35) !important; color: #fff !important; box-shadow: 0 8px 30px rgba(219,39,119,0.12) !important; }
+#newChatButton:hover, #sendButton:hover, #saveSettingsButton:hover { background-color: rgba(219, 39, 119, 0.45) !important; box-shadow: 0 12px 40px rgba(219, 39, 119, 0.4) !important; }
+
+/* Small circular icon buttons */
+.icon-btn { width: 44px; height: 44px; padding: 0; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; }
+.icon-btn svg { filter: drop-shadow(0 6px 12px rgba(0,0,0,0.25)); }
 
 /* ================================================================= */
 /* --- Element-Specific Adjustments & Opaque Bubbles --- */
@@ -160,7 +408,7 @@ button:active,
 .flex-1 > header h1 { padding: 0.5rem 1.25rem; }
 .flex-1 > header h1.is-scrolled { opacity: 0; transform: translateY(-10px) scale(0.95) !important; pointer-events: none; }
 #userInput::placeholder { color: rgba(255, 255, 255, 0.7); text-shadow: 0 0 5px rgba(0,0,0,0.8); } 
-#userInput:focus { box-shadow: 0 12px 40px rgba(0,0,0,0.4), 0 0 0 2px rgba(255, 255, 255, 0.2) !important; }
+#userInput:focus { box-shadow: 0 12px 40px rgba(0,0,0,0.4) !important; }
 
 /* Border Radii */
 #userInput, #micButton, #settingsButton, #toolsButton, #sendButton, #cancelSettingsButton, #resetSettingsButton, #closeToolsButton, .tool-button, .mood-button, #newChatButton { border-radius: 9999px !important; }
@@ -197,3 +445,163 @@ button:active,
 .breathing-status { font-size: 1.25rem; font-weight: 500; margin-bottom: 1rem; }
 .checklist-columns { columns: 2 220px; column-gap: 2rem; }
 .checklist-columns li { break-inside: avoid-column; page-break-inside: avoid; }
+
+/* ---------------------- */
+/* Light theme overrides  */
+/* ---------------------- */
+[data-theme="light"] body, [data-theme="light"] #chatSidebar {
+    background: #FFFFFF !important;
+    color: #0f172a !important; /* dark text */
+}
+
+[data-theme="light"] .chat-bubble.ai { background-color: #f1f5f9; color: #0f172a; }
+[data-theme="light"] .chat-bubble.user { background-color: #dbeafe; color: #0f172a; }
+
+/* Light-mode glass: white, translucent, with subtle colored banding */
+[data-theme="light"] #settingsModal .relative, [data-theme="light"] #toolsModal .relative,
+[data-theme="light"] #userInput, [data-theme="light"] .flex-1 > header h1,
+[data-theme="light"] button, [data-theme="light"] #chatList > div.bg-gray-800,
+[data-theme="light"] .affirmation-card, [data-theme="light"] .checklist-card, [data-theme="light"] .breathing-exercise-container, [data-theme="light"] .mood-tracker-card,
+[data-theme="light"] #systemPromptTextarea, [data-theme="light"] #voiceSelectDropdown, [data-theme="light"] #modelSelectDropdown {
+    /* Match dark mode: semi-opaque frosted base so both themes look consistent */
+    background-color: var(--glass-base-light) !important;
+    color: #0f172a !important;
+    border: 1px solid rgba(15,23,42,0.06) !important;
+    -webkit-backdrop-filter: blur(2px) saturate(105%) contrast(0.98) !important;
+    backdrop-filter: blur(2px) saturate(105%) contrast(0.98) !important;
+    box-shadow: 0 6px 18px rgba(2,6,23,0.06) !important;
+}
+
+/* Light variant for glass-liquid */
+[data-theme="light"] .glass-liquid {
+    /* Semi-opaque liquid: use same opacity as dark mode for consistent appearance */
+    background-color: var(--glass-base-light) !important;
+    box-shadow: 0 8px 22px rgba(2,6,23,0.06) !important;
+    mix-blend-mode: normal !important;
+    -webkit-backdrop-filter: blur(6px) saturate(110%) contrast(0.98) !important;
+    backdrop-filter: blur(6px) saturate(110%) contrast(0.98) !important;
+}
+
+[data-theme="light"] .glass-liquid::before {
+    /* visible flow bands and sheen rendered on top of opaque light base (match dark mode) */
+    background-image:
+        linear-gradient(110deg, rgba(219,39,119,0.038) 0%, rgba(255,255,255,0.0) 35%, rgba(255,255,255,0.0) 65%, rgba(59,130,246,0.028) 100%),
+        linear-gradient(110deg, rgba(255,255,255,0.06) 0%, rgba(255,255,255,0.02) 50%, rgba(255,255,255,0.06) 100%);
+    mix-blend-mode: overlay;
+    background-repeat: repeat-x, repeat-x;
+    background-size: 200% 140%, 360% 100%;
+    -webkit-backdrop-filter: url(#liquid-distort) blur(0.6px) !important;
+    backdrop-filter: url(#liquid-distort) blur(0.6px) !important;
+    filter: url(#liquid-distort) blur(0.6px);
+    opacity: 0.18;
+    will-change: transform, opacity;
+}
+
+[data-theme="light"] .glass-liquid::after {
+    /* thin gloss highlight to suggest liquid surface (match dark mode) */
+    background: linear-gradient(180deg, rgba(255,255,255,0.08), rgba(255,255,255,0.02));
+    mix-blend-mode: screen;
+    filter: blur(3px);
+    opacity: 0.6;
+}
+
+[data-theme="light"] #userInput { background-color: rgba(255,255,255,0.9) !important; }
+/* Improve input readability in light mode */
+[data-theme="light"] #userInput {
+    color: #0f172a !important; /* dark text */
+}
+[data-theme="light"] #userInput::placeholder {
+    color: rgba(15,23,42,0.45) !important;
+    text-shadow: none !important;
+}
+
+/* Remove heavy text-shadows and translucent overlays inside modals in light mode to ensure maximum readability */
+[data-theme="light"] #toolsModal .relative::before,
+[data-theme="light"] #toolsModal .relative::after,
+[data-theme="light"] #settingsModal .relative::before,
+[data-theme="light"] #settingsModal .relative::after {
+    background: transparent !important;
+    opacity: 0 !important;
+    filter: none !important;
+    display: none !important;
+}
+
+[data-theme="light"] #toolsModal .relative, [data-theme="light"] #settingsModal .relative {
+    text-shadow: none !important; /* remove faint rim that reduces contrast */
+}
+
+/* --- Restore liquid overlays for modals in light mode (mirror dark-mode liquid look) --- */
+[data-theme="light"] #toolsModal .relative, [data-theme="light"] #settingsModal .relative {
+    /* keep text dark but allow liquid overlays like dark mode */
+    color: #0f172a !important;
+    text-shadow: none !important;
+}
+
+[data-theme="light"] #toolsModal .relative::before,
+[data-theme="light"] #settingsModal .relative::before {
+    content: "";
+    position: absolute; inset: 0; pointer-events: none; z-index: 0;
+    background-image:
+        linear-gradient(110deg, var(--liquid-accent-1) 0%, rgba(255,255,255,0.0) 35%, rgba(255,255,255,0.0) 65%, var(--liquid-accent-2) 100%),
+        linear-gradient(110deg, rgba(255,255,255,0.06) 0%, rgba(255,255,255,0.02) 50%, rgba(255,255,255,0.06) 100%);
+    mix-blend-mode: overlay;
+    background-repeat: repeat-x, repeat-x;
+    background-size: 200% 140%, 360% 100%;
+    -webkit-backdrop-filter: url(#liquid-distort) blur(0.6px) !important;
+    backdrop-filter: url(#liquid-distort) blur(0.6px) !important;
+    filter: url(#liquid-distort) blur(0.6px);
+    opacity: 0.18;
+    transform: translateX(-8%);
+    transition: opacity 0.45s ease, transform 0.6s ease;
+    animation: band-slide calc(var(--liquid-band-speed) / 1.2) linear infinite,
+               sheen-swipe var(--liquid-sheen-speed) ease-in-out infinite,
+               liquid-wave var(--liquid-wave-speed) ease-in-out infinite;
+    background-position: -20% 50%, -10% 50%;
+}
+
+[data-theme="light"] #toolsModal .relative::after,
+[data-theme="light"] #settingsModal .relative::after {
+    content: "";
+    position: absolute; left: 0; right: 0; top: 0; height: 18%; pointer-events: none; z-index: 1;
+    background: linear-gradient(180deg, rgba(255,255,255,0.08), rgba(255,255,255,0.02));
+    mix-blend-mode: screen;
+    filter: blur(3px);
+    opacity: 0.6;
+}
+
+/* Sidebar title and chat list readability */
+[data-theme="light"] #chatSidebar h2, [data-theme="light"] #chatSidebar .text-gray-100 {
+    color: #0f172a !important;
+    opacity: 0.95;
+}
+[data-theme="light"] #chatList > div { color: #0f172a !important; }
+
+/* Button color adjustments for light mode - keep signature accent but ensure contrast */
+[data-theme="light"] #newChatButton, [data-theme="light"] #sendButton, [data-theme="light"] #saveSettingsButton {
+    background-color: #db2777 !important; /* signature pink */
+    color: #fff !important;
+    box-shadow: 0 8px 30px rgba(219,39,119,0.12) !important;
+}
+[data-theme="light"] #newChatButton:hover, [data-theme="light"] #sendButton:hover, [data-theme="light"] #saveSettingsButton:hover {
+    background-color: #c41f67 !important;
+}
+
+/* Neutral secondary buttons on light background */
+[data-theme="light"] button:not(#newChatButton):not(#sendButton):not(#saveSettingsButton) {
+    background-color: rgba(15,23,42,0.04) !important;
+    color: #0f172a !important;
+}
+
+/* Icon buttons (settings/tools/theme) dark icons on light bg */
+[data-theme="light"] #settingsButton svg, [data-theme="light"] #toolsButton svg, [data-theme="light"] #themeToggleButton svg {
+    stroke: #0f172a !important;
+    fill: none !important;
+}
+
+/* Light-mode button variants */
+[data-theme="light"] .liquid-btn { background-color: rgba(15,23,42,0.04); color: #0f172a; border-color: rgba(15,23,42,0.06); box-shadow: 0 6px 18px rgba(2,6,23,0.04) inset, 0 6px 18px rgba(2,6,23,0.04); }
+[data-theme="light"] .liquid-btn.primary { background-color: #db2777; color: #fff; border-color: rgba(219,39,119,0.12); }
+[data-theme="light"] .icon-btn { background-color: rgba(15,23,42,0.04); }
+
+/* Fix chat-bubble contrast in light mode (ensure shadows still show) */
+[data-theme="light"] .chat-bubble.ai, [data-theme="light"] .chat-bubble.user { box-shadow: 0 6px 18px rgba(2,6,23,0.06); }

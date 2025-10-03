@@ -9,6 +9,7 @@ const settingsModal = document.getElementById('settingsModal');
 const toolsModal = document.getElementById('toolsModal');
 const toolsModalContent = document.getElementById('toolsModalContent');
 const toolsButton = document.getElementById('toolsButton');
+const themeToggleButton = document.getElementById('themeToggleButton');
 
 // A simple utility to clear the chat window.
 function clearChatMessages() {
@@ -264,3 +265,37 @@ function setMicButtonState(state = 'idle') {
 
 function openSettingsModal() { settingsModal.classList.remove('hidden'); }
 function closeSettingsModal() { settingsModal.classList.add('hidden'); }
+
+/* Theme handling */
+function applyTheme(theme) {
+    // theme: 'dark' or 'light'
+    if (theme === 'light') {
+        document.documentElement.setAttribute('data-theme', 'light');
+        document.body.classList.remove('bg-gray-950');
+        document.body.classList.add('bg-white');
+        document.body.classList.remove('text-gray-200');
+        document.body.classList.add('text-gray-900');
+        if (themeToggleButton) themeToggleButton.setAttribute('aria-pressed', 'true');
+    } else {
+        document.documentElement.setAttribute('data-theme', 'dark');
+        document.body.classList.remove('bg-white');
+        document.body.classList.add('bg-gray-950');
+        document.body.classList.remove('text-gray-900');
+        document.body.classList.add('text-gray-200');
+        if (themeToggleButton) themeToggleButton.setAttribute('aria-pressed', 'false');
+    }
+    localStorage.setItem('aura_theme', theme);
+}
+
+// Initialize theme on load
+document.addEventListener('DOMContentLoaded', () => {
+    const saved = localStorage.getItem('aura_theme') || 'dark';
+    applyTheme(saved);
+    if (themeToggleButton) {
+        themeToggleButton.addEventListener('click', () => {
+            const current = document.documentElement.getAttribute('data-theme') === 'light' ? 'light' : 'dark';
+            const next = current === 'light' ? 'dark' : 'light';
+            applyTheme(next);
+        });
+    }
+});
