@@ -114,7 +114,7 @@ body, #chatSidebar {
 
 #settingsModal .relative, #toolsModal .relative,
 #userInput, .flex-1 > header h1,
-button,
+button, #fileUploadButton,
 #chatList > div.bg-gray-800,
 .affirmation-card, .checklist-card, .breathing-exercise-container, .mood-tracker-card,
 #systemPromptTextarea, #voiceSelectDropdown, #modelSelectDropdown {
@@ -137,7 +137,7 @@ button,
 /* Create layered liquid reflections with pseudo-elements */
 #settingsModal .relative::before, #toolsModal .relative::before,
 #userInput::before, .flex-1 > header h1::before,
-button::before,
+button::before, #fileUploadButton::before,
 #chatList > div.bg-gray-800::before,
 .affirmation-card::before, .checklist-card::before, .breathing-exercise-container::before, .mood-tracker-card::before,
 #systemPromptTextarea::before, #voiceSelectDropdown::before, #modelSelectDropdown::before {
@@ -158,7 +158,7 @@ button::before,
 /* Subtle moving sheen layer */
 #settingsModal .relative::after, #toolsModal .relative::after,
 #userInput::after, .flex-1 > header h1::after,
-button::after,
+button::after, #fileUploadButton::after,
 #chatList > div.bg-gray-800::after,
 .affirmation-card::after, .checklist-card::after, .breathing-exercise-container::after, .mood-tracker-card::after,
 #systemPromptTextarea::after, #voiceSelectDropdown::after, #modelSelectDropdown::after {
@@ -288,7 +288,7 @@ button::after,
 /* Slight ripple when hovering or focusing to simulate liquid surface */
 #settingsModal .relative:hover::before, #toolsModal .relative:hover::before,
 #userInput:hover::before, .flex-1 > header h1:hover::before,
-button:hover::before,
+button:hover::before, #fileUploadButton:hover::before,
 #chatList > div.bg-gray-800:hover::before,
 .affirmation-card:hover::before, .checklist-card:hover::before, .breathing-exercise-container:hover::before, .mood-tracker-card:hover::before,
 #systemPromptTextarea:focus::before, #voiceSelectDropdown:focus::before, #modelSelectDropdown:focus::before {
@@ -316,7 +316,8 @@ button:hover::before,
 /* Make sure content sits above pseudo-elements */
 #settingsModal .relative > *, #toolsModal .relative > *,
 #userInput > *, .flex-1 > header h1 > *,
-button > *, #chatList > div.bg-gray-800 > *,
+button > *, #fileUploadButton > *, 
+#chatList > div.bg-gray-800 > *,
 .affirmation-card > *, .checklist-card > *, .breathing-exercise-container > *, .mood-tracker-card > *,
 #systemPromptTextarea > *, #voiceSelectDropdown > *, #modelSelectDropdown > * {
     position: relative; z-index: 2;
@@ -324,7 +325,7 @@ button > *, #chatList > div.bg-gray-800 > *,
 
 /* Hover effect */
 #settingsModal .relative:hover, #toolsModal .relative:hover,
-#userInput:hover, .flex-1 > header h1:hover, button:hover {
+#userInput:hover, .flex-1 > header h1:hover, button:hover, #fileUploadButton:hover {
     transform: translateY(-3px) scale(1.004) !important;
     box-shadow: 0 18px 50px rgba(0,0,0,0.45) !important;
 }
@@ -332,7 +333,7 @@ button > *, #chatList > div.bg-gray-800 > *,
 /* "Squish" effect on click */
 #settingsModal .relative:active, #toolsModal .relative:active,
 #userInput:active, .flex-1 > header h1:active,
-button:active,
+button:active, #fileUploadButton:active,
 #chatList > div.bg-gray-800:active,
 #systemPromptTextarea:active, #voiceSelectDropdown:active, #modelSelectDropdown:active {
     transform: translateY(0) scale(0.97) !important;
@@ -389,7 +390,7 @@ button:active,
 .liquid-btn.ghost:hover { background-color: rgba(255,255,255,0.04); }
 
 /* Apply liquid button class to existing button IDs */
-#newChatButton, #sendButton, #saveSettingsButton, #cancelSettingsButton, #resetSettingsButton, #closeToolsButton, #micButton, #settingsButton, #toolsButton, #themeToggleButton {
+#newChatButton, #sendButton, #saveSettingsButton, #cancelSettingsButton, #resetSettingsButton, #closeToolsButton, #micButton, #settingsButton, #toolsButton, #themeToggleButton, #fileUploadButton {
     /* add base liquid appearance */
     border-radius: 9999px !important; padding: 0.6rem 1rem !important; height: 44px !important;
 }
@@ -411,15 +412,15 @@ button:active,
 #userInput:focus { box-shadow: 0 12px 40px rgba(0,0,0,0.4) !important; }
 
 /* Border Radii */
-#userInput, #micButton, #settingsButton, #toolsButton, #sendButton, #cancelSettingsButton, #resetSettingsButton, #closeToolsButton, .tool-button, .mood-button, #newChatButton { border-radius: 9999px !important; }
+#userInput, #micButton, #settingsButton, #toolsButton, #sendButton, #cancelSettingsButton, #resetSettingsButton, #closeToolsButton, .tool-button, .mood-button, #newChatButton, #fileUploadButton { border-radius: 9999px !important; }
 .flex-1 > header h1, #saveSettingsButton, #systemPromptTextarea, #voiceSelectDropdown, #modelSelectDropdown, .affirmation-card, .checklist-card, .breathing-exercise-container, .mood-tracker-card { border-radius: 0.75rem !important; }
 #settingsModal .relative, #toolsModal .relative, #chatList > div.bg-gray-800 { border-radius: 1.5rem; }
 #chatList > div.bg-gray-800 { margin: 0.25rem 0; } 
 
 /* Icon Readability */
-#sendButton svg, #micButton svg, #settingsButton svg, #toolsButton svg { filter: drop-shadow(0 0 3px rgba(0,0,0,0.8)); }
+#sendButton svg, #micButton svg, #settingsButton svg, #toolsButton svg, #fileUploadButton svg { filter: drop-shadow(0 0 3px rgba(0,0,0,0.8)); }
 #sendButton svg { fill: #FFF; }
-#micButton svg, #settingsButton svg, #toolsButton svg { stroke: #f9fafb; }
+#micButton svg, #settingsButton svg, #toolsButton svg, #fileUploadButton svg { stroke: #f9fafb; }
 
 /* Opaque Chat Bubbles */
 .chat-bubble.ai, .chat-bubble.user { box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2); color: #FFF; }
@@ -460,7 +461,8 @@ button:active,
 /* Light-mode glass: white, translucent, with subtle colored banding */
 [data-theme="light"] #settingsModal .relative, [data-theme="light"] #toolsModal .relative,
 [data-theme="light"] #userInput, [data-theme="light"] .flex-1 > header h1,
-[data-theme="light"] button, [data-theme="light"] #chatList > div.bg-gray-800,
+[data-theme="light"] button, [data-theme="light"] #fileUploadButton, 
+[data-theme="light"] #chatList > div.bg-gray-800,
 [data-theme="light"] .affirmation-card, [data-theme="light"] .checklist-card, [data-theme="light"] .breathing-exercise-container, [data-theme="light"] .mood-tracker-card,
 [data-theme="light"] #systemPromptTextarea, [data-theme="light"] #voiceSelectDropdown, [data-theme="light"] #modelSelectDropdown {
     /* Match dark mode: semi-opaque frosted base so both themes look consistent */
@@ -587,13 +589,14 @@ button:active,
 }
 
 /* Neutral secondary buttons on light background */
-[data-theme="light"] button:not(#newChatButton):not(#sendButton):not(#saveSettingsButton) {
+[data-theme="light"] button:not(#newChatButton):not(#sendButton):not(#saveSettingsButton),
+[data-theme="light"] #fileUploadButton {
     background-color: rgba(15,23,42,0.04) !important;
     color: #0f172a !important;
 }
 
 /* Icon buttons (settings/tools/theme) dark icons on light bg */
-[data-theme="light"] #settingsButton svg, [data-theme="light"] #toolsButton svg, [data-theme="light"] #themeToggleButton svg {
+[data-theme="light"] #settingsButton svg, [data-theme="light"] #toolsButton svg, [data-theme="light"] #themeToggleButton svg, [data-theme="light"] #fileUploadButton svg, [data-theme="light"] #micButton svg {
     stroke: #0f172a !important;
     fill: none !important;
 }
