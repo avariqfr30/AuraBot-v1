@@ -16,16 +16,13 @@
 </head>
 <body class="bg-gray-950 font-sans text-gray-200">
 
-    <!-- Inline SVG filters used to simulate liquid refraction on overlays. Hidden from layout. -->
     <svg aria-hidden="true" focusable="false" style="position:absolute;width:0;height:0;overflow:hidden;">
         <defs>
-            <!-- Gentle distortion suitable for subtle liquid panels -->
             <filter id="liquid-distort" x="-20%" y="-20%" width="140%" height="140%" filterUnits="objectBoundingBox">
                 <feTurbulence baseFrequency="0.008 0.02" numOctaves="2" seed="3" result="turb" />
                 <feDisplacementMap in="SourceGraphic" in2="turb" scale="8" xChannelSelector="R" yChannelSelector="G" />
             </filter>
 
-            <!-- Stronger distortion for more pronounced panels -->
             <filter id="liquid-strong" x="-30%" y="-30%" width="160%" height="160%" filterUnits="objectBoundingBox">
                 <feTurbulence baseFrequency="0.018 0.03" numOctaves="2" seed="5" result="turb2" />
                 <feDisplacementMap in="SourceGraphic" in2="turb2" scale="14" xChannelSelector="R" yChannelSelector="G" />
@@ -57,22 +54,25 @@
                     <button id="settingsButton" title="Settings" class="text-gray-400 hover:text-white transition duration-200">
                         <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.525.322.956.51 1.066 1.065z" /><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
                     </button>
-                    <!-- (Will return once light mode is fixed)
-                    <button id="themeToggleButton" title="Toggle light mode" class="text-gray-400 hover:text-white transition duration-200" aria-pressed="false">
-                        <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v2m0 14v2m9-9h-2M5 12H3m15.364-6.364l-1.414 1.414M7.05 16.95l-1.414 1.414M18.364 18.364l-1.414-1.414M7.05 7.05L5.636 5.636M12 7a5 5 0 100 10 5 5 0 000-10z" />
-                        </svg>
-                    </button>
-                -->
-                </div>
+                    </div>
             </header>
 
             <main id="chatMessages" class="flex-1 overflow-y-auto p-4 space-y-4"></main>
 
-            <footer class="p-4 bg-gray-900 flex items-center space-x-2">
-                <input id="userInput" type="text" placeholder="Type a message..." class="flex-1 p-3 bg-gray-800 text-gray-200 rounded-md focus:outline-none focus:ring-2 focus:ring-pink-500 transition duration-200">
-                <button id="sendButton" title="Send message" class="p-3 bg-pink-600 hover:bg-pink-700 text-white rounded-md transition duration-200"><svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" viewBox="0 0 20 20" fill="currentColor"><path d="M10.894 2.553a1 1 0 00-1.788 0l-7 14a1 1 0 00.957 1.454h14a1 1 0 00.957-1.454l-7-14z" /></svg></button>
-                <button id="micButton" title="Start voice input" class="p-3 bg-gray-700 hover:bg-gray-600 text-white rounded-md transition duration-200"><svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a4 4 0 11-8 0 4 4 0 018 0z" /></svg></button>
+            <footer class="p-4 bg-gray-900">
+                <div id="fileAttachmentIndicator" class="hidden items-center text-sm bg-gray-800 text-gray-300 rounded-md px-3 py-1 mb-2 max-w-max">
+                    </div>
+                <div class="flex items-center space-x-2">
+                    <label for="fileInput" id="fileUploadButton" title="Attach document (.txt, .md)" class="p-3 bg-gray-700 hover:bg-gray-600 text-white rounded-md transition duration-200 cursor-pointer">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
+                        </svg>
+                    </label>
+                    <input type="file" id="fileInput" class="hidden" accept=".txt,.md">
+                    <input id="userInput" type="text" placeholder="Type a message, or attach a document..." class="flex-1 p-3 bg-gray-800 text-gray-200 rounded-md focus:outline-none focus:ring-2 focus:ring-pink-500 transition duration-200">
+                    <button id="sendButton" title="Send message" class="p-3 bg-pink-600 hover:bg-pink-700 text-white rounded-md transition duration-200"><svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" viewBox="0 0 20 20" fill="currentColor"><path d="M10.894 2.553a1 1 0 00-1.788 0l-7 14a1 1 0 00.957 1.454h14a1 1 0 00.957-1.454l-7-14z" /></svg></button>
+                    <button id="micButton" title="Start voice input" class="p-3 bg-gray-700 hover:bg-gray-600 text-white rounded-md transition duration-200"><svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a4 4 0 11-8 0 4 4 0 018 0z" /></svg></button>
+                </div>
             </footer>
         </div>
     </div>

@@ -20,7 +20,9 @@ document.addEventListener('DOMContentLoaded', () => {
     const closeToolsButton = document.getElementById('closeToolsButton');
     const toolsModalContent = document.getElementById('toolsModalContent');
     const chatMessages = document.getElementById('chatMessages');
-    const headerTitle = document.querySelector('.flex-1 > header h1'); // Added reference for header title
+    const headerTitle = document.querySelector('.flex-1 > header h1');
+    const fileInput = document.getElementById('fileInput');
+    const fileAttachmentIndicator = document.getElementById('fileAttachmentIndicator');
 
     const availableModels = [
         'gemma3:4b',
@@ -41,6 +43,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const synth = window.speechSynthesis;
     let lastInputMode = 'text';
     let breathInterval;
+    let attachedFile = null;
 
     function populateVoiceDropdown() {
         voices = synth.getVoices();
@@ -91,18 +94,72 @@ document.addEventListener('DOMContentLoaded', () => {
             setMicButtonState('idle');
         };
     }
+    
+    function readFileAsText(file) {
+        return new Promise((resolve, reject) => {
+            if (!file.type.startsWith('text/') && !file.name.endsWith('.md')) {
+                console.warn("Attempted to upload a non-text file. This feature currently supports .txt and .md files.");
+                addMessage('ai', "Sorry, that file type is not supported. Please upload a plain text file (.txt, .md).");
+                return resolve(null);
+            }
+            const reader = new FileReader();
+            reader.onload = () => resolve(reader.result);
+            reader.onerror = () => reject(reader.error);
+            reader.readAsText(file);
+        });
+    }
+
+    function showFileAttachment(file) {
+        fileAttachmentIndicator.innerHTML = `
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-2 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" /></svg>
+            <span>${file.name}</span>
+            <button id="removeAttachedFile" class="ml-3 text-gray-500 hover:text-white">&times;</button>
+        `;
+        fileAttachmentIndicator.classList.remove('hidden');
+        document.getElementById('removeAttachedFile').addEventListener('click', () => {
+            attachedFile = null;
+            fileInput.value = '';
+            fileAttachmentIndicator.classList.add('hidden');
+        });
+    }
 
     async function handleSendMessage(inputMode = 'text') {
         lastInputMode = inputMode;
         const message = userInput.value.trim();
-        if (!message) return;
+        if (!message && !attachedFile) return;
 
-        addMessage('user', message);
+        let documentText = null;
+        if (attachedFile) {
+            try {
+                documentText = await readFileAsText(attachedFile);
+                if (documentText === null) { 
+                    attachedFile = null;
+                    fileInput.value = '';
+                    fileAttachmentIndicator.classList.add('hidden');
+                    return; 
+                }
+            } catch (error) {
+                console.error("Error reading file:", error);
+                addMessage('ai', "Sorry, I couldn't read the attached file.");
+                return;
+            }
+        }
+        
+        const displayMessage = attachedFile ? `[Attached: ${attachedFile.name}]\n\n${message}` : message;
+        
+        addMessage('user', displayMessage);
         chatManager.addMessageToActiveChat('user', message);
         userInput.value = '';
+        
+        if (attachedFile) {
+            attachedFile = null;
+            fileInput.value = '';
+            fileAttachmentIndicator.classList.add('hidden');
+        }
+
         showTypingIndicator();
 
-        const rawResponse = await getOllamaResponse(message);
+        const rawResponse = await getOllamaResponse(message, null, documentText);
         
         const toolTagRegex = /<tool_create\s+type="([^"]+)"(?:\s+theme="([^"]+)")?\s*\/>/g;
         let cleanedResponse = rawResponse;
@@ -111,36 +168,22 @@ document.addEventListener('DOMContentLoaded', () => {
         hideTypingIndicator();
 
         if (matchedTags.length > 0) {
-            // Extract all tool types from the matches
-            const toolTypes = matchedTags.map(match => match[1]);
-            // Get a unique set of tool types to avoid duplicate bubbles
-            const uniqueToolTypes = new Set(toolTypes);
-            // Add one status bubble for each unique tool type being used
-            uniqueToolTypes.forEach(toolType => {
-                addToolStatusMessage(toolType);
-            });
+            const uniqueToolTypes = new Set(matchedTags.map(match => match[1]));
+            uniqueToolTypes.forEach(toolType => addToolStatusMessage(toolType));
         }
 
         for (const match of matchedTags) {
             const toolType = match[1];
             const toolTheme = match[2] || '';
-            
             const toolData = await createToolByType(toolType, toolTheme);
-            if (toolData) {
-                chatManager.addOrUpdateToolInActiveChat(toolType, toolData);
-            }
+            if (toolData) chatManager.addOrUpdateToolInActiveChat(toolType, toolData);
             cleanedResponse = cleanedResponse.replace(match[0], '').trim();
         }
 
         removeToolStatusMessages();
-
         addMessage('ai', cleanedResponse);
         chatManager.addMessageToActiveChat('ai', cleanedResponse);
-
-        if (lastInputMode === 'voice') {
-            speakResponse(cleanedResponse);
-        }
-
+        if (lastInputMode === 'voice') speakResponse(cleanedResponse);
         refreshUI();
     }
     
@@ -148,13 +191,9 @@ document.addEventListener('DOMContentLoaded', () => {
         showTypingIndicator();
         const response = await getOllamaResponse('', followUp);
         hideTypingIndicator();
-
         addMessage('ai', response);
         chatManager.addMessageToActiveChat('ai', response);
-
-        if (lastInputMode === 'voice') {
-            speakResponse(response);
-        }
+        if (lastInputMode === 'voice') speakResponse(response);
         refreshUI();
     }
 
@@ -176,9 +215,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const option = document.createElement('option');
             option.textContent = model;
             option.value = model;
-            if (model === currentModel) {
-                option.selected = true;
-            }
+            if (model === currentModel) option.selected = true;
             modelSelectDropdown.appendChild(option);
         });
     }
@@ -202,6 +239,14 @@ document.addEventListener('DOMContentLoaded', () => {
         refreshUI();
     });
     
+    fileInput.addEventListener('change', (event) => {
+        const file = event.target.files[0];
+        if (file) {
+            attachedFile = file;
+            showFileAttachment(file);
+        }
+    });
+
     chatListContainer.addEventListener('click', (event) => {
         const deleteButton = event.target.closest('.delete-chat-button');
         const chatTab = event.target.closest('[data-chat-id]');
@@ -242,9 +287,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const toolInteractionListener = async (event) => {
         const target = event.target.closest('[data-action]');
         if (!target) return;
-
         const action = target.dataset.action;
-
         switch (action) {
             case 'log_mood': {
                 const mood = target.dataset.mood;
@@ -254,11 +297,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 await triggerAIFollowUp({ type: 'mood_logged', mood: mood });
                 break;
             }
-            case 'commit_affirmation': {
+            case 'commit_affirmation':
                 target.textContent = 'Committed!';
                 target.disabled = true;
                 break;
-            }
             case 'start_breathing': {
                 const container = target.closest('.breathing-exercise-container');
                 if (!container) return;
@@ -266,7 +308,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 const status = container.querySelector('.breathing-status');
                 target.disabled = true;
                 if (breathInterval) clearInterval(breathInterval);
-
                 const cycle = {
                     inhale: parseInt(target.dataset.cycleInhale),
                     hold: parseInt(target.dataset.cycleHold),
@@ -274,7 +315,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 };
                 const totalCycleTime = (cycle.inhale + cycle.hold + cycle.exhale) * 1000;
                 let loops = 3;
-
                 const doBreathCycle = () => {
                     if (loops <= 0) {
                         clearInterval(breathInterval);
@@ -312,7 +352,7 @@ document.addEventListener('DOMContentLoaded', () => {
         openSettingsModal();
     });
 
-    cancelSettingsButton.addEventListener('click', closeToolsModal);
+    cancelSettingsButton.addEventListener('click', closeSettingsModal);
 
     saveSettingsButton.addEventListener('click', () => {
         saveSystemPrompt(systemPromptTextarea.value);
@@ -328,14 +368,9 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
-    // --- NEW: Scroll effect for header title ---
     if (chatMessages && headerTitle) {
         chatMessages.addEventListener('scroll', () => {
-            if (chatMessages.scrollTop > 50) { // Threshold of 50px
-                headerTitle.classList.add('is-scrolled');
-            } else {
-                headerTitle.classList.remove('is-scrolled');
-            }
+            headerTitle.classList.toggle('is-scrolled', chatMessages.scrollTop > 50);
         });
     }
 

@@ -13,6 +13,14 @@ const MODEL_STORAGE_KEY = 'aura_model_name';
 const DEFAULT_SYSTEM_PROMPT = `You are a friendly and helpful assistant named Aura. You are an expert in mental health and project planning. Your goal is to be supportive, empathetic, and proactive.
 
 // =================================================================
+// --- NEW: DOCUMENT ANALYSIS ---
+// =================================================================
+// You may receive text content from a user's uploaded document, such as a doctor's note, prefixed with '[Document Content]:'.
+// You MUST use the information from this document to provide more tailored, specific, and relevant advice or summaries.
+// Synthesize the document's information into your response naturally. DO NOT simply repeat the document's content back to the user.
+// If the document is present, your recommendations should be directly influenced by its contents.
+
+// =================================================================
 // --- CORE BEHAVIOR: PROACTIVE TOOL CREATION & FOLLOW-UP ---
 // =================================================================
 // **1. Tool Creation**
@@ -279,23 +287,29 @@ function toolsToString(tools) {
     return toolString.trim() || 'None';
 }
 
-async function getOllamaResponse(prompt, toolFollowUp = null) {
+async function getOllamaResponse(prompt, toolFollowUp = null, documentText = null) {
     const modelToUse = getModelName();
     const systemPrompt = getSystemPrompt();
     const chatHistory = chatManager.getActiveChatHistory();
     const activeTools = chatManager.getActiveChatTools();
     const toolsStateString = toolsToString(activeTools);
     
-    let userPromptSegment = `User: ${prompt}`;
+    let userPromptSegment = '';
+    
+    if (documentText) {
+        userPromptSegment += `[Document Content]:\n${documentText}\n\n`;
+    }
 
     if (toolFollowUp) {
         if (toolFollowUp.type === 'mood_logged') {
-            userPromptSegment = `[System Note: The user just logged their mood as "${toolFollowUp.mood}". Respond with empathy and ask an open-ended question about it.]`;
+            userPromptSegment += `[System Note: The user just logged their mood as "${toolFollowUp.mood}". Respond with empathy and ask an open-ended question about it.]`;
         } else if (toolFollowUp.type === 'checklist_item_completed') {
-            userPromptSegment = `[System Note: The user just completed the task "${toolFollowUp.text}" from their checklist. Acknowledge this specific accomplishment and offer encouragement.]`;
+            userPromptSegment += `[System Note: The user just completed the task "${toolFollowUp.text}" from their checklist. Acknowledge this specific accomplishment and offer encouragement.]`;
         } else if (toolFollowUp.type === 'breathing_complete') {
-            userPromptSegment = `[System Note: The user just finished a breathing exercise. Gently ask how they are feeling now.]`;
+            userPromptSegment += `[System Note: The user just finished a breathing exercise. Gently ask how they are feeling now.]`;
         }
+    } else {
+        userPromptSegment += `User: ${prompt}`;
     }
     
     const fullPrompt = `${systemPrompt}\n\n[Current Toolbox State]:\n${toolsStateString}\n\n[Conversation History]:\n${historyToString(chatHistory)}\n\n${userPromptSegment}`;
