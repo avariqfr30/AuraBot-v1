@@ -10,14 +10,9 @@ const PROMPT_STORAGE_KEY = 'aura_system_prompt';
 const VOICE_STORAGE_KEY = 'aura_voice_name';
 const MODEL_STORAGE_KEY = 'aura_model_name';
 
-// --- Crisis Intervention Agent ---
-// This agent's job is to proactively check for signs of a crisis.
-// We now use a 2-stage system:
-// 1. A negative mood log puts this chat in "Heightened Awareness".
-// 2. While in that state, all new messages are pre-screened by the DETECTOR.
+// --- Crisis Intervention Agent (2-Stage) ---
 
-// This prompt is a lightweight "watchdog". Its ONLY job is to classify
-// a user's message as 'CRISIS' or 'OK'.
+// 1. The "Watchdog" Prompt: Classifies a message as 'CRISIS' or 'OK'.
 const DETECTION_PROMPT = `You are a crisis detection classifier. The user has already indicated they are in a distressed state.
 Analyze the following user message for any sign of suicidal ideation, self-harm, or hopelessness.
 The user's message is:
@@ -26,9 +21,7 @@ The user's message is:
 ---
 Does this message contain a crisis signal? Respond with ONLY the word 'CRISIS' or 'OK'.`;
 
-
-// This is the prompt for the *response* AI, used *after* the DETECTOR
-// has already flagged a message as a crisis.
+// 2. The "Response" Prompt: Used *after* a crisis is detected.
 const CRISIS_SYSTEM_PROMPT = `You are a safety-focused AI. A user is in significant distress. Your ONLY task is to write a single, brief, calm message.
 
 // --- ABSOLUTE RULES ---
@@ -37,11 +30,24 @@ const CRISIS_SYSTEM_PROMPT = `You are a safety-focused AI. A user is in signific
 // - You MUST immediately guide the user to the tools that have been opened for them (a Breathing Exercise and a Safety Plan).
 // - You MUST NOT offer advice, ask open-ended questions, or make promises like "it will be okay."
 // - Keep your response to 2-3 short sentences.`;
+// --- End Crisis Agent ---
 
-// --- End Crisis Intervention Agent ---
+// --- NEW: Re-Engagement Agent Prompt ---
+// This prompt is for the agent that speaks first when it detects
+// a user is "stuck" or "withdrawn".
+const RE_ENGAGEMENT_PROMPT = `You are Aura. The user has not engaged with this chat for %DAYS% days and may be feeling overwhelmed (%REASON%).
+Your goal is to be gentle, supportive, and non-judgmental.
+
+// --- YOUR TASK ---
+// 1. Acknowledge it's been a bit, and state that this is completely okay.
+// 2. Proactively create a *new*, simple 'checklist' tool. The theme should be 'One small, easy step for today'.
+// 3. Embed the \`<tool_create type="checklist" theme="One small, easy step for today" />\` tag.
+// 4. Gently let the user know you've created this simple, one-item list to make it easier to start again.
+// 5. Keep the message warm and brief.`;
+// --- End Re-Engagement Agent ---
 
 
-// The default "brain" for Aura. This detailed prompt defines its persona, rules, and capabilities.
+// The default "brain" for Aura.
 const DEFAULT_SYSTEM_PROMPT = `You are a friendly and helpful assistant named Aura. You are an expert in mental health and project planning. Your goal is to be supportive, empathetic, and proactive.
 
 // =================================================================
@@ -141,7 +147,11 @@ class ChatManager {
             memories: [],
             tools: {},
             completed_tasks: [], // Tracks completed checklist items
-            isHeightenedAwareness: false // Our new flag for the safety agent
+            
+            // --- Agent State Variables ---
+            isHeightenedAwareness: false, // For the Crisis Agent
+            lastUserMessageTimestamp: null, // For the Re-Engagement Agent
+            reEngagementTriggered: false // Prevents Re-Engagement loops
         };
         this.state.activeChatId = newChatId;
         this.saveState();
@@ -172,13 +182,21 @@ class ChatManager {
 
     addMessageToActiveChat(role, content) {
         if (this.state.activeChatId) {
-            const history = this.state.chats[this.state.activeChatId].history;
-            history.push({ role, content });
+            const activeChat = this.state.chats[this.state.activeChatId];
+            activeChat.history.push({ role, content });
             
             // Set the chat title from the first user message
-            if (history.length === 1 && role === 'user') {
-                this.state.chats[this.state.activeChatId].title = content.substring(0, 20) + '...';
+            if (activeChat.history.length === 1 && role === 'user') {
+                activeChat.title = content.substring(0, 20) + '...';
             }
+
+            // If the user sends a message, update their timestamp and
+            // reset the re-engagement agent.
+            if (role === 'user') {
+                activeChat.lastUserMessageTimestamp = Date.now();
+                activeChat.reEngagementTriggered = false;
+            }
+            
             this.saveState();
         }
     }
@@ -222,7 +240,7 @@ class ChatManager {
             moodTracker.history.shift();
         }
         
-        // This is the "Arming" stage of the safety agent
+        // --- This is the "Arming" stage of the safety agent ---
         const negativeMoods = ["Sad", "Angry"];
         const positiveMoods = ["Happy", "Okay", "Neutral"];
 
@@ -265,8 +283,8 @@ class ChatManager {
         return completedItem.text;
     }
 
-    // --- Reflective Agent Method ---
-    // Gathers all relevant data for the reflective review
+    // --- Data Gathering for Agents ---
+    // Gathers all relevant data for both Reflective and Re-Engagement agents
     getAnalysisData() {
         if (!this.state.activeChatId) return null;
         const activeChat = this.state.chats[this.state.activeChatId];
@@ -301,7 +319,7 @@ class ChatManager {
         return {
             moodHistory,
             completedTasks,
-            openTasks,
+            openTasks: openTasks, // We pass the full array now
             docContext: docContext.join('\n')
         };
     }
@@ -372,7 +390,6 @@ class ChatManager {
      */
     async triggerSafetyIntervention(crisisMessageText) {
         // 1. Generate safety tools immediately.
-        // We run these in parallel to make the intervention fast.
         const breathToolPromise = createToolByType('breathing_exercise');
         const safetyPlanPromise = createSafetyPlanTool(); // Our AI-powered safety plan
         
@@ -402,6 +419,112 @@ class ChatManager {
         this.addMessageToActiveChat('ai', safeMessage);
         return safeMessage;
     }
+    
+    // --- Re-Engagement Agent Methods ---
+    
+    /**
+     * Checks if the user has "withdrawn" from the current chat.
+     * This is called when a chat is loaded.
+     */
+    checkForWithdrawalPattern() {
+        if (!this.state.activeChatId) return false;
+        const activeChat = this.state.chats[this.state.activeChatId];
+        
+        // 1. Check if agent has already run or if it's a new chat
+        if (activeChat.reEngagementTriggered) return false;
+        if (!activeChat.lastUserMessageTimestamp) return false;
+        
+        // 2. Check time difference
+        const now = Date.now();
+        const diffDays = (now - activeChat.lastUserMessageTimestamp) / (1000 * 60 * 60 * 24);
+        
+        if (diffDays <= 3) { // 3-day grace period
+            return false;
+        }
+        
+        // 3. If it's been long enough, check the context
+        const data = this.getAnalysisData();
+        if (!data) return false;
+        
+        const lastMood = data.moodHistory.length > 0 ? data.moodHistory[data.moodHistory.length - 1].mood : null;
+        const openTaskCount = data.openTasks.length;
+
+        // Check for a "stuck" pattern
+        const isStuck = (["Sad", "Angry"].includes(lastMood) || openTaskCount >= 5);
+        
+        if (isStuck) {
+            // We have a match. Return the reason to help the AI.
+            const reason = lastMood ? `their last mood was "${lastMood}"` : `they have ${openTaskCount} open tasks`;
+            return {
+                days: Math.round(diffDays),
+                reason: reason
+            };
+        }
+        
+        return false;
+    }
+
+    /**
+     * This is the Re-Engagement Agent's main action. It crafts a
+     * gentle message and creates a new, simple tool.
+     */
+    async triggerReEngagement(pattern) {
+        if (!this.state.activeChatId) return;
+        
+        // 1. Set the flag to prevent this from running again
+        this.state.chats[this.state.activeChatId].reEngagementTriggered = true;
+        this.saveState();
+        
+        // 2. Prepare the AI prompt
+        const prompt = RE_ENGAGEMENT_PROMPT
+            .replace('%DAYS%', pattern.days)
+            .replace('%REASON%', pattern.reason);
+        
+        // 3. Call the LLM
+        try {
+            const modelToUse = getModelName();
+            const response = await fetch(`${OLLAMA_API_BASE_URL}/api/generate`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ model: modelToUse, prompt: prompt, stream: false })
+            });
+            if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+            
+            const data = await response.json();
+            const rawResponse = data.response.trim();
+
+            // 4. Process the response for the tool it *must* create
+            const toolTagRegex = /<tool_create\s+type="([^"]+)"(?:\s+theme="([^"]+)")?\s*\/>/g;
+            let cleanedResponse = rawResponse;
+            const match = toolTagRegex.exec(rawResponse); // We only expect one
+            
+            if (match) {
+                const toolType = match[1];
+                const toolTheme = match[2] || '';
+                const toolData = await createToolByType(toolType, toolTheme);
+                if (toolData) {
+                    // Let's make sure it's a 1-item list, as requested
+                    if (toolType === 'checklist' && toolData.items.length > 1) {
+                        toolData.items = [toolData.items[0]]; // Only keep the first item
+                    }
+                    this.addOrUpdateToolInActiveChat(toolType, toolData);
+                }
+                cleanedResponse = cleanedResponse.replace(match[0], '').trim();
+            }
+
+            // 5. Add the AI's message to the chat
+            this.addMessageToActiveChat('ai', cleanedResponse);
+            return cleanedResponse;
+            
+        } catch (error) {
+            console.error("Error during re-engagement:", error);
+            // If it fails, undo the trigger flag so it can try again next time
+            this.state.chats[this.state.activeChatId].reEngagementTriggered = false;
+            this.saveState();
+            return null;
+        }
+    }
+
 
     // --- Getters ---
     getActiveChatHistory() { return this.state.activeChatId ? this.state.chats[this.state.activeChatId].history : []; }
@@ -461,6 +584,7 @@ async function createToolByType(type, theme = '') {
             const prompt = `An AI assistant needs to create a checklist for a user based on the theme: "${theme}".
 - Create a friendly, encouraging title for the checklist.
 - Create 3 to 5 short, actionable checklist items.
+- If the theme is 'One small, easy step for today', create ONLY ONE item.
 - Your output MUST be only the raw JSON object with this exact structure: { "type": "checklist", "id": "checklist-${Date.now()}", "title": "...", "items": [{"text": "...", "done": false}] }`;
             return await generateToolJson(prompt);
         }
@@ -528,7 +652,7 @@ function toolsToString(tools) {
 function formatReviewDataForAI(data) {
     let summary = "Data Summary:\n";
     summary += `- Completed Tasks: ${data.completedTasks.length > 0 ? data.completedTasks.join(', ') : 'None'}\n`;
-    summary += `- Open Tasks: ${data.openTasks.length > 0 ? data.openTasks.join(', ') : 'None'}\n`;
+    summary += `- Open Tasks: ${data.openTasks.length > 0 ? data.openTasks.map(t => `"${t}"`).join(', ') : 'None'}\n`;
     
     if (data.moodHistory.length > 0) {
         const recentMoods = data.moodHistory.slice(-5).map(m => m.mood).join(', ');

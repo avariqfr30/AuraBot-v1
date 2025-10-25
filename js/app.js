@@ -328,7 +328,32 @@ document.addEventListener('DOMContentLoaded', () => {
         const hasAnyTools = Object.values(activeTools).some(toolArray => toolArray && toolArray.length > 0);
         toggleToolsButton(hasAnyTools); // from ui.js
     }
-
+    
+    /**
+     * --- NEW: Agent Runner ---
+     * This function runs when a chat is loaded to check for agent triggers.
+     */
+    async function checkAndRunAgents() {
+        // --- Re-Engagement Agent Check ---
+        try {
+            const withdrawalPattern = chatManager.checkForWithdrawalPattern(); // from chat-logic.js
+            if (withdrawalPattern) {
+                console.log("Withdrawal pattern detected. Engaging...");
+                showTypingIndicator(); // from ui.js
+                
+                const message = await chatManager.triggerReEngagement(withdrawalPattern); // from chat-logic.js
+                
+                hideTypingIndicator(); // from ui.js
+                if (message) {
+                    addMessage('ai', message); // from ui.js
+                    refreshUI(); // Re-render to show the new tool
+                }
+            }
+        } catch (e) {
+            console.error("Error during re-engagement check:", e);
+        }
+    }
+    
     /**
      * Fills the model dropdown in settings with our list.
      */
@@ -370,6 +395,7 @@ document.addEventListener('DOMContentLoaded', () => {
     newChatButton.addEventListener('click', () => {
         chatManager.createNewChat();
         refreshUI();
+        // New chats don't need agents run on them
     });
     
     // Listen for a file to be selected
@@ -392,11 +418,13 @@ document.addEventListener('DOMContentLoaded', () => {
             if (confirm('Are you sure you want to delete this chat?')) {
                 chatManager.deleteChat(deleteButton.getAttribute('data-chat-id'));
                 refreshUI();
+                checkAndRunAgents(); // Check agents on the *new* active chat
             }
         } else if (chatTab) {
             // User clicked to switch to a different chat
             chatManager.setActiveChat(chatTab.getAttribute('data-chat-id'));
             refreshUI();
+            checkAndRunAgents(); // Check agents on the switched-to chat
         }
     });
     
@@ -562,4 +590,7 @@ document.addEventListener('DOMContentLoaded', () => {
     
     // Load the initial chat state into the UI
     refreshUI();
+    
+    // Run agents on the initially loaded chat
+    checkAndRunAgents();
 });
