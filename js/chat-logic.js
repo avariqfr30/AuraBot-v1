@@ -1,6 +1,7 @@
 // chat-logic.js
-// This file holds the core client-side logic for Aura. It manages chat state,
-// tool interactions, and communication with the Ollama API.
+// This file is the "brain" of Aura. It manages all chat state (like history
+// and tools), handles generating AI-powered tools, and contains the core
+// logic for our proactive agents.
 
 // --- App-wide Constants & Configuration ---
 
@@ -8,6 +9,37 @@
 const PROMPT_STORAGE_KEY = 'aura_system_prompt';
 const VOICE_STORAGE_KEY = 'aura_voice_name';
 const MODEL_STORAGE_KEY = 'aura_model_name';
+
+// --- Crisis Intervention Agent ---
+// This agent's job is to proactively check for signs of a crisis.
+// We now use a 2-stage system:
+// 1. A negative mood log puts this chat in "Heightened Awareness".
+// 2. While in that state, all new messages are pre-screened by the DETECTOR.
+
+// This prompt is a lightweight "watchdog". Its ONLY job is to classify
+// a user's message as 'CRISIS' or 'OK'.
+const DETECTION_PROMPT = `You are a crisis detection classifier. The user has already indicated they are in a distressed state.
+Analyze the following user message for any sign of suicidal ideation, self-harm, or hopelessness.
+The user's message is:
+---
+%MESSAGE%
+---
+Does this message contain a crisis signal? Respond with ONLY the word 'CRISIS' or 'OK'.`;
+
+
+// This is the prompt for the *response* AI, used *after* the DETECTOR
+// has already flagged a message as a crisis.
+const CRISIS_SYSTEM_PROMPT = `You are a safety-focused AI. A user is in significant distress. Your ONLY task is to write a single, brief, calm message.
+
+// --- ABSOLUTE RULES ---
+// - You MUST be direct and calm.
+// - You MUST acknowledge the user is in distress, based ONLY on the context provided.
+// - You MUST immediately guide the user to the tools that have been opened for them (a Breathing Exercise and a Safety Plan).
+// - You MUST NOT offer advice, ask open-ended questions, or make promises like "it will be okay."
+// - Keep your response to 2-3 short sentences.`;
+
+// --- End Crisis Intervention Agent ---
+
 
 // The default "brain" for Aura. This detailed prompt defines its persona, rules, and capabilities.
 const DEFAULT_SYSTEM_PROMPT = `You are a friendly and helpful assistant named Aura. You are an expert in mental health and project planning. Your goal is to be supportive, empathetic, and proactive.
@@ -66,6 +98,10 @@ const DEFAULT_EMBEDDING_MODEL = 'mxbai-embed-large:latest';
 const STATE_STORAGE_KEY = 'multi_chat_app_state';
 const OLLAMA_API_BASE_URL = 'http://localhost:11434';
 
+/**
+ * Manages all application state, including chats, history, and tools.
+ * This is the single source of truth for the app.
+ */
 class ChatManager {
     constructor() {
         this.state = this.loadState() || {
@@ -104,7 +140,8 @@ class ChatManager {
             history: [],
             memories: [],
             tools: {},
-            completed_tasks: []
+            completed_tasks: [], // Tracks completed checklist items
+            isHeightenedAwareness: false // Our new flag for the safety agent
         };
         this.state.activeChatId = newChatId;
         this.saveState();
@@ -121,8 +158,10 @@ class ChatManager {
         if (this.state.chats[chatId]) {
             delete this.state.chats[chatId];
             if (this.state.activeChatId === chatId) {
+                // Find the next most recent chat to make active
                 const chatIds = Object.keys(this.state.chats).sort((a, b) => b - a);
                 this.state.activeChatId = chatIds.length > 0 ? chatIds[0] : null;
+                // If no chats are left, create a new one
                 if (!this.state.activeChatId) {
                     this.createNewChat();
                 }
@@ -135,6 +174,8 @@ class ChatManager {
         if (this.state.activeChatId) {
             const history = this.state.chats[this.state.activeChatId].history;
             history.push({ role, content });
+            
+            // Set the chat title from the first user message
             if (history.length === 1 && role === 'user') {
                 this.state.chats[this.state.activeChatId].title = content.substring(0, 20) + '...';
             }
@@ -148,6 +189,7 @@ class ChatManager {
             if (!activeChat.tools) {
                 activeChat.tools = {};
             }
+            // Ensure the tool type is an array
             if (!Array.isArray(activeChat.tools[toolName])) {
                 activeChat.tools[toolName] = [];
             }
@@ -168,40 +210,210 @@ class ChatManager {
         if (!activeChat || !activeChat.tools || !activeChat.tools.mood_tracker || activeChat.tools.mood_tracker.length === 0) {
             return;
         }
+        
         const moodTracker = activeChat.tools.mood_tracker[0];
         if (!moodTracker.history) {
             moodTracker.history = [];
         }
+        
         moodTracker.history.push({ mood: mood, timestamp: new Date().toISOString() });
+        // Keep the history log from getting too long
         if(moodTracker.history.length > 10) {
             moodTracker.history.shift();
         }
+        
+        // This is the "Arming" stage of the safety agent
+        const negativeMoods = ["Sad", "Angry"];
+        const positiveMoods = ["Happy", "Okay", "Neutral"];
+
+        if (negativeMoods.includes(mood)) {
+            this.setHeightenedAwareness(true);
+            console.log("Heightened Awareness ENABLED.");
+        } else if (positiveMoods.includes(mood)) {
+            this.setHeightenedAwareness(false);
+            console.log("Heightened Awareness DISABLED.");
+        }
+        
         this.saveState();
     }
 
     completeAndRemoveChecklistItem(toolId, itemIndex) {
         const activeChat = this.state.chats[this.state.activeChatId];
         if (!activeChat || !activeChat.tools || !activeChat.tools.checklist) return null;
+
         const checklistArray = activeChat.tools.checklist;
+        // Find the specific checklist this item belongs to
         const toolIndex = checklistArray.findIndex(list => list.id === toolId);
         if (toolIndex === -1) return null;
+        
         const checklist = checklistArray[toolIndex];
+        // Remove the item from its list
         const [completedItem] = checklist.items.splice(itemIndex, 1);
+        
+        // If the checklist is now empty, remove it
         if (checklist.items.length === 0) {
             checklistArray.splice(toolIndex, 1);
         }
+        
+        // Log the completed task text for the Reflective Agent
         activeChat.completed_tasks.push(completedItem.text);
         if (activeChat.completed_tasks.length > 20) {
-            activeChat.completed_tasks.shift();
+            activeChat.completed_tasks.shift(); // Keep list manageable
         }
+        
         this.saveState();
         return completedItem.text;
     }
 
+    // --- Reflective Agent Method ---
+    // Gathers all relevant data for the reflective review
+    getAnalysisData() {
+        if (!this.state.activeChatId) return null;
+        const activeChat = this.state.chats[this.state.activeChatId];
+        if (!activeChat) return null;
+
+        let moodHistory = [];
+        if (activeChat.tools && activeChat.tools.mood_tracker && activeChat.tools.mood_tracker[0]) {
+            moodHistory = activeChat.tools.mood_tracker[0].history || [];
+        }
+
+        const completedTasks = activeChat.completed_tasks || [];
+
+        let openTasks = [];
+        if (activeChat.tools && activeChat.tools.checklist) {
+            activeChat.tools.checklist.forEach(list => {
+                list.items.forEach(item => {
+                    if (!item.done) {
+                        openTasks.push(item.text);
+                    }
+                });
+            });
+        }
+
+        // Find any document context from the chat history
+        let docContext = [];
+        activeChat.history.forEach(msg => {
+            if (msg.role === 'user' && msg.content.includes('[Attached:')) {
+                docContext.push(msg.content.split('\n')[0]); // Get just the attachment line
+            }
+        });
+
+        return {
+            moodHistory,
+            completedTasks,
+            openTasks,
+            docContext: docContext.join('\n')
+        };
+    }
+
+    // --- Crisis Intervention Agent Methods ---
+    
+    // Gets the awareness state for the active chat
+    isChatInHeightenedAwareness() {
+        if (this.state.activeChatId && this.state.chats[this.state.activeChatId]) {
+            return this.state.chats[this.state.activeChatId].isHeightenedAwareness;
+        }
+        return false;
+    }
+    
+    // Sets the awareness state for the active chat
+    setHeightenedAwareness(value) {
+        if (this.state.activeChatId && this.state.chats[this.state.activeChatId]) {
+            this.state.chats[this.state.activeChatId].isHeightenedAwareness = value;
+            this.saveState();
+        }
+    }
+
+    /**
+     * This is the "watchdog" function. It pre-screens a user's message
+     * *if* the app is in heightened awareness.
+     * @param {string} messageText - The user's typed message.
+     * @returns {string} - 'CRISIS' or 'OK'
+     */
+    async preScreenMessage(messageText) {
+        // If we're not in heightened awareness, don't do anything.
+        if (!this.isChatInHeightenedAwareness()) {
+            return 'OK';
+        }
+        
+        // If we *are* in heightened awareness, ask the LLM to classify the message
+        console.log("Heightened Awareness active. Pre-screening message...");
+        const prompt = DETECTION_PROMPT.replace('%MESSAGE%', messageText);
+        
+        try {
+            const modelToUse = getModelName();
+            const response = await fetch(`${OLLAMA_API_BASE_URL}/api/generate`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ model: modelToUse, prompt: prompt, stream: false })
+            });
+            if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+            
+            const data = await response.json();
+            const result = data.response.trim().toUpperCase();
+            
+            if (result.includes('CRISIS')) {
+                console.log("Watchdog detected: CRISIS");
+                return 'CRISIS';
+            } else {
+                console.log("Watchdog detected: OK");
+                return 'OK';
+            }
+        } catch (error) {
+            console.error("Error in preScreenMessage, failing safe:", error);
+            return 'OK'; // If the check fails, we must fail-safe and not block the user.
+        }
+    }
+
+    /**
+     * This is the agent's main action. It takes control from the normal
+     * chat flow, generates safety tools, and crafts a safe AI response.
+     * This is now *only* called after preScreenMessage returns 'CRISIS'.
+     */
+    async triggerSafetyIntervention(crisisMessageText) {
+        // 1. Generate safety tools immediately.
+        // We run these in parallel to make the intervention fast.
+        const breathToolPromise = createToolByType('breathing_exercise');
+        const safetyPlanPromise = createSafetyPlanTool(); // Our AI-powered safety plan
+        
+        const [breathTool, safetyPlan] = await Promise.all([breathToolPromise, safetyPlanPromise]);
+        
+        // 2. Add the tools to the state
+        this.addOrUpdateToolInActiveChat('breathing_exercise', breathTool);
+        this.addOrUpdateToolInActiveChat('checklist', safetyPlan);
+
+        // 3. Prepare the safe, constrained AI prompt
+        const context = `Context: The user is in a distressed state. Your detection system has flagged their last message as a potential crisis. The message was: "${crisisMessageText}"`;
+        const prompt = `${CRISIS_SYSTEM_PROMPT}\n\n${context}\n\nNow, write the message.`;
+
+        // 4. Make the constrained AI call
+        const modelToUse = getModelName();
+        const response = await fetch(`${OLLAMA_API_BASE_URL}/api/generate`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ model: modelToUse, prompt: prompt, stream: false })
+        });
+        if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+
+        const data = await response.json();
+        const safeMessage = data.response.trim();
+
+        // 5. Add to history and return the message for the UI
+        this.addMessageToActiveChat('ai', safeMessage);
+        return safeMessage;
+    }
+
+    // --- Getters ---
     getActiveChatHistory() { return this.state.activeChatId ? this.state.chats[this.state.activeChatId].history : []; }
     getActiveChatId() { return this.state.activeChatId; }
 }
 
+/**
+ * A generic function to ask the AI to generate JSON for a tool.
+ * This is the foundation for all our AI-powered tools.
+ * @param {string} prompt - The specific prompt for the LLM.
+ * @returns {object | null} - The parsed JSON object or null on error.
+ */
 async function generateToolJson(prompt) {
     const modelToUse = getModelName();
     try {
@@ -219,6 +431,24 @@ async function generateToolJson(prompt) {
     }
 }
 
+/**
+ * Generates the JSON for our crisis-specific safety plan.
+ * We trust the LLM to generate the plan's *items*.
+ */
+async function createSafetyPlanTool() {
+    const prompt = `You are an AI assistant that creates JSON for a "Safety Plan Checklist" tool.
+- This is for a user in an acute mental health crisis.
+- The title MUST be "Immediate Safety Plan".
+- Create exactly 5 simple, actionable, grounding items.
+- Examples: "Take 5 deep breaths", "Name 3 things you can see", "Hold a piece of ice".
+- Your output MUST be only the raw JSON object with this exact structure: { "type": "checklist", "id": "safety-${Date.now()}", "title": "Immediate Safety Plan", "items": [{"text": "...", "done": false}, ...] }`;
+    return await generateToolJson(prompt);
+}
+
+/**
+ * Creates a tool based on its type and an optional theme.
+ * This is called by the main AI response parser.
+ */
 async function createToolByType(type, theme = '') {
     switch (type) {
         case 'mood_tracker': {
@@ -251,8 +481,13 @@ async function createToolByType(type, theme = '') {
     }
 }
 
+/**
+ * Converts the current state of all tools into a plain string.
+ * This is fed to the AI as context in every message.
+ */
 function toolsToString(tools) {
     let toolString = '';
+    // Define a consistent order
     const toolOrder = ['mood_tracker', 'checklist', 'affirmation_card', 'breathing_exercise'];
 
     toolOrder.forEach(toolName => {
@@ -287,6 +522,92 @@ function toolsToString(tools) {
     return toolString.trim() || 'None';
 }
 
+/**
+ * Formats the raw analysis data for the Reflective Agent's prompt.
+ */
+function formatReviewDataForAI(data) {
+    let summary = "Data Summary:\n";
+    summary += `- Completed Tasks: ${data.completedTasks.length > 0 ? data.completedTasks.join(', ') : 'None'}\n`;
+    summary += `- Open Tasks: ${data.openTasks.length > 0 ? data.openTasks.join(', ') : 'None'}\n`;
+    
+    if (data.moodHistory.length > 0) {
+        const recentMoods = data.moodHistory.slice(-5).map(m => m.mood).join(', ');
+        summary += `- Recent Moods: ${recentMoods}\n`;
+    }
+    if (data.docContext) {
+        summary += `- Project Context: ${data.docContext}\n`;
+    }
+    return summary;
+}
+
+/**
+ * This is the Reflective Agent's main action. It gets data,
+ * formats it, and asks the AI to synthesize it.
+ */
+async function runReflectiveReview() {
+    const data = chatManager.getAnalysisData();
+    if (!data) return "Sorry, I couldn't find any data to review.";
+
+    const dataSummary = formatReviewDataForAI(data);
+    
+    const REFLECTIVE_PROMPT = `You are Aura. A user has asked for a review of their progress. Your task is to synthesize the following data into a single, supportive summary.
+
+// --- DATA SUMMARY ---
+${dataSummary}
+// --- END OF DATA ---
+
+Based on this data, first, write a brief, encouraging summary of their progress.
+
+Second, decide if a new tool would help them.
+- If they have many open tasks and seem stressed (e.g., "Sad" moods), create an 'affirmation_card' for motivation.
+- If they have completed many tasks and seem positive (e.g., "Happy" moods), create a new 'checklist' for 'Next Steps'.
+
+If you create a tool, embed the tag <tool_create type="..." theme="..."/> at the end of your summary.
+Speak directly to the user.`;
+
+    try {
+        const modelToUse = getModelName();
+        const response = await fetch(`${OLLAMA_API_BASE_URL}/api/generate`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ model: modelToUse, prompt: REFLECTIVE_PROMPT, stream: false })
+        });
+        if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+
+        const responseData = await response.json();
+        const rawResponse = responseData.response.trim();
+
+        // We need to process the response for any tools it decided to create
+        const toolTagRegex = /<tool_create\s+type="([^"]+)"(?:\s+theme="([^"]+)")?\s*\/>/g;
+        let cleanedResponse = rawResponse;
+        const matchedTags = [...rawResponse.matchAll(toolTagRegex)];
+
+        if (matchedTags.length > 0) {
+            for (const match of matchedTags) {
+                const toolType = match[1];
+                const toolTheme = match[2] || '';
+                const toolData = await createToolByType(toolType, toolTheme);
+                if (toolData) chatManager.addOrUpdateToolInActiveChat(toolType, toolData);
+                cleanedResponse = cleanedResponse.replace(match[0], '').trim();
+            }
+        }
+
+        // Save the AI's summary to our chat history
+        chatManager.addMessageToActiveChat('ai', cleanedResponse);
+        return cleanedResponse;
+
+    } catch (error) {
+        console.error("Reflective Review AI call failed:", error);
+        // Let the main handler inform the user
+        throw error;
+    }
+}
+
+
+/**
+ * The main function for getting a response from the AI.
+ * This is used for all *normal* conversation.
+ */
 async function getOllamaResponse(prompt, toolFollowUp = null, documentText = null) {
     const modelToUse = getModelName();
     const systemPrompt = getSystemPrompt();
@@ -296,10 +617,12 @@ async function getOllamaResponse(prompt, toolFollowUp = null, documentText = nul
     
     let userPromptSegment = '';
     
+    // Add document context if it exists
     if (documentText) {
         userPromptSegment += `[Document Content]:\n${documentText}\n\n`;
     }
 
+    // Check if this is a follow-up to a tool interaction
     if (toolFollowUp) {
         if (toolFollowUp.type === 'mood_logged') {
             userPromptSegment += `[System Note: The user just logged their mood as "${toolFollowUp.mood}". Respond with empathy and ask an open-ended question about it.]`;
@@ -309,9 +632,11 @@ async function getOllamaResponse(prompt, toolFollowUp = null, documentText = nul
             userPromptSegment += `[System Note: The user just finished a breathing exercise. Gently ask how they are feeling now.]`;
         }
     } else {
+        // Otherwise, it's a standard user message
         userPromptSegment += `User: ${prompt}`;
     }
     
+    // Assemble the final prompt with all context
     const fullPrompt = `${systemPrompt}\n\n[Current Toolbox State]:\n${toolsStateString}\n\n[Conversation History]:\n${historyToString(chatHistory)}\n\n${userPromptSegment}`;
 
     try {
@@ -330,11 +655,15 @@ async function getOllamaResponse(prompt, toolFollowUp = null, documentText = nul
     }
 }
 
+// --- Utility Functions ---
+
 function historyToString(history) {
     return history.map(m => {
         return `${m.role === 'user' ? 'User' : 'Assistant'}: ${m.content}`;
     }).join('\n');
 }
+
+// --- Settings Getters/Setters ---
 
 function getSystemPrompt() { return localStorage.getItem(PROMPT_STORAGE_KEY) || DEFAULT_SYSTEM_PROMPT; }
 function saveSystemPrompt(prompt) { localStorage.setItem(PROMPT_STORAGE_KEY, prompt); }
@@ -344,4 +673,6 @@ function getModelName() { return localStorage.getItem(MODEL_STORAGE_KEY) || DEFA
 function saveModelName(modelName) { localStorage.setItem(MODEL_STORAGE_KEY, modelName); }
 function getDefaultSystemPrompt() { return DEFAULT_SYSTEM_PROMPT; }
 
+// --- App Initialization ---
+// Create the one and only chat manager instance
 const chatManager = new ChatManager();
