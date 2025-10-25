@@ -437,15 +437,60 @@ button:active, #fileUploadButton:active,
 #chatList > div { background-color: transparent !important; }
 #chatList > div:hover { background-color: rgba(255, 255, 255, 0.1) !important; border-radius: 0.75rem; }
 
-/* Tool Specific Styles */
+/* ================================================================= */
+/* --- Tool Specific Styles (Modal & Chat) --- */
+/* ================================================================= */
+
 .affirmation-card, .checklist-card, .mood-tracker-card { padding: 1.25rem; }
 .breathing-exercise-container { text-align: center; padding: 1.25rem; }
 .breathing-pacer { width: 100px; height: 100px; background: radial-gradient(circle, rgba(99,102,241,1) 0%, rgba(219,39,119,1) 100%); border-radius: 50%; margin: 1.5rem auto; transform: scale(0.5); transition: transform 4s ease-in-out, background 4s ease-in-out; }
 .breathing-pacer.inhale, .breathing-pacer.hold { transform: scale(1.2); }
 .breathing-pacer.exhale { transform: scale(0.5); }
 .breathing-status { font-size: 1.25rem; font-weight: 500; margin-bottom: 1rem; }
+
+/* --- FIX FOR CHECKLIST SCROLLING --- */
+.checklist-scroll-container {
+    /* We give the list a max height. 250px is a good start. */
+    max-height: 250px;
+    
+    /* This is the magic: it adds a vertical scrollbar ONLY if needed. */
+    overflow-y: auto;
+    
+    /* A little padding to make sure the scrollbar doesn't hide the text. */
+    padding-right: 0.5rem;
+}
+/* --- END FIX --- */
+
 .checklist-columns { columns: 2 220px; column-gap: 2rem; }
 .checklist-columns li { break-inside: avoid-column; page-break-inside: avoid; }
+
+/* --- NEW: TOOLS MODAL GRID LAYOUT --- */
+
+/* This turns the vertical tool container into a flexible, wrapping grid */
+#toolsModalContent {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1.5rem; /* 24px */
+    justify-content: center;
+}
+
+/* This overrides the 'space-y-6' class from index.html,
+   which added vertical margins we no longer want. */
+#toolsModalContent > * + * {
+    margin-top: 0; 
+}
+
+/* This gives all tool cards a flexible width so they
+   can form a grid. */
+#toolsModalContent > .checklist-card,
+#toolsModalContent > .breathing-exercise-container,
+#toolsModalContent > .affirmation-card,
+#toolsModalContent > .mood-tracker-card {
+    flex: 1 1 340px; /* Each card will try to be 340px */
+    min-width: 320px; /* But won't shrink smaller than 320px */
+}
+/* --- END NEW --- */
+
 
 /* ---------------------- */
 /* Light theme overrides  */
@@ -596,7 +641,7 @@ button:active, #fileUploadButton:active,
 }
 
 /* Icon buttons (settings/tools/theme) dark icons on light bg */
-[data-theme="light"] #settingsButton svg, [data-theme="light"] #toolsButton svg, [data-theme="light"] #themeToggleButton svg, [data-theme="light"] #fileUploadButton svg, [data-theme="light"] #micButton svg {
+[data-tam-theme="light"] #settingsButton svg, [data-theme="light"] #toolsButton svg, [data-theme="light"] #themeToggleButton svg, [data-theme="light"] #fileUploadButton svg, [data-theme="light"] #micButton svg {
     stroke: #0f172a !important;
     fill: none !important;
 }

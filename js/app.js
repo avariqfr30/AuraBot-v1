@@ -330,7 +330,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     
     /**
-     * --- NEW: Agent Runner ---
+     * --- Agent Runner ---
      * This function runs when a chat is loaded to check for agent triggers.
      */
     async function checkAndRunAgents() {
@@ -351,6 +351,26 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         } catch (e) {
             console.error("Error during re-engagement check:", e);
+        }
+        
+        // --- Cognitive Pattern Agent Check ---
+        try {
+            const patternData = chatManager.checkForCognitivePattern(); // from chat-logic.js
+            if (patternData) {
+                console.log("Cognitive data found. Analyzing for patterns...");
+                showTypingIndicator(); // from ui.js
+                
+                const message = await chatManager.triggerCognitiveAnalysis(patternData); // from chat-logic.js
+                
+                hideTypingIndicator(); // from ui.js
+                if (message) {
+                    // This message is the AI's insight
+                    addMessage('ai', message); // from ui.js
+                    refreshUI(); // Re-render to show the new tool
+                }
+            }
+        } catch (e) {
+            console.error("Error during cognitive analysis:", e);
         }
     }
     

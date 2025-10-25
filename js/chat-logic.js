@@ -32,9 +32,7 @@ const CRISIS_SYSTEM_PROMPT = `You are a safety-focused AI. A user is in signific
 // - Keep your response to 2-3 short sentences.`;
 // --- End Crisis Agent ---
 
-// --- NEW: Re-Engagement Agent Prompt ---
-// This prompt is for the agent that speaks first when it detects
-// a user is "stuck" or "withdrawn".
+// --- Re-Engagement Agent Prompt ---
 const RE_ENGAGEMENT_PROMPT = `You are Aura. The user has not engaged with this chat for %DAYS% days and may be feeling overwhelmed (%REASON%).
 Your goal is to be gentle, supportive, and non-judgmental.
 
@@ -45,6 +43,33 @@ Your goal is to be gentle, supportive, and non-judgmental.
 // 4. Gently let the user know you've created this simple, one-item list to make it easier to start again.
 // 5. Keep the message warm and brief.`;
 // --- End Re-Engagement Agent ---
+
+// --- NEW: Cognitive Pattern Agent Prompt ---
+// This is the prompt for the CBT agent. It's a heavy-lifting
+// analysis prompt to find hidden patterns.
+const PATTERN_FINDER_PROMPT = `You are an expert AI therapist specializing in Cognitive Behavioral Therapy (CBT).
+Your goal is to analyze the user's chat and mood data to find correlations between topics and emotions.
+
+// --- DATA ANALYSIS ---
+The user has provided the following data from their private journal:
+
+[Positive Mood Context]
+The user logged 'Happy' or 'Okay' moods after discussing these topics:
+%POSITIVE_CONTEXT%
+
+[Negative Mood Context]
+The user logged 'Sad' or 'Angry' moods after discussing these topics:
+%NEGATIVE_CONTEXT%
+// --- END OF DATA ---
+
+// --- YOUR TASK ---
+// 1. Analyze the context. Is there a strong, recurring correlation between a specific topic and a negative mood?
+// 2. If NO strong pattern is found, stop and output ONLY the word 'NULL'.
+// 3. If a strong pattern IS found:
+//    a. Write a brief, gentle, and curious message (2-3 sentences) pointing it out. Use "I'm noticing a possible pattern..." or "It seems like...". DO NOT be an authority.
+//    b. Proactively create a new tool to help them *manage this specific trigger*. For example, an 'affirmation_card' or a 'checklist'.
+//    c. Embed the \`<tool_create ... />\` tag for this new tool at the end of your message.`;
+// --- End Cognitive Pattern Agent ---
 
 
 // The default "brain" for Aura.
@@ -151,7 +176,8 @@ class ChatManager {
             // --- Agent State Variables ---
             isHeightenedAwareness: false, // For the Crisis Agent
             lastUserMessageTimestamp: null, // For the Re-Engagement Agent
-            reEngagementTriggered: false // Prevents Re-Engagement loops
+            reEngagementTriggered: false, // Prevents Re-Engagement loops
+            cognitiveAgentTriggered: false // Prevents Cognitive Agent loops
         };
         this.state.activeChatId = newChatId;
         this.saveState();
@@ -183,7 +209,8 @@ class ChatManager {
     addMessageToActiveChat(role, content) {
         if (this.state.activeChatId) {
             const activeChat = this.state.chats[this.state.activeChatId];
-            activeChat.history.push({ role, content });
+            // Add a timestamp to all messages for our agents to use
+            activeChat.history.push({ role, content, timestamp: Date.now() });
             
             // Set the chat title from the first user message
             if (activeChat.history.length === 1 && role === 'user') {
@@ -234,6 +261,7 @@ class ChatManager {
             moodTracker.history = [];
         }
         
+        // We log the timestamp *with* the mood
         moodTracker.history.push({ mood: mood, timestamp: new Date().toISOString() });
         // Keep the history log from getting too long
         if(moodTracker.history.length > 10) {
@@ -284,7 +312,7 @@ class ChatManager {
     }
 
     // --- Data Gathering for Agents ---
-    // Gathers all relevant data for both Reflective and Re-Engagement agents
+    // Gathers all relevant data for Reflective, Re-Engagement, and Cognitive agents
     getAnalysisData() {
         if (!this.state.activeChatId) return null;
         const activeChat = this.state.chats[this.state.activeChatId];
@@ -317,16 +345,16 @@ class ChatManager {
         });
 
         return {
-            moodHistory,
-            completedTasks,
-            openTasks: openTasks, // We pass the full array now
+            moodHistory, // Full mood log [{mood, timestamp}, ...]
+            chatHistory: activeChat.history, // Full chat history [{role, content, timestamp}, ...]
+            completedTasks, // Array of strings
+            openTasks: openTasks, // Array of strings
             docContext: docContext.join('\n')
         };
     }
 
     // --- Crisis Intervention Agent Methods ---
     
-    // Gets the awareness state for the active chat
     isChatInHeightenedAwareness() {
         if (this.state.activeChatId && this.state.chats[this.state.activeChatId]) {
             return this.state.chats[this.state.activeChatId].isHeightenedAwareness;
@@ -334,7 +362,6 @@ class ChatManager {
         return false;
     }
     
-    // Sets the awareness state for the active chat
     setHeightenedAwareness(value) {
         if (this.state.activeChatId && this.state.chats[this.state.activeChatId]) {
             this.state.chats[this.state.activeChatId].isHeightenedAwareness = value;
@@ -342,19 +369,11 @@ class ChatManager {
         }
     }
 
-    /**
-     * This is the "watchdog" function. It pre-screens a user's message
-     * *if* the app is in heightened awareness.
-     * @param {string} messageText - The user's typed message.
-     * @returns {string} - 'CRISIS' or 'OK'
-     */
     async preScreenMessage(messageText) {
-        // If we're not in heightened awareness, don't do anything.
         if (!this.isChatInHeightenedAwareness()) {
             return 'OK';
         }
         
-        // If we *are* in heightened awareness, ask the LLM to classify the message
         console.log("Heightened Awareness active. Pre-screening message...");
         const prompt = DETECTION_PROMPT.replace('%MESSAGE%', messageText);
         
@@ -379,31 +398,22 @@ class ChatManager {
             }
         } catch (error) {
             console.error("Error in preScreenMessage, failing safe:", error);
-            return 'OK'; // If the check fails, we must fail-safe and not block the user.
+            return 'OK'; 
         }
     }
 
-    /**
-     * This is the agent's main action. It takes control from the normal
-     * chat flow, generates safety tools, and crafts a safe AI response.
-     * This is now *only* called after preScreenMessage returns 'CRISIS'.
-     */
     async triggerSafetyIntervention(crisisMessageText) {
-        // 1. Generate safety tools immediately.
         const breathToolPromise = createToolByType('breathing_exercise');
-        const safetyPlanPromise = createSafetyPlanTool(); // Our AI-powered safety plan
+        const safetyPlanPromise = createSafetyPlanTool(); 
         
         const [breathTool, safetyPlan] = await Promise.all([breathToolPromise, safetyPlanPromise]);
         
-        // 2. Add the tools to the state
         this.addOrUpdateToolInActiveChat('breathing_exercise', breathTool);
         this.addOrUpdateToolInActiveChat('checklist', safetyPlan);
 
-        // 3. Prepare the safe, constrained AI prompt
         const context = `Context: The user is in a distressed state. Your detection system has flagged their last message as a potential crisis. The message was: "${crisisMessageText}"`;
         const prompt = `${CRISIS_SYSTEM_PROMPT}\n\n${context}\n\nNow, write the message.`;
 
-        // 4. Make the constrained AI call
         const modelToUse = getModelName();
         const response = await fetch(`${OLLAMA_API_BASE_URL}/api/generate`, {
             method: 'POST',
@@ -415,26 +425,19 @@ class ChatManager {
         const data = await response.json();
         const safeMessage = data.response.trim();
 
-        // 5. Add to history and return the message for the UI
         this.addMessageToActiveChat('ai', safeMessage);
         return safeMessage;
     }
     
     // --- Re-Engagement Agent Methods ---
     
-    /**
-     * Checks if the user has "withdrawn" from the current chat.
-     * This is called when a chat is loaded.
-     */
     checkForWithdrawalPattern() {
         if (!this.state.activeChatId) return false;
         const activeChat = this.state.chats[this.state.activeChatId];
         
-        // 1. Check if agent has already run or if it's a new chat
         if (activeChat.reEngagementTriggered) return false;
         if (!activeChat.lastUserMessageTimestamp) return false;
         
-        // 2. Check time difference
         const now = Date.now();
         const diffDays = (now - activeChat.lastUserMessageTimestamp) / (1000 * 60 * 60 * 24);
         
@@ -442,18 +445,15 @@ class ChatManager {
             return false;
         }
         
-        // 3. If it's been long enough, check the context
         const data = this.getAnalysisData();
         if (!data) return false;
         
         const lastMood = data.moodHistory.length > 0 ? data.moodHistory[data.moodHistory.length - 1].mood : null;
         const openTaskCount = data.openTasks.length;
 
-        // Check for a "stuck" pattern
         const isStuck = (["Sad", "Angry"].includes(lastMood) || openTaskCount >= 5);
         
         if (isStuck) {
-            // We have a match. Return the reason to help the AI.
             const reason = lastMood ? `their last mood was "${lastMood}"` : `they have ${openTaskCount} open tasks`;
             return {
                 days: Math.round(diffDays),
@@ -464,23 +464,16 @@ class ChatManager {
         return false;
     }
 
-    /**
-     * This is the Re-Engagement Agent's main action. It crafts a
-     * gentle message and creates a new, simple tool.
-     */
     async triggerReEngagement(pattern) {
         if (!this.state.activeChatId) return;
         
-        // 1. Set the flag to prevent this from running again
         this.state.chats[this.state.activeChatId].reEngagementTriggered = true;
         this.saveState();
         
-        // 2. Prepare the AI prompt
         const prompt = RE_ENGAGEMENT_PROMPT
             .replace('%DAYS%', pattern.days)
             .replace('%REASON%', pattern.reason);
         
-        // 3. Call the LLM
         try {
             const modelToUse = getModelName();
             const response = await fetch(`${OLLAMA_API_BASE_URL}/api/generate`, {
@@ -493,33 +486,171 @@ class ChatManager {
             const data = await response.json();
             const rawResponse = data.response.trim();
 
-            // 4. Process the response for the tool it *must* create
             const toolTagRegex = /<tool_create\s+type="([^"]+)"(?:\s+theme="([^"]+)")?\s*\/>/g;
             let cleanedResponse = rawResponse;
-            const match = toolTagRegex.exec(rawResponse); // We only expect one
+            const match = toolTagRegex.exec(rawResponse); 
             
             if (match) {
                 const toolType = match[1];
                 const toolTheme = match[2] || '';
                 const toolData = await createToolByType(toolType, toolTheme);
                 if (toolData) {
-                    // Let's make sure it's a 1-item list, as requested
                     if (toolType === 'checklist' && toolData.items.length > 1) {
-                        toolData.items = [toolData.items[0]]; // Only keep the first item
+                        toolData.items = [toolData.items[0]]; 
                     }
                     this.addOrUpdateToolInActiveChat(toolType, toolData);
                 }
                 cleanedResponse = cleanedResponse.replace(match[0], '').trim();
             }
 
-            // 5. Add the AI's message to the chat
             this.addMessageToActiveChat('ai', cleanedResponse);
             return cleanedResponse;
             
         } catch (error) {
             console.error("Error during re-engagement:", error);
-            // If it fails, undo the trigger flag so it can try again next time
             this.state.chats[this.state.activeChatId].reEngagementTriggered = false;
+            this.saveState();
+            return null;
+        }
+    }
+    
+    // --- NEW: Cognitive Pattern Agent Methods ---
+    
+    /**
+     * Checks if a chat is "mature" enough for analysis.
+     */
+    checkForCognitivePattern() {
+        if (!this.state.activeChatId) return false;
+        const activeChat = this.state.chats[this.state.activeChatId];
+        
+        // 1. Has the agent already run for this chat?
+        if (activeChat.cognitiveAgentTriggered) return false;
+        
+        const data = this.getAnalysisData();
+        if (!data) return false;
+        
+        // 2. Do we have enough data to analyze?
+        if (data.chatHistory.length < 10 || data.moodHistory.length < 5) {
+            return false;
+        }
+        
+        // 3. Do we have a mix of moods to compare?
+        const negativeLogs = data.moodHistory.filter(log => ["Sad", "Angry"].includes(log.mood));
+        const positiveLogs = data.moodHistory.filter(log => ["Happy", "Okay"].includes(log.mood));
+
+        if (negativeLogs.length < 2 || positiveLogs.length < 2) {
+            return false;
+        }
+        
+        // If we pass all checks, we're good to run
+        return {
+            chatHistory: data.chatHistory,
+            negativeLogs,
+            positiveLogs
+        };
+    }
+    
+    /**
+     * Extracts chat messages from a 15-minute window before a mood log.
+     */
+    extractContext(allMessages, moodTimestamp) {
+        const contextWindowMs = 15 * 60 * 1000; // 15 minutes
+        const moodTime = new Date(moodTimestamp).getTime();
+        
+        const contextMessages = allMessages.filter(msg => {
+            return msg.timestamp >= (moodTime - contextWindowMs) && msg.timestamp < moodTime;
+        });
+        
+        // We only care about what the *user* was talking about
+        return contextMessages
+            .filter(msg => msg.role === 'user')
+            .map(msg => msg.content)
+            .join(' \n '); // Join user messages into a single block
+    }
+
+    /**
+     * This is the Cognitive Agent's main action. It builds the
+     * data report and asks the LLM to find patterns.
+     */
+    async triggerCognitiveAnalysis(patternData) {
+        if (!this.state.activeChatId) return;
+        
+        // 1. Set the flag to prevent this from running again
+        this.state.chats[this.state.activeChatId].cognitiveAgentTriggered = true;
+        this.saveState();
+
+        // 2. Build the context blocks for the prompt
+        let negativeContext = "";
+        patternData.negativeLogs.forEach(log => {
+            const context = this.extractContext(patternData.chatHistory, log.timestamp);
+            if (context) {
+                negativeContext += `- Topic before logging "${log.mood}": ${context}\n`;
+            }
+        });
+
+        let positiveContext = "";
+        patternData.positiveLogs.forEach(log => {
+            const context = this.extractContext(patternData.chatHistory, log.timestamp);
+            if (context) {
+                positiveContext += `- Topic before logging "${log.mood}": ${context}\n`;
+            }
+        });
+        
+        // If we don't have enough context, abort.
+        if (!negativeContext || !positiveContext) {
+             this.state.chats[this.state.activeChatId].cognitiveAgentTriggered = false; // Reset flag
+             this.saveState();
+             return null;
+        }
+
+        // 3. Build the final prompt
+        const prompt = PATTERN_FINDER_PROMPT
+            .replace('%POSITIVE_CONTEXT%', positiveContext)
+            .replace('%NEGATIVE_CONTEXT%', negativeContext);
+            
+        // 4. Call the LLM
+        try {
+            const modelToUse = getModelName();
+            const response = await fetch(`${OLLAMA_API_BASE_URL}/api/generate`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ model: modelToUse, prompt: prompt, stream: false })
+            });
+            if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+            
+            const data = await response.json();
+            const rawResponse = data.response.trim();
+            
+            // 5. Check if the AI found a pattern
+            if (rawResponse.toUpperCase().includes('NULL')) {
+                console.log("Cognitive agent ran, but found no strong pattern.");
+                return null; // No pattern found, all good.
+            }
+            
+            // 6. If we're here, a pattern *was* found. Process it.
+            console.log("Cognitive agent FOUND a pattern. Intervening.");
+            const toolTagRegex = /<tool_create\s+type="([^"]+)"(?:\s+theme="([^"]+)")?\s*\/>/g;
+            let cleanedResponse = rawResponse;
+            const match = toolTagRegex.exec(rawResponse); 
+            
+            if (match) {
+                const toolType = match[1];
+                const toolTheme = match[2] || '';
+                const toolData = await createToolByType(toolType, toolTheme);
+                if (toolData) {
+                    this.addOrUpdateToolInActiveChat(toolType, toolData);
+                }
+                cleanedResponse = cleanedResponse.replace(match[0], '').trim();
+            }
+
+            // 7. Add the AI's insightful message to the chat
+            this.addMessageToActiveChat('ai', cleanedResponse);
+            return cleanedResponse;
+
+        } catch (error) {
+            console.error("Error during cognitive analysis:", error);
+            // If it fails, undo the trigger flag so it can try again next time
+            this.state.chats[this.state.activeChatId].cognitiveAgentTriggered = false;
             this.saveState();
             return null;
         }
@@ -535,7 +666,7 @@ class ChatManager {
  * A generic function to ask the AI to generate JSON for a tool.
  * This is the foundation for all our AI-powered tools.
  * @param {string} prompt - The specific prompt for the LLM.
- * @returns {object | null} - The parsed JSON object or null on error.
+ *@returns {object | null} - The parsed JSON object or null on error.
  */
 async function generateToolJson(prompt) {
     const modelToUse = getModelName();
@@ -782,6 +913,7 @@ async function getOllamaResponse(prompt, toolFollowUp = null, documentText = nul
 // --- Utility Functions ---
 
 function historyToString(history) {
+    // We now have timestamps, but the AI prompt doesn't need them
     return history.map(m => {
         return `${m.role === 'user' ? 'User' : 'Assistant'}: ${m.content}`;
     }).join('\n');

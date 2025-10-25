@@ -114,11 +114,8 @@ function renderToolsInModal(tools) {
     renderOrder.forEach(toolName => {
         if (tools[toolName] && tools[toolName].length > 0) {
             tools[toolName].forEach(toolInstance => {
-                if (hasTools) {
-                    const divider = document.createElement('hr');
-                    divider.className = 'my-6 border-gray-700';
-                    toolsModalContent.appendChild(divider);
-                }
+                // CHANGE: Removed the <hr> divider.
+                // We don't want a horizontal line between our grid items.
                 hasTools = true;
                 
                 switch (toolName) {
@@ -156,6 +153,8 @@ function addMessage(sender, content) {
         p.textContent = content;
         chatBubble.appendChild(p);
     } else {
+        // We trust the AI, but sanitizing is still a good practice
+        // to prevent accidental HTML injection issues.
         chatBubble.innerHTML = DOMPurify.sanitize(marked.parse(String(content)));
     }
     
@@ -198,6 +197,8 @@ function removeToolStatusMessages() {
 
 function displayChat(history) {
     clearChatMessages();
+    // We add timestamps to history in chat-logic.js, but
+    // we don't need to display them here.
     history.forEach(message => {
         addMessage(message.role, message.content);
     });
