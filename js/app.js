@@ -64,6 +64,8 @@ document.addEventListener('DOMContentLoaded', () => {
             const selectedVoice = voices.find(voice => voice.name === selectedVoiceName);
             if (selectedVoice) { utterance.voice = selectedVoice; }
         }
+        // Cancel any previous speech before starting new
+        synth.cancel();
         synth.speak(utterance);
     }
     function setupSpeechRecognition() {
@@ -82,23 +84,23 @@ document.addEventListener('DOMContentLoaded', () => {
     function readFileAsText(file) {
         return new Promise((resolve, reject) => {
             if (file.type.startsWith('text/') || file.name.endsWith('.md')) {
-                console.log("Text/MD file detected.");
+                console.log("Text/MD file detected. Reading as plain text.");
                 const reader = new FileReader();
                 reader.onload = () => resolve(reader.result);
-                reader.onerror = () => reject(reader.error);
+                reader.onerror = (err) => { console.error("Error reading file:", err); reject(err); };
                 reader.readAsText(file);
             } else {
-                console.warn("Unsupported file type.");
-                addMessage('ai', "Sorry, unsupported file type (.txt, .md only).");
+                console.warn("Unsupported file type. Supports .txt and .md only.");
+                addMessage('ai', "Sorry, that file type is not supported. Please upload a plain text file (.txt, .md).");
                 resolve(null);
             }
         });
     }
     function showFileAttachment(file) {
         fileAttachmentIndicator.innerHTML = `
-            <svg class="h-5 w-5 mr-2 text-gray-400" ...></svg>
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-2 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" /></svg>
             <span>${file.name}</span>
-            <button id="removeAttachedFile" class="ml-3 ...">&times;</button>
+            <button id="removeAttachedFile" class="ml-3 text-gray-500 hover:text-white">&times;</button>
         `;
         fileAttachmentIndicator.classList.remove('hidden');
         document.getElementById('removeAttachedFile').addEventListener('click', () => {
@@ -120,7 +122,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 userInput.value = '';
                 const safeMessage = await chatManager.triggerSafetyIntervention(message);
                 addMessage('ai', safeMessage);
-                processContentLinks();
+                processContentLinks(); // Process links potentially added by safety agent
                 refreshUI(); openToolsModal();
                 return;
             }
@@ -141,7 +143,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 const summaryMessage = await runReflectiveReview();
                 hideTypingIndicator();
                 addMessage('ai', summaryMessage);
-                processContentLinks();
+                processContentLinks(); // Process links potentially added by review agent
             } catch (e) {
                 console.error("Error during reflective review:", e);
                 hideTypingIndicator();
@@ -155,10 +157,9 @@ document.addEventListener('DOMContentLoaded', () => {
         let documentText = null;
         if (attachedFile) {
             try {
-                documentText = await readFileAsText(attachedFile); // Use text-only reader
+                documentText = await readFileAsText(attachedFile);
                 if (documentText === null) { attachedFile = null; fileInput.value = ''; fileAttachmentIndicator.classList.add('hidden'); return; }
             } catch (error) {
-                console.error("Error processing file:", error);
                 addMessage('ai', "Error reading attached file.");
                 attachedFile = null; fileInput.value = ''; fileAttachmentIndicator.classList.add('hidden');
                 return;
@@ -186,14 +187,19 @@ document.addEventListener('DOMContentLoaded', () => {
         for (const match of matchedTags) {
             const toolType = match[1]; const toolTheme = match[2] || '';
             const toolData = await createToolByType(toolType, toolTheme);
-            if (toolData) chatManager.addOrUpdateToolInActiveChat(toolType, toolData);
+            if (toolData) {
+                chatManager.addOrUpdateToolInActiveChat(toolType, toolData);
+            } else {
+                 console.error(`Failed to generate tool data for type: ${toolType}`);
+                 // Optionally inform the user: addMessage('ai', `Sorry, I had trouble creating the ${toolType} tool.`);
+            }
             cleanedResponse = cleanedResponse.replace(match[0], '').trim();
         }
         removeToolStatusMessages();
 
         addMessage('ai', cleanedResponse);
-        processContentLinks();
-        chatManager.addMessageToActiveChat('ai', cleanedResponse);
+        processContentLinks(); // Convert link tags after adding message
+        chatManager.addMessageToActiveChat('ai', rawResponse); // Save the ORIGINAL response (with tags) to history for potential context
 
         if (lastInputMode === 'voice') { speakResponse(cleanedResponse); }
         refreshUI();
@@ -235,7 +241,7 @@ document.addEventListener('DOMContentLoaded', () => {
                  hideTypingIndicator();
                  if (message) { addMessage('ai', message); processContentLinks(); refreshUI(); }
             }
-        } catch (e) { console.error("Error during re-engagement check:", e); }
+        } catch (e) { console.error("Error during re-engagement check:", e); hideTypingIndicator(); } // Ensure indicator hides on error
         // Cognitive Pattern Agent Check
         try {
             const patternData = chatManager.checkForCognitivePattern();
@@ -246,7 +252,7 @@ document.addEventListener('DOMContentLoaded', () => {
                  hideTypingIndicator();
                  if (message) { addMessage('ai', message); processContentLinks(); refreshUI(); }
             }
-        } catch (e) { console.error("Error during cognitive analysis:", e); }
+        } catch (e) { console.error("Error during cognitive analysis:", e); hideTypingIndicator(); } // Ensure indicator hides on error
     }
 
     // Fills model dropdown
@@ -272,9 +278,11 @@ document.addEventListener('DOMContentLoaded', () => {
         const chatTab = event.target.closest('[data-chat-id]');
         if (deleteButton) {
             event.stopPropagation();
-            if (confirm('Delete chat?')) { chatManager.deleteChat(deleteButton.getAttribute('data-chat-id')); refreshUI(); checkAndRunAgents(); }
+            if (confirm('Are you sure you want to delete this chat?')) { chatManager.deleteChat(deleteButton.getAttribute('data-chat-id')); refreshUI(); checkAndRunAgents(); }
         } else if (chatTab) {
-            chatManager.setActiveChat(chatTab.getAttribute('data-chat-id')); refreshUI(); checkAndRunAgents();
+            if (chatTab.dataset.chatId !== chatManager.getActiveChatId()) { // Only run if switching chat
+                chatManager.setActiveChat(chatTab.dataset.chatId); refreshUI(); checkAndRunAgents();
+            }
         }
     });
     toolsButton.addEventListener('click', () => { renderToolsInModal(chatManager.getActiveChatTools()); openToolsModal(); });
@@ -288,7 +296,7 @@ document.addEventListener('DOMContentLoaded', () => {
              const toolId = target.dataset.toolId;
              if (target.checked && toolId) {
                 const itemText = chatManager.completeAndRemoveChecklistItem(toolId, itemIndex);
-                renderToolsInModal(chatManager.getActiveChatTools());
+                renderToolsInModal(chatManager.getActiveChatTools()); // Re-render modal to show change
                 if (itemText) { closeToolsModal(); await triggerAIFollowUp({ type: 'checklist_item_completed', text: itemText }); }
              }
         }
@@ -303,13 +311,30 @@ document.addEventListener('DOMContentLoaded', () => {
             case 'log_mood': {
                 const mood = target.dataset.mood;
                 chatManager.logMoodToTracker(mood);
+                // Re-render immediately to show updated history *before* closing
                 renderToolsInModal(chatManager.getActiveChatTools());
                 closeToolsModal();
                 await triggerAIFollowUp({ type: 'mood_logged', mood: mood });
                 break;
             }
             case 'commit_affirmation': { target.textContent = 'Committed!'; target.disabled = true; break; }
-            case 'start_breathing': { /* ... unchanged breathing animation logic ... */ break; }
+            case 'start_breathing': {
+                const container = target.closest('.breathing-exercise-container'); if (!container) return;
+                const pacer = container.querySelector('.breathing-pacer'); const status = container.querySelector('.breathing-status');
+                target.disabled = true; if (breathInterval) clearInterval(breathInterval);
+                const cycle = { inhale: parseInt(target.dataset.cycleInhale), hold: parseInt(target.dataset.cycleHold), exhale: parseInt(target.dataset.cycleExhale) };
+                const totalCycleTime = (cycle.inhale + cycle.hold + cycle.exhale) * 1000; let loops = 3;
+                const doBreathCycle = () => {
+                    if (loops <= 0) { clearInterval(breathInterval); status.textContent = 'Complete!'; target.disabled = false; closeToolsModal(); triggerAIFollowUp({ type: 'breathing_complete' }); return; }
+                    status.textContent = 'Breathe In...'; pacer.className = 'breathing-pacer inhale';
+                    setTimeout(() => {
+                        status.textContent = 'Hold...'; pacer.className = 'breathing-pacer hold';
+                        setTimeout(() => { status.textContent = 'Breathe Out...'; pacer.className = 'breathing-pacer exhale'; loops--; }, cycle.hold * 1000);
+                    }, cycle.inhale * 1000);
+                };
+                doBreathCycle(); breathInterval = setInterval(doBreathCycle, totalCycleTime);
+                break;
+            }
             case 'save_thought_record': {
                 const toolId = target.dataset.toolId;
                 const card = target.closest('.thought-record-card');
@@ -324,7 +349,7 @@ document.addEventListener('DOMContentLoaded', () => {
     };
     toolsModalContent.addEventListener('click', toolInteractionListener);
 
-    // Content Link Listener
+    // Content Link Listener (Uses event delegation on body)
     document.body.addEventListener('click', async (event) => {
         const target = event.target.closest('a.content-link');
         if (target && target.dataset.topic) {
@@ -337,7 +362,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 showContentModal(title, markdownContent); // From ui.js
             } else {
                 console.warn(`Content not found: ${topicSlug}`);
-                addMessage('ai', `Sorry, info on "${topicSlug}" not found.`);
+                addMessage('ai', `Sorry, I couldn't find information on "${topicSlug}".`);
             }
         }
     });
@@ -356,16 +381,16 @@ document.addEventListener('DOMContentLoaded', () => {
         closeSettingsModal();
     });
     resetSettingsButton.addEventListener('click', () => {
-        if (confirm('Reset prompt to default?')) {
+        if (confirm('Are you sure you want to reset the prompt to its default state?')) {
             systemPromptTextarea.value = getDefaultSystemPrompt();
-            localStorage.removeItem(PROMPT_STORAGE_KEY);
+            localStorage.removeItem(PROMPT_STORAGE_KEY); // Also remove from storage
         }
     });
 
     // Final Initialization
     if (chatMessages && headerTitle) { chatMessages.addEventListener('scroll', () => { headerTitle.classList.toggle('is-scrolled', chatMessages.scrollTop > 50); }); }
     setupSpeechRecognition();
-    populateVoiceDropdown();
+    populateVoiceDropdown(); // Populate voices on initial load
     refreshUI();
-    checkAndRunAgents();
+    checkAndRunAgents(); // Run agents on initial load
 });

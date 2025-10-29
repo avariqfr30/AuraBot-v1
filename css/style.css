@@ -116,7 +116,7 @@ body, #chatSidebar {
 #userInput, .flex-1 > header h1,
 button, #fileUploadButton,
 #chatList > div.bg-gray-800,
-.affirmation-card, .checklist-card, .breathing-exercise-container, .mood-tracker-card,
+.affirmation-card, .checklist-card, .breathing-exercise-container, .mood-tracker-card, .thought-record-card,
 #systemPromptTextarea, #voiceSelectDropdown, #modelSelectDropdown {
     position: relative;
     z-index: 1;
@@ -139,7 +139,7 @@ button, #fileUploadButton,
 #userInput::before, .flex-1 > header h1::before,
 button::before, #fileUploadButton::before,
 #chatList > div.bg-gray-800::before,
-.affirmation-card::before, .checklist-card::before, .breathing-exercise-container::before, .mood-tracker-card::before,
+.affirmation-card::before, .checklist-card::before, .breathing-exercise-container::before, .mood-tracker-card::before, .thought-record-card::before,
 #systemPromptTextarea::before, #voiceSelectDropdown::before, #modelSelectDropdown::before {
     content: "";
     position: absolute;
@@ -160,7 +160,7 @@ button::before, #fileUploadButton::before,
 #userInput::after, .flex-1 > header h1::after,
 button::after, #fileUploadButton::after,
 #chatList > div.bg-gray-800::after,
-.affirmation-card::after, .checklist-card::after, .breathing-exercise-container::after, .mood-tracker-card::after,
+.affirmation-card::after, .checklist-card::after, .breathing-exercise-container::after, .mood-tracker-card::after, .thought-record-card::after,
 #systemPromptTextarea::after, #voiceSelectDropdown::after, #modelSelectDropdown::after {
     content: "";
     position: absolute;
@@ -290,7 +290,7 @@ button::after, #fileUploadButton::after,
 #userInput:hover::before, .flex-1 > header h1:hover::before,
 button:hover::before, #fileUploadButton:hover::before,
 #chatList > div.bg-gray-800:hover::before,
-.affirmation-card:hover::before, .checklist-card:hover::before, .breathing-exercise-container:hover::before, .mood-tracker-card:hover::before,
+.affirmation-card:hover::before, .checklist-card:hover::before, .breathing-exercise-container:hover::before, .mood-tracker-card:hover::before, .thought-record-card:hover::before,
 #systemPromptTextarea:focus::before, #voiceSelectDropdown:focus::before, #modelSelectDropdown:focus::before {
     transform: scale(1.02) translateY(-4px);
     opacity: 1;
@@ -318,7 +318,7 @@ button:hover::before, #fileUploadButton:hover::before,
 #userInput > *, .flex-1 > header h1 > *,
 button > *, #fileUploadButton > *, 
 #chatList > div.bg-gray-800 > *,
-.affirmation-card > *, .checklist-card > *, .breathing-exercise-container > *, .mood-tracker-card > *,
+.affirmation-card > *, .checklist-card > *, .breathing-exercise-container > *, .mood-tracker-card > *, .thought-record-card > *,
 #systemPromptTextarea > *, #voiceSelectDropdown > *, #modelSelectDropdown > * {
     position: relative; z-index: 2;
 }
@@ -413,7 +413,7 @@ button:active, #fileUploadButton:active,
 
 /* Border Radii */
 #userInput, #micButton, #settingsButton, #toolsButton, #sendButton, #cancelSettingsButton, #resetSettingsButton, #closeToolsButton, .tool-button, .mood-button, #newChatButton, #fileUploadButton { border-radius: 9999px !important; }
-.flex-1 > header h1, #saveSettingsButton, #systemPromptTextarea, #voiceSelectDropdown, #modelSelectDropdown, .affirmation-card, .checklist-card, .breathing-exercise-container, .mood-tracker-card { border-radius: 0.75rem !important; }
+.flex-1 > header h1, #saveSettingsButton, #systemPromptTextarea, #voiceSelectDropdown, #modelSelectDropdown, .affirmation-card, .checklist-card, .breathing-exercise-container, .mood-tracker-card, .thought-record-card { border-radius: 0.75rem !important; }
 #settingsModal .relative, #toolsModal .relative, #chatList > div.bg-gray-800 { border-radius: 1.5rem; }
 #chatList > div.bg-gray-800 { margin: 0.25rem 0; } 
 
@@ -438,10 +438,106 @@ button:active, #fileUploadButton:active,
 #chatList > div:hover { background-color: rgba(255, 255, 255, 0.1) !important; border-radius: 0.75rem; }
 
 /* ================================================================= */
+/* --- Floating Scrollbar for All Elements --- */
+/* ================================================================= */
+
+/* Firefox */
+#chatList, #chatMessages, #toolsModal, #settingsModal, #contentModal, .checklist-scroll-container, textarea, pre {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(255, 255, 255, 0.3) transparent;
+}
+
+/* WebKit (Chrome, Safari, Edge) */
+#chatList::-webkit-scrollbar,
+#chatMessages::-webkit-scrollbar,
+#toolsModal::-webkit-scrollbar,
+#settingsModal::-webkit-scrollbar,
+#contentModal::-webkit-scrollbar,
+.checklist-scroll-container::-webkit-scrollbar,
+textarea::-webkit-scrollbar,
+pre::-webkit-scrollbar {
+    width: 8px;
+    height: 8px; /* Added for horizontal scrollbars like in <pre> */
+}
+
+#chatList::-webkit-scrollbar-track,
+#chatMessages::-webkit-scrollbar-track,
+#toolsModal::-webkit-scrollbar-track,
+#settingsModal::-webkit-scrollbar-track,
+#contentModal::-webkit-scrollbar-track,
+.checklist-scroll-container::-webkit-scrollbar-track,
+textarea::-webkit-scrollbar-track,
+pre::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+#chatList::-webkit-scrollbar-thumb,
+#chatMessages::-webkit-scrollbar-thumb,
+#toolsModal::-webkit-scrollbar-thumb,
+#settingsModal::-webkit-scrollbar-thumb,
+#contentModal::-webkit-scrollbar-thumb,
+.checklist-scroll-container::-webkit-scrollbar-thumb,
+textarea::-webkit-scrollbar-thumb,
+pre::-webkit-scrollbar-thumb {
+    background-color: rgba(255, 255, 255, 0.3);
+    border-radius: 10px;
+    border: 2px solid transparent;
+    background-clip: padding-box;
+}
+
+#chatList::-webkit-scrollbar-thumb:hover,
+#chatMessages::-webkit-scrollbar-thumb:hover,
+#toolsModal::-webkit-scrollbar-thumb:hover,
+#settingsModal::-webkit-scrollbar-thumb:hover,
+#contentModal::-webkit-scrollbar-thumb:hover,
+.checklist-scroll-container::-webkit-scrollbar-thumb:hover,
+textarea::-webkit-scrollbar-thumb:hover,
+pre::-webkit-scrollbar-thumb:hover {
+    background-color: rgba(255, 255, 255, 0.5);
+}
+
+/* --- Light Theme Scrollbar --- */
+
+/* Firefox */
+[data-theme="light"] #chatList,
+[data-theme="light"] #chatMessages,
+[data-theme="light"] #toolsModal,
+[data-theme="light"] #settingsModal,
+[data-theme="light"] #contentModal,
+[data-theme="light"] .checklist-scroll-container,
+[data-theme="light"] textarea,
+[data-theme="light"] pre {
+    scrollbar-color: rgba(0, 0, 0, 0.3) transparent;
+}
+
+/* WebKit */
+[data-theme="light"] #chatList::-webkit-scrollbar-thumb,
+[data-theme="light"] #chatMessages::-webkit-scrollbar-thumb,
+[data-theme="light"] #toolsModal::-webkit-scrollbar-thumb,
+[data-theme="light"] #settingsModal::-webkit-scrollbar-thumb,
+[data-theme="light"] #contentModal::-webkit-scrollbar-thumb,
+[data-theme="light"] .checklist-scroll-container::-webkit-scrollbar-thumb,
+[data-theme="light"] textarea::-webkit-scrollbar-thumb,
+[data-theme="light"] pre::-webkit-scrollbar-thumb {
+    background-color: rgba(0, 0, 0, 0.3);
+}
+
+[data-theme="light"] #chatList::-webkit-scrollbar-thumb:hover,
+[data-theme="light"] #chatMessages::-webkit-scrollbar-thumb:hover,
+[data-theme="light"] #toolsModal::-webkit-scrollbar-thumb:hover,
+[data-theme="light"] #settingsModal::-webkit-scrollbar-thumb:hover,
+[data-theme="light"] #contentModal::-webkit-scrollbar-thumb:hover,
+[data-theme="light"] .checklist-scroll-container::-webkit-scrollbar-thumb:hover,
+[data-theme="light"] textarea::-webkit-scrollbar-thumb:hover,
+[data-theme="light"] pre::-webkit-scrollbar-thumb:hover {
+    background-color: rgba(0, 0, 0, 0.5);
+}
+
+/* ================================================================= */
 /* --- Tool Specific Styles (Modal & Chat) --- */
 /* ================================================================= */
 
-.affirmation-card, .checklist-card, .mood-tracker-card { padding: 1.25rem; }
+.affirmation-card, .checklist-card, .mood-tracker-card, .thought-record-card { padding: 1.25rem; }
 .breathing-exercise-container { text-align: center; padding: 1.25rem; }
 .breathing-pacer { width: 100px; height: 100px; background: radial-gradient(circle, rgba(99,102,241,1) 0%, rgba(219,39,119,1) 100%); border-radius: 50%; margin: 1.5rem auto; transform: scale(0.5); transition: transform 4s ease-in-out, background 4s ease-in-out; }
 .breathing-pacer.inhale, .breathing-pacer.hold { transform: scale(1.2); }
@@ -463,6 +559,21 @@ button:active, #fileUploadButton:active,
 
 .checklist-columns { columns: 2 220px; column-gap: 2rem; }
 .checklist-columns li { break-inside: avoid-column; page-break-inside: avoid; }
+
+/* --- NEW: FIX FOR THOUGHT RECORD LAYOUT --- */
+.thought-record-columns {
+    columns: 2 240px; /* Will create 2+ columns, each at least 240px wide */
+    column-gap: 2rem;
+}
+
+/* This assumes your form fields are wrapped in <div>s, e.g., <div><label>...</label><input/textarea>...</div> */
+.thought-record-columns > div {
+    break-inside: avoid-column; /* Prevents a form field from breaking in half */
+    page-break-inside: avoid;
+    padding-bottom: 1rem; /* Adds spacing below each form group */
+}
+/* --- END FIX --- */
+
 
 /* --- NEW: TOOLS MODAL GRID LAYOUT --- */
 
@@ -489,6 +600,13 @@ button:active, #fileUploadButton:active,
     flex: 1 1 340px; /* Each card will try to be 340px */
     min-width: 320px; /* But won't shrink smaller than 320px */
 }
+
+/* Give Thought Record more horizontal space */
+#toolsModalContent > .thought-record-card {
+    flex: 1 1 700px; /* Allow this specific card to be much wider */
+    min-width: 320px;
+    max-width: 100%; /* Don't overflow the modal */
+}
 /* --- END NEW --- */
 
 
@@ -508,7 +626,7 @@ button:active, #fileUploadButton:active,
 [data-theme="light"] #userInput, [data-theme="light"] .flex-1 > header h1,
 [data-theme="light"] button, [data-theme="light"] #fileUploadButton, 
 [data-theme="light"] #chatList > div.bg-gray-800,
-[data-theme="light"] .affirmation-card, [data-theme="light"] .checklist-card, [data-theme="light"] .breathing-exercise-container, [data-theme="light"] .mood-tracker-card,
+[data-theme="light"] .affirmation-card, [data-theme="light"] .checklist-card, [data-theme="light"] .breathing-exercise-container, [data-theme="light"] .mood-tracker-card, [data-theme="light"] .thought-record-card,
 [data-theme="light"] #systemPromptTextarea, [data-theme="light"] #voiceSelectDropdown, [data-theme="light"] #modelSelectDropdown {
     /* Match dark mode: semi-opaque frosted base so both themes look consistent */
     background-color: var(--glass-base-light) !important;
