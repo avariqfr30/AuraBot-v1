@@ -4,8 +4,6 @@
 // logic for our proactive agents.
 
 // --- App-wide Constants & Configuration ---
-
-// Keys for storing user settings in the browser's localStorage.
 const PROMPT_STORAGE_KEY = 'aura_system_prompt';
 const VOICE_STORAGE_KEY = 'aura_voice_name';
 const MODEL_STORAGE_KEY = 'aura_model_name';
@@ -44,11 +42,10 @@ Your goal is to be gentle, supportive, and non-judgmental.
 // 5. Keep the message warm and brief.`;
 // --- End Re-Engagement Agent ---
 
-// --- NEW: Cognitive Pattern Agent Prompt ---
-// This is the prompt for the CBT agent. It's a heavy-lifting
-// analysis prompt to find hidden patterns.
+// --- Cognitive Pattern Agent Prompt ---
+// This prompt now asks the LLM to identify distortions and suggest content links.
 const PATTERN_FINDER_PROMPT = `You are an expert AI therapist specializing in Cognitive Behavioral Therapy (CBT).
-Your goal is to analyze the user's chat and mood data to find correlations between topics and emotions.
+Your goal is to analyze the user's chat and mood data to find correlations between topics and emotions, and potentially identify cognitive distortions.
 
 // --- DATA ANALYSIS ---
 The user has provided the following data from their private journal:
@@ -62,15 +59,20 @@ The user logged 'Sad' or 'Angry' moods after discussing these topics:
 %NEGATIVE_CONTEXT%
 // --- END OF DATA ---
 
+// --- AVAILABLE CONCEPTS/DISTORTIONS (for linking) ---
+// You can suggest linking to these topics if relevant using <link_content topic="topic-name-slug"/>
+// Examples: all-or-nothing-thinking, catastrophizing, overgeneralization, mental-filter, discounting-the-positive, mind-reading, fortune-telling, emotional-reasoning, labeling, personalization, should-statements, thought-record-info, grounding-techniques, mindfulness-deep-breathing, behavioral-activation
+
 // --- YOUR TASK ---
 // 1. Analyze the context. Is there a strong, recurring correlation between a specific topic and a negative mood?
-// 2. If NO strong pattern is found, stop and output ONLY the word 'NULL'.
-// 3. If a strong pattern IS found:
-//    a. Write a brief, gentle, and curious message (2-3 sentences) pointing it out. Use "I'm noticing a possible pattern..." or "It seems like...". DO NOT be an authority.
-//    b. Proactively create a new tool to help them *manage this specific trigger*. For example, an 'affirmation_card' or a 'checklist'.
-//    c. Embed the \`<tool_create ... />\` tag for this new tool at the end of your message.`;
+// 2. If YES, *also* try to identify a potential Cognitive Distortion pattern in the user's language during those negative contexts.
+// 3. If NO strong pattern/distortion is found, stop and output ONLY the word 'NULL'.
+// 4. If a pattern IS found:
+//    a. Write a brief, gentle, and curious message (2-3 sentences) pointing out the topic/mood correlation. Use "I'm noticing a possible pattern..." or "It seems like...". DO NOT be an authority.
+//    b. If you identified a likely distortion, *gently* mention it by name and embed a content link tag for it. Example: "...This might sometimes be related to a pattern called 'Catastrophizing'. <link_content topic="catastrophizing"/>"
+//    c. Proactively create a *new* tool to help them *manage this specific trigger or thought pattern*. A 'thought_record' is often useful here, or an 'affirmation_card' related to the trigger topic.
+//    d. Embed the \`<tool_create type="tool_type" theme="Relevant Theme"/>\` tag for this new tool at the end of your message.`;
 // --- End Cognitive Pattern Agent ---
-
 
 // The default "brain" for Aura.
 const DEFAULT_SYSTEM_PROMPT = `You are a friendly and helpful assistant named Aura. You are an expert in mental health and project planning. Your goal is to be supportive, empathetic, and proactive.
@@ -108,13 +110,19 @@ const DEFAULT_SYSTEM_PROMPT = `You are a friendly and helpful assistant named Au
     -   **Theme:** The \`theme\` attribute should be the topic of the checklist.
     -   **Example Tag:** \`<tool_create type="checklist" theme="plan the user's upcoming beach trip" />\`
 
-3.  **Affirmation Card**
+3.  **Thought Record**
+    -   **Type:** \`thought_record\`
+    -   **Trigger:** Use when a user expresses a strong negative automatic thought, wants to analyze a feeling, or after identifying a cognitive distortion.
+    -   **Theme:** (Optional) The situation or automatic thought to pre-fill.
+    -   **Example Tag:** \`<tool_create type="thought_record" theme="Feeling like I failed the presentation" />\`
+
+4.  **Affirmation Card**
     -   **Type:** \`affirmation_card\`
     -   **Trigger:** Use this when a user expresses self-doubt, needs motivation, or feels discouraged.
     -   **Theme:** The \`theme\` attribute should be the reason for the affirmation.
     -   **Example Tag:** \`<tool_create type="affirmation_card" theme="building confidence for a new job" />\`
 
-4.  **Breathing Exercise**
+5.  **Breathing Exercise**
     -   **Type:** \`breathing_exercise\`
     -   **Trigger:** Use this when a user expresses feelings of high stress, anxiety, or panic.
     -   **Example Tag:** \`<tool_create type="breathing_exercise" />\`
@@ -125,13 +133,46 @@ const DEFAULT_SYSTEM_PROMPT = `You are a friendly and helpful assistant named Au
 - Your tone is warm, encouraging, and relaxed. Use contractions (you're, it's, let's).
 - Be supportive and proactive. Confidently create tools you think will help and then inform the user what you've done.`;
 const DEFAULT_MODEL = 'gpt-oss:120b-cloud';
-const DEFAULT_EMBEDDING_MODEL = 'qwen3-embedding:latest';
+const DEFAULT_EMBEDDING_MODEL = 'mxbai-embed-large:latest';
 const STATE_STORAGE_KEY = 'multi_chat_app_state';
 const OLLAMA_API_BASE_URL = 'http://localhost:11434';
 
+
+// --- Psychoeducation Content Store ---
+// Embedded content strings. Ideally, load from local .md files if possible.
+const localContentStore = {
+    "all-or-nothing-thinking": `## All-or-Nothing Thinking (or Black-and-White Thinking)\n\nSeeing things in absolute, black-and-white categories. If a situation falls short of perfect, you see it as a total failure.\n\n**Example:** "If I don't get an A on this test, I'm a complete idiot."`,
+    "catastrophizing": `## Catastrophizing (or Magnification)\n\nExpecting disaster to strike, no matter what. You hear about a problem and automatically think of the worst-case scenario.\n\n**Example:** "If I make a mistake in the presentation, I'll get fired."`,
+    "overgeneralization": `## Overgeneralization\n\nYou see a single negative event as a never-ending pattern of defeat by using words such as "always" or "never" when you think about it.\n\n**Example:** After one rejection, thinking "I'll *never* find a partner."`,
+    "mental-filter": `## Mental Filter\n\nYou pick out a single negative detail and dwell on it exclusively, so that your vision of all reality becomes darkened, like the drop of ink that colors a beaker of water.\n\n**Example:** Focusing on one critical comment after a successful performance and ignoring all the praise.`,
+    "discounting-the-positive": `## Discounting the Positive\n\nRejecting positive experiences by insisting they "don't count" for some reason. This maintains a negative belief that is contradicted by everyday experiences.\n\n**Example:** After receiving praise, thinking "They're just being nice, it doesn't really mean anything."`,
+    "mind-reading": `## Mind Reading\n\nAssuming you know what other people are thinking, often negatively, without sufficient evidence.\n\n**Example:** "He thinks I'm incompetent because I asked a question."`,
+    "fortune-telling": `## Fortune Telling\n\nPredicting a negative outcome without realistically considering other possibilities.\n\n**Example:** "I'm going to fail this exam, I just know it."`,
+    "emotional-reasoning": `## Emotional Reasoning\n\nAssuming that because you *feel* a certain way, it must be true. Letting your feelings guide your interpretation of reality.\n\n**Example:** "I feel inadequate, so I must be worthless."`,
+    "labeling": `## Labeling / Mislabeling\n\nAssigning fixed, global labels to yourself or others based on behavior in specific situations, often in an extreme or emotionally charged way. It's an extreme form of overgeneralization.\n\n**Example:** Instead of saying "I made a mistake," you say "I'm a loser."`,
+    "personalization": `## Personalization\n\nBelieving that you are the cause of some negative external event which, in fact, you were not primarily responsible for. Also involves taking things personally when they are not connected to you.\n\n**Example:** "My colleague seems upset; it must be something I did."`,
+    "should-statements": `## "Should" Statements (or Must, Ought)\n\nHaving a rigid set of rules about how you and others *should* behave. Getting angry or frustrated when these rules are broken. When directed inward, they lead to guilt.\n\n**Example:** "I *should* always be productive." or "He *must* arrive on time."`,
+    "thought-record-info": `## Using a Thought Record\n\nA Thought Record helps you identify and challenge unhelpful automatic thoughts. By examining the evidence, you can often find a more balanced perspective.\n\n**Steps:**\n1.  **Situation:** Describe the event objectively.\n2.  **Thoughts:** Write down the automatic thoughts that popped into your head.\n3.  **Emotions:** Note the feelings and their intensity (0-100).\n4.  **Cognitive Distortions:** (Optional) Identify any thinking traps involved.\n5.  **Evidence For/Against:** Act like a detective – what facts support or contradict your thought?\n6.  **Balanced Thought:** Create a more realistic thought based on the evidence.\n7.  **Outcome:** Re-rate your emotions (0-100).`,
+    "grounding-techniques": `## Grounding Techniques (5-4-3-2-1 Method)\n\nGrounding helps pull you out of intense anxiety, flashbacks, or overwhelming emotions by reconnecting you to the present moment using your senses.\n\n**Try the 5-4-3-2-1 Method:**\n\n* **5 - SEE:** Look around and name five things you can see right now. (e.g., "I see my keyboard, a blue cup, a window, a crack in the wall, my hand.")\n* **4 - FEEL:** Notice four things you can physically feel. (e.g., "I feel the chair under me, my feet on the floor, the smooth surface of my desk, the air on my skin.")\n* **3 - HEAR:** Listen and identify three sounds. (e.g., "I hear the computer fan, distant traffic, my own breathing.")\n* **2 - SMELL:** Name two things you can smell. If you can't smell anything, name two smells you like. (e.g., "I smell coffee, maybe dust.")\n* **1 - TASTE:** Name one thing you can taste. If nothing, name a taste you enjoy. (e.g., "I can taste the toothpaste from this morning.")\n\nTake a slow breath after each step. This helps anchor you to the 'here and now'.`,
+    "mindfulness-deep-breathing": `## Mindfulness & Deep Breathing\n\nMindfulness means paying attention to the present moment, on purpose, without judgment. Deep breathing is a simple way to practice this and calm your nervous system.\n\n**Simple Deep Breathing:**\n\n1.  Find a comfortable position, sitting or lying down.\n2.  Close your eyes gently or soften your gaze.\n3.  Place one hand on your chest and the other on your belly.\n4.  Breathe in slowly and deeply through your nose, feeling your belly rise more than your chest. (Count to 4 if helpful: Inhale, 2, 3, 4)\n5.  Hold the breath gently for a moment. (Count to 4 if helpful: Hold, 2, 3, 4)\n6.  Breathe out slowly and completely through your mouth or nose, feeling your belly fall. (Count to 6 if helpful: Exhale, 2, 3, 4, 5, 6)\n7.  Repeat for several breaths, focusing only on the sensation of breathing. If your mind wanders, gently bring your attention back to your breath.\n\nEven a minute or two can make a difference when feeling stressed or overwhelmed.`,
+    "behavioral-activation": `## Behavioral Activation (Taking Small Steps)\n\nWhen feeling depressed or overwhelmed, it's easy to stop doing things, even things you used to enjoy. Behavioral Activation is about gently re-engaging with activities, starting small, to improve your mood and energy.\n\n**The Idea:** Action can come *before* motivation. Doing something small, even if you don't feel like it, can often help you feel a bit better, which then makes it easier to do the next thing.\n\n**How to Start:**\n\n1.  **Identify Small, Achievable Actions:** Think of something simple you *could* do, even if it feels difficult. (e.g., Get out of bed, take a shower, walk around the block for 5 minutes, wash one dish, send one email).\n2.  **Schedule It (Optional but helpful):** Decide *when* you might try it.\n3.  **Do It (Even partially):** Try the action. Don't worry about doing it perfectly or for a long time. Just starting counts.\n4.  **Notice:** Briefly reflect on how you feel *afterwards*. Did anything shift, even slightly?\n\nThe goal isn't immediate happiness, but breaking the cycle of inactivity. Aura's "One small, easy step for today" checklist is based on this principle!`
+};
+
 /**
- * Manages all application state, including chats, history, and tools.
- * This is the single source of truth for the app.
+ * Fetches psychoeducation content from our local store.
+ * @param {string} topicSlug - The filename-like topic identifier (e.g., "catastrophizing").
+ * @returns {Promise<string | null>} - Markdown content or null if not found.
+ */
+async function getContent(topicSlug) {
+    console.log(`Attempting to get content for: ${topicSlug}`);
+    await new Promise(resolve => setTimeout(resolve, 10)); // Simulate async
+    return localContentStore[topicSlug.toLowerCase()] || null;
+}
+// --- End Content Store ---
+
+
+/**
+ * Manages all application state.
  */
 class ChatManager {
     constructor() {
@@ -171,18 +212,16 @@ class ChatManager {
             history: [],
             memories: [],
             tools: {},
-            completed_tasks: [], // Tracks completed checklist items
-            
-            // --- Agent State Variables ---
-            isHeightenedAwareness: false, // For the Crisis Agent
-            lastUserMessageTimestamp: null, // For the Re-Engagement Agent
-            reEngagementTriggered: false, // Prevents Re-Engagement loops
-            cognitiveAgentTriggered: false // Prevents Cognitive Agent loops
+            completed_tasks: [],
+            isHeightenedAwareness: false,
+            lastUserMessageTimestamp: null,
+            reEngagementTriggered: false,
+            cognitiveAgentTriggered: false
         };
         this.state.activeChatId = newChatId;
         this.saveState();
     }
-    
+
     setActiveChat(chatId) {
         if (this.state.chats[chatId]) {
             this.state.activeChatId = chatId;
@@ -194,10 +233,8 @@ class ChatManager {
         if (this.state.chats[chatId]) {
             delete this.state.chats[chatId];
             if (this.state.activeChatId === chatId) {
-                // Find the next most recent chat to make active
                 const chatIds = Object.keys(this.state.chats).sort((a, b) => b - a);
                 this.state.activeChatId = chatIds.length > 0 ? chatIds[0] : null;
-                // If no chats are left, create a new one
                 if (!this.state.activeChatId) {
                     this.createNewChat();
                 }
@@ -209,718 +246,398 @@ class ChatManager {
     addMessageToActiveChat(role, content) {
         if (this.state.activeChatId) {
             const activeChat = this.state.chats[this.state.activeChatId];
-            // Add a timestamp to all messages for our agents to use
             activeChat.history.push({ role, content, timestamp: Date.now() });
-            
-            // Set the chat title from the first user message
             if (activeChat.history.length === 1 && role === 'user') {
                 activeChat.title = content.substring(0, 20) + '...';
             }
-
-            // If the user sends a message, update their timestamp and
-            // reset the re-engagement agent.
             if (role === 'user') {
                 activeChat.lastUserMessageTimestamp = Date.now();
-                activeChat.reEngagementTriggered = false;
+                activeChat.reEngagementTriggered = false; // Reset agent flag on user activity
             }
-            
             this.saveState();
         }
     }
-    
+
     addOrUpdateToolInActiveChat(toolName, toolData) {
         if (this.state.activeChatId && this.state.chats[this.state.activeChatId]) {
             const activeChat = this.state.chats[this.state.activeChatId];
-            if (!activeChat.tools) {
-                activeChat.tools = {};
-            }
-            // Ensure the tool type is an array
-            if (!Array.isArray(activeChat.tools[toolName])) {
-                activeChat.tools[toolName] = [];
-            }
+            if (!activeChat.tools) activeChat.tools = {};
+            if (!Array.isArray(activeChat.tools[toolName])) activeChat.tools[toolName] = [];
             activeChat.tools[toolName].push(toolData);
             this.saveState();
         }
     }
-    
+
     getActiveChatTools() {
         if (this.state.activeChatId && this.state.chats[this.state.activeChatId]) {
             return this.state.chats[this.state.activeChatId].tools || {};
         }
         return {};
     }
-    
+
     logMoodToTracker(mood) {
         const activeChat = this.state.chats[this.state.activeChatId];
-        if (!activeChat || !activeChat.tools || !activeChat.tools.mood_tracker || activeChat.tools.mood_tracker.length === 0) {
-            return;
-        }
-        
+        if (!activeChat || !activeChat.tools || !activeChat.tools.mood_tracker || !activeChat.tools.mood_tracker[0]) return;
         const moodTracker = activeChat.tools.mood_tracker[0];
-        if (!moodTracker.history) {
-            moodTracker.history = [];
-        }
-        
-        // We log the timestamp *with* the mood
+        if (!moodTracker.history) moodTracker.history = [];
         moodTracker.history.push({ mood: mood, timestamp: new Date().toISOString() });
-        // Keep the history log from getting too long
-        if(moodTracker.history.length > 10) {
-            moodTracker.history.shift();
-        }
-        
-        // --- This is the "Arming" stage of the safety agent ---
+        if(moodTracker.history.length > 10) moodTracker.history.shift();
         const negativeMoods = ["Sad", "Angry"];
         const positiveMoods = ["Happy", "Okay", "Neutral"];
-
-        if (negativeMoods.includes(mood)) {
-            this.setHeightenedAwareness(true);
-            console.log("Heightened Awareness ENABLED.");
-        } else if (positiveMoods.includes(mood)) {
-            this.setHeightenedAwareness(false);
-            console.log("Heightened Awareness DISABLED.");
-        }
-        
+        if (negativeMoods.includes(mood)) { this.setHeightenedAwareness(true); console.log("Heightened Awareness ENABLED."); }
+        else if (positiveMoods.includes(mood)) { this.setHeightenedAwareness(false); console.log("Heightened Awareness DISABLED."); }
         this.saveState();
     }
 
     completeAndRemoveChecklistItem(toolId, itemIndex) {
         const activeChat = this.state.chats[this.state.activeChatId];
         if (!activeChat || !activeChat.tools || !activeChat.tools.checklist) return null;
-
         const checklistArray = activeChat.tools.checklist;
-        // Find the specific checklist this item belongs to
         const toolIndex = checklistArray.findIndex(list => list.id === toolId);
         if (toolIndex === -1) return null;
-        
         const checklist = checklistArray[toolIndex];
-        // Remove the item from its list
         const [completedItem] = checklist.items.splice(itemIndex, 1);
-        
-        // If the checklist is now empty, remove it
-        if (checklist.items.length === 0) {
-            checklistArray.splice(toolIndex, 1);
-        }
-        
-        // Log the completed task text for the Reflective Agent
+        if (checklist.items.length === 0) checklistArray.splice(toolIndex, 1);
+        if (!activeChat.completed_tasks) activeChat.completed_tasks = [];
         activeChat.completed_tasks.push(completedItem.text);
-        if (activeChat.completed_tasks.length > 20) {
-            activeChat.completed_tasks.shift(); // Keep list manageable
-        }
-        
+        if (activeChat.completed_tasks.length > 20) activeChat.completed_tasks.shift();
         this.saveState();
         return completedItem.text;
     }
 
-    // --- Data Gathering for Agents ---
-    // Gathers all relevant data for Reflective, Re-Engagement, and Cognitive agents
     getAnalysisData() {
-        if (!this.state.activeChatId) return null;
+        if (!this.state.activeChatId || !this.state.chats[this.state.activeChatId]) return null;
         const activeChat = this.state.chats[this.state.activeChatId];
-        if (!activeChat) return null;
-
         let moodHistory = [];
-        if (activeChat.tools && activeChat.tools.mood_tracker && activeChat.tools.mood_tracker[0]) {
-            moodHistory = activeChat.tools.mood_tracker[0].history || [];
-        }
-
+        if (activeChat.tools?.mood_tracker?.[0]?.history) moodHistory = activeChat.tools.mood_tracker[0].history;
         const completedTasks = activeChat.completed_tasks || [];
-
         let openTasks = [];
-        if (activeChat.tools && activeChat.tools.checklist) {
+        if (activeChat.tools?.checklist) {
             activeChat.tools.checklist.forEach(list => {
                 list.items.forEach(item => {
-                    if (!item.done) {
-                        openTasks.push(item.text);
-                    }
+                    if (!item.done) openTasks.push(item.text);
                 });
             });
         }
-
-        // Find any document context from the chat history
         let docContext = [];
-        activeChat.history.forEach(msg => {
+        (activeChat.history || []).forEach(msg => {
             if (msg.role === 'user' && msg.content.includes('[Attached:')) {
-                docContext.push(msg.content.split('\n')[0]); // Get just the attachment line
+                docContext.push(msg.content.split('\n')[0]);
             }
         });
-
         return {
-            moodHistory, // Full mood log [{mood, timestamp}, ...]
-            chatHistory: activeChat.history, // Full chat history [{role, content, timestamp}, ...]
-            completedTasks, // Array of strings
-            openTasks: openTasks, // Array of strings
+            moodHistory,
+            chatHistory: activeChat.history || [],
+            completedTasks,
+            openTasks,
             docContext: docContext.join('\n')
         };
     }
 
-    // --- Crisis Intervention Agent Methods ---
-    
-    isChatInHeightenedAwareness() {
-        if (this.state.activeChatId && this.state.chats[this.state.activeChatId]) {
-            return this.state.chats[this.state.activeChatId].isHeightenedAwareness;
-        }
-        return false;
-    }
-    
-    setHeightenedAwareness(value) {
-        if (this.state.activeChatId && this.state.chats[this.state.activeChatId]) {
-            this.state.chats[this.state.activeChatId].isHeightenedAwareness = value;
-            this.saveState();
-        }
+    updateThoughtRecord(toolId, data) {
+         if (!this.state.activeChatId || !this.state.chats[this.state.activeChatId]?.tools?.thought_record) return;
+         const activeChat = this.state.chats[this.state.activeChatId];
+         const toolIndex = activeChat.tools.thought_record.findIndex(record => record.id === toolId);
+         if (toolIndex !== -1) {
+             activeChat.tools.thought_record[toolIndex] = { ...activeChat.tools.thought_record[toolIndex], ...data, lastUpdated: new Date().toISOString() };
+             this.saveState();
+             console.log("Thought Record updated:", toolId);
+         }
     }
 
+    // --- Crisis Agent ---
+    isChatInHeightenedAwareness() { return this.state.chats[this.state.activeChatId]?.isHeightenedAwareness || false; }
+    setHeightenedAwareness(value) { if (this.state.chats[this.state.activeChatId]) { this.state.chats[this.state.activeChatId].isHeightenedAwareness = value; this.saveState(); } }
     async preScreenMessage(messageText) {
-        if (!this.isChatInHeightenedAwareness()) {
-            return 'OK';
-        }
-        
+        if (!this.isChatInHeightenedAwareness()) return 'OK';
         console.log("Heightened Awareness active. Pre-screening message...");
         const prompt = DETECTION_PROMPT.replace('%MESSAGE%', messageText);
-        
         try {
             const modelToUse = getModelName();
             const response = await fetch(`${OLLAMA_API_BASE_URL}/api/generate`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ model: modelToUse, prompt: prompt, stream: false })
             });
             if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
-            
             const data = await response.json();
             const result = data.response.trim().toUpperCase();
-            
-            if (result.includes('CRISIS')) {
-                console.log("Watchdog detected: CRISIS");
-                return 'CRISIS';
-            } else {
-                console.log("Watchdog detected: OK");
-                return 'OK';
-            }
-        } catch (error) {
-            console.error("Error in preScreenMessage, failing safe:", error);
-            return 'OK'; 
-        }
+            if (result.includes('CRISIS')) { console.log("Watchdog detected: CRISIS"); return 'CRISIS'; }
+            else { console.log("Watchdog detected: OK"); return 'OK'; }
+        } catch (error) { console.error("Error in preScreenMessage, failing safe:", error); return 'OK'; }
     }
-
     async triggerSafetyIntervention(crisisMessageText) {
         const breathToolPromise = createToolByType('breathing_exercise');
-        const safetyPlanPromise = createSafetyPlanTool(); 
-        
+        const safetyPlanPromise = createSafetyPlanTool();
         const [breathTool, safetyPlan] = await Promise.all([breathToolPromise, safetyPlanPromise]);
-        
         this.addOrUpdateToolInActiveChat('breathing_exercise', breathTool);
         this.addOrUpdateToolInActiveChat('checklist', safetyPlan);
-
         const context = `Context: The user is in a distressed state. Your detection system has flagged their last message as a potential crisis. The message was: "${crisisMessageText}"`;
         const prompt = `${CRISIS_SYSTEM_PROMPT}\n\n${context}\n\nNow, write the message.`;
-
         const modelToUse = getModelName();
         const response = await fetch(`${OLLAMA_API_BASE_URL}/api/generate`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ model: modelToUse, prompt: prompt, stream: false })
         });
         if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
-
         const data = await response.json();
         const safeMessage = data.response.trim();
-
         this.addMessageToActiveChat('ai', safeMessage);
         return safeMessage;
     }
-    
-    // --- Re-Engagement Agent Methods ---
-    
+
+    // --- Re-Engagement Agent ---
     checkForWithdrawalPattern() {
         if (!this.state.activeChatId) return false;
         const activeChat = this.state.chats[this.state.activeChatId];
-        
-        if (activeChat.reEngagementTriggered) return false;
-        if (!activeChat.lastUserMessageTimestamp) return false;
-        
+        if (activeChat.reEngagementTriggered || !activeChat.lastUserMessageTimestamp) return false;
         const now = Date.now();
         const diffDays = (now - activeChat.lastUserMessageTimestamp) / (1000 * 60 * 60 * 24);
-        
-        if (diffDays <= 3) { // 3-day grace period
-            return false;
-        }
-        
+        if (diffDays <= 3) return false;
         const data = this.getAnalysisData();
         if (!data) return false;
-        
         const lastMood = data.moodHistory.length > 0 ? data.moodHistory[data.moodHistory.length - 1].mood : null;
         const openTaskCount = data.openTasks.length;
-
         const isStuck = (["Sad", "Angry"].includes(lastMood) || openTaskCount >= 5);
-        
         if (isStuck) {
             const reason = lastMood ? `their last mood was "${lastMood}"` : `they have ${openTaskCount} open tasks`;
-            return {
-                days: Math.round(diffDays),
-                reason: reason
-            };
+            return { days: Math.round(diffDays), reason: reason };
         }
-        
         return false;
     }
-
     async triggerReEngagement(pattern) {
         if (!this.state.activeChatId) return;
-        
         this.state.chats[this.state.activeChatId].reEngagementTriggered = true;
         this.saveState();
-        
-        const prompt = RE_ENGAGEMENT_PROMPT
-            .replace('%DAYS%', pattern.days)
-            .replace('%REASON%', pattern.reason);
-        
+        const prompt = RE_ENGAGEMENT_PROMPT.replace('%DAYS%', pattern.days).replace('%REASON%', pattern.reason);
         try {
             const modelToUse = getModelName();
             const response = await fetch(`${OLLAMA_API_BASE_URL}/api/generate`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ model: modelToUse, prompt: prompt, stream: false })
-            });
+                 method: 'POST', headers: { 'Content-Type': 'application/json' },
+                 body: JSON.stringify({ model: modelToUse, prompt: prompt, stream: false })
+             });
             if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
-            
             const data = await response.json();
             const rawResponse = data.response.trim();
-
             const toolTagRegex = /<tool_create\s+type="([^"]+)"(?:\s+theme="([^"]+)")?\s*\/>/g;
             let cleanedResponse = rawResponse;
-            const match = toolTagRegex.exec(rawResponse); 
-            
+            const match = toolTagRegex.exec(rawResponse);
             if (match) {
-                const toolType = match[1];
-                const toolTheme = match[2] || '';
+                const toolType = match[1]; const toolTheme = match[2] || '';
                 const toolData = await createToolByType(toolType, toolTheme);
                 if (toolData) {
-                    if (toolType === 'checklist' && toolData.items.length > 1) {
-                        toolData.items = [toolData.items[0]]; 
-                    }
+                    if (toolType === 'checklist' && toolData.items.length > 1) toolData.items = [toolData.items[0]];
                     this.addOrUpdateToolInActiveChat(toolType, toolData);
                 }
                 cleanedResponse = cleanedResponse.replace(match[0], '').trim();
             }
-
             this.addMessageToActiveChat('ai', cleanedResponse);
             return cleanedResponse;
-            
         } catch (error) {
             console.error("Error during re-engagement:", error);
-            this.state.chats[this.state.activeChatId].reEngagementTriggered = false;
-            this.saveState();
+            this.state.chats[this.state.activeChatId].reEngagementTriggered = false; this.saveState();
             return null;
         }
     }
-    
-    // --- NEW: Cognitive Pattern Agent Methods ---
-    
-    /**
-     * Checks if a chat is "mature" enough for analysis.
-     */
+
+    // --- Cognitive Agent ---
     checkForCognitivePattern() {
         if (!this.state.activeChatId) return false;
         const activeChat = this.state.chats[this.state.activeChatId];
-        
-        // 1. Has the agent already run for this chat?
         if (activeChat.cognitiveAgentTriggered) return false;
-        
         const data = this.getAnalysisData();
-        if (!data) return false;
-        
-        // 2. Do we have enough data to analyze?
-        if (data.chatHistory.length < 10 || data.moodHistory.length < 5) {
-            return false;
-        }
-        
-        // 3. Do we have a mix of moods to compare?
+        if (!data || data.chatHistory.length < 10 || data.moodHistory.length < 5) return false;
         const negativeLogs = data.moodHistory.filter(log => ["Sad", "Angry"].includes(log.mood));
         const positiveLogs = data.moodHistory.filter(log => ["Happy", "Okay"].includes(log.mood));
-
-        if (negativeLogs.length < 2 || positiveLogs.length < 2) {
-            return false;
-        }
-        
-        // If we pass all checks, we're good to run
-        return {
-            chatHistory: data.chatHistory,
-            negativeLogs,
-            positiveLogs
-        };
+        if (negativeLogs.length < 2 || positiveLogs.length < 2) return false;
+        return { chatHistory: data.chatHistory, negativeLogs, positiveLogs };
     }
-    
-    /**
-     * Extracts chat messages from a 15-minute window before a mood log.
-     */
     extractContext(allMessages, moodTimestamp) {
-        const contextWindowMs = 15 * 60 * 1000; // 15 minutes
+        const contextWindowMs = 15 * 60 * 1000;
         const moodTime = new Date(moodTimestamp).getTime();
-        
-        const contextMessages = allMessages.filter(msg => {
-            return msg.timestamp >= (moodTime - contextWindowMs) && msg.timestamp < moodTime;
-        });
-        
-        // We only care about what the *user* was talking about
-        return contextMessages
-            .filter(msg => msg.role === 'user')
-            .map(msg => msg.content)
-            .join(' \n '); // Join user messages into a single block
+        const contextMessages = allMessages.filter(msg => msg.timestamp >= (moodTime - contextWindowMs) && msg.timestamp < moodTime);
+        return contextMessages.filter(msg => msg.role === 'user').map(msg => msg.content).join(' \n ');
     }
-
-    /**
-     * This is the Cognitive Agent's main action. It builds the
-     * data report and asks the LLM to find patterns.
-     */
     async triggerCognitiveAnalysis(patternData) {
         if (!this.state.activeChatId) return;
-        
-        // 1. Set the flag to prevent this from running again
         this.state.chats[this.state.activeChatId].cognitiveAgentTriggered = true;
         this.saveState();
-
-        // 2. Build the context blocks for the prompt
         let negativeContext = "";
         patternData.negativeLogs.forEach(log => {
             const context = this.extractContext(patternData.chatHistory, log.timestamp);
-            if (context) {
-                negativeContext += `- Topic before logging "${log.mood}": ${context}\n`;
-            }
+            if (context) negativeContext += `- Topic before logging "${log.mood}": ${context}\n`;
         });
-
         let positiveContext = "";
         patternData.positiveLogs.forEach(log => {
             const context = this.extractContext(patternData.chatHistory, log.timestamp);
-            if (context) {
-                positiveContext += `- Topic before logging "${log.mood}": ${context}\n`;
-            }
+            if (context) positiveContext += `- Topic before logging "${log.mood}": ${context}\n`;
         });
-        
-        // If we don't have enough context, abort.
-        if (!negativeContext || !positiveContext) {
-             this.state.chats[this.state.activeChatId].cognitiveAgentTriggered = false; // Reset flag
-             this.saveState();
-             return null;
-        }
-
-        // 3. Build the final prompt
-        const prompt = PATTERN_FINDER_PROMPT
-            .replace('%POSITIVE_CONTEXT%', positiveContext)
-            .replace('%NEGATIVE_CONTEXT%', negativeContext);
-            
-        // 4. Call the LLM
+        if (!negativeContext || !positiveContext) { this.state.chats[this.state.activeChatId].cognitiveAgentTriggered = false; this.saveState(); return null; }
+        const prompt = PATTERN_FINDER_PROMPT.replace('%POSITIVE_CONTEXT%', positiveContext).replace('%NEGATIVE_CONTEXT%', negativeContext);
         try {
             const modelToUse = getModelName();
             const response = await fetch(`${OLLAMA_API_BASE_URL}/api/generate`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ model: modelToUse, prompt: prompt, stream: false })
-            });
+                 method: 'POST', headers: { 'Content-Type': 'application/json' },
+                 body: JSON.stringify({ model: modelToUse, prompt: prompt, stream: false })
+             });
             if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
-            
             const data = await response.json();
             const rawResponse = data.response.trim();
-            
-            // 5. Check if the AI found a pattern
-            if (rawResponse.toUpperCase().includes('NULL')) {
-                console.log("Cognitive agent ran, but found no strong pattern.");
-                return null; // No pattern found, all good.
-            }
-            
-            // 6. If we're here, a pattern *was* found. Process it.
+            if (rawResponse.toUpperCase().includes('NULL')) { console.log("Cognitive agent found no strong pattern."); return null; }
             console.log("Cognitive agent FOUND a pattern. Intervening.");
             const toolTagRegex = /<tool_create\s+type="([^"]+)"(?:\s+theme="([^"]+)")?\s*\/>/g;
+            const linkTagRegex = /<link_content\s+topic="([^"]+)"\s*\/>/g;
             let cleanedResponse = rawResponse;
-            const match = toolTagRegex.exec(rawResponse); 
-            
-            if (match) {
-                const toolType = match[1];
-                const toolTheme = match[2] || '';
+            const toolMatch = toolTagRegex.exec(rawResponse);
+            if (toolMatch) {
+                const toolType = toolMatch[1]; const toolTheme = toolMatch[2] || '';
                 const toolData = await createToolByType(toolType, toolTheme);
-                if (toolData) {
-                    this.addOrUpdateToolInActiveChat(toolType, toolData);
-                }
-                cleanedResponse = cleanedResponse.replace(match[0], '').trim();
+                if (toolData) this.addOrUpdateToolInActiveChat(toolType, toolData);
+                cleanedResponse = cleanedResponse.replace(toolMatch[0], '').trim();
             }
-
-            // 7. Add the AI's insightful message to the chat
+            const linkMatch = linkTagRegex.exec(cleanedResponse);
+             if (linkMatch) {
+                cleanedResponse = cleanedResponse.replace(linkMatch[0], `<link_content topic="${linkMatch[1]}"/>`); // Keep tag as marker
+                console.log(`Cognitive agent suggested content link: ${linkMatch[1]}`);
+             }
             this.addMessageToActiveChat('ai', cleanedResponse);
             return cleanedResponse;
-
         } catch (error) {
             console.error("Error during cognitive analysis:", error);
-            // If it fails, undo the trigger flag so it can try again next time
-            this.state.chats[this.state.activeChatId].cognitiveAgentTriggered = false;
-            this.saveState();
+            this.state.chats[this.state.activeChatId].cognitiveAgentTriggered = false; this.saveState();
             return null;
         }
     }
 
-
     // --- Getters ---
-    getActiveChatHistory() { return this.state.activeChatId ? this.state.chats[this.state.activeChatId].history : []; }
+    getActiveChatHistory() { return this.state.chats[this.state.activeChatId]?.history || []; }
     getActiveChatId() { return this.state.activeChatId; }
 }
 
-/**
- * A generic function to ask the AI to generate JSON for a tool.
- * This is the foundation for all our AI-powered tools.
- * @param {string} prompt - The specific prompt for the LLM.
- *@returns {object | null} - The parsed JSON object or null on error.
- */
+
+// --- Tool Generation Functions ---
 async function generateToolJson(prompt) {
     const modelToUse = getModelName();
     try {
         const response = await fetch(`${OLLAMA_API_BASE_URL}/api/generate`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ model: modelToUse, prompt, stream: false, format: 'json' })
         });
         if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
         const data = await response.json();
         return JSON.parse(data.response);
-    } catch (error) {
-        console.error('Error generating tool JSON:', error);
-        return null;
-    }
+    } catch (error) { console.error('Error generating tool JSON:', error); return null; }
 }
-
-/**
- * Generates the JSON for our crisis-specific safety plan.
- * We trust the LLM to generate the plan's *items*.
- */
 async function createSafetyPlanTool() {
-    const prompt = `You are an AI assistant that creates JSON for a "Safety Plan Checklist" tool.
-- This is for a user in an acute mental health crisis.
-- The title MUST be "Immediate Safety Plan".
-- Create exactly 5 simple, actionable, grounding items.
-- Examples: "Take 5 deep breaths", "Name 3 things you can see", "Hold a piece of ice".
-- Your output MUST be only the raw JSON object with this exact structure: { "type": "checklist", "id": "safety-${Date.now()}", "title": "Immediate Safety Plan", "items": [{"text": "...", "done": false}, ...] }`;
+    const prompt = `You are an AI assistant creating JSON for a "Safety Plan Checklist"... Create exactly 5 simple, actionable, grounding items... structure: { "type": "checklist", "id": "safety-\${Date.now()}", "title": "Immediate Safety Plan", "items": [{"text": "...", "done": false}, ...] }`;
     return await generateToolJson(prompt);
 }
-
-/**
- * Creates a tool based on its type and an optional theme.
- * This is called by the main AI response parser.
- */
 async function createToolByType(type, theme = '') {
     switch (type) {
         case 'mood_tracker': {
-            const prompt = `You are an AI assistant that creates JSON for a "Mood Tracker" tool.
-- Your output MUST be only the raw JSON object.
-- The object must have this exact structure: { "type": "mood_tracker", "id": "mood-${Date.now()}", "title": "Your Mood Tracker", "options": ["Happy", "Okay", "Neutral", "Sad", "Angry"], "history": [] }`;
+            const prompt = `Create JSON for a "Mood Tracker"... structure: { "type": "mood_tracker", "id": "mood-\${Date.now()}", "title": "Your Mood Tracker", "options": ["Happy", "Okay", "Neutral", "Sad", "Angry"], "history": [] }`;
             return await generateToolJson(prompt);
         }
         case 'checklist': {
-            const prompt = `An AI assistant needs to create a checklist for a user based on the theme: "${theme}".
-- Create a friendly, encouraging title for the checklist.
-- Create 3 to 5 short, actionable checklist items.
-- If the theme is 'One small, easy step for today', create ONLY ONE item.
-- Your output MUST be only the raw JSON object with this exact structure: { "type": "checklist", "id": "checklist-${Date.now()}", "title": "...", "items": [{"text": "...", "done": false}] }`;
+            const prompt = `Create a checklist... theme: "${theme}"... Create 3 to 5 items. If theme is 'One small, easy step for today', create ONLY ONE item... structure: { "type": "checklist", "id": "checklist-\${Date.now()}", "title": "...", "items": [{"text": "...", "done": false}] }`;
             return await generateToolJson(prompt);
         }
         case 'affirmation_card': {
-             const prompt = `You are an AI assistant that creates JSON for an "Affirmation Card".
-- The theme is: "${theme}".
-- Generate a friendly, encouraging title.
-- Generate an array of 2-3 short, powerful affirmation strings for the "text" property.
-- Your output MUST be only the raw JSON object with this exact structure: { "type": "affirmation_card", "id": "affirm-${Date.now()}", "title": "...", "text": ["...", "..."], "buttonText": "I will remember this." }`;
+             const prompt = `Create JSON for an "Affirmation Card"... theme: "${theme}"... Generate 2-3 affirmations... structure: { "type": "affirmation_card", "id": "affirm-\${Date.now()}", "title": "...", "text": ["...", "..."], "buttonText": "I will remember this." }`;
             return await generateToolJson(prompt);
         }
         case 'breathing_exercise': {
-            const prompt = `Create a JSON object for a standard breathing exercise. The output must be ONLY the raw JSON object with this exact structure: { "type": "breathing_exercise", "id": "breathe-${Date.now()}", "title": "A Quick Breathing Exercise", "cycle": { "inhale": 4, "hold": 4, "exhale": 6 } }`;
+            const prompt = `Create JSON for a standard breathing exercise... structure: { "type": "breathing_exercise", "id": "breathe-\${Date.now()}", "title": "A Quick Breathing Exercise", "cycle": { "inhale": 4, "hold": 4, "exhale": 6 } }`;
             return await generateToolJson(prompt);
         }
-        default:
-            return null;
+        case 'thought_record': {
+            const prompt = `Create JSON for a CBT "Thought Record"... theme (optional situation): "${theme}"... structure: { "type": "thought_record", "id": "tr-\${Date.now()}", "title": "...", "situation": "${theme || ''}", "automaticThoughts": "", "emotions": "", "cognitiveDistortions": "", "evidenceFor": "", "evidenceAgainst": "", "balancedThought": "", "outcomeEmotions": "" }`;
+            return await generateToolJson(prompt);
+        }
+        default: return null;
     }
 }
 
-/**
- * Converts the current state of all tools into a plain string.
- * This is fed to the AI as context in every message.
- */
+// --- Agent/Context Formatting ---
 function toolsToString(tools) {
     let toolString = '';
-    // Define a consistent order
-    const toolOrder = ['mood_tracker', 'checklist', 'affirmation_card', 'breathing_exercise'];
-
+    const toolOrder = ['mood_tracker', 'checklist', 'thought_record', 'affirmation_card', 'breathing_exercise'];
     toolOrder.forEach(toolName => {
-        if (tools[toolName] && tools[toolName].length > 0) {
+        if (tools[toolName]?.length > 0) {
             tools[toolName].forEach(toolInstance => {
                 switch (toolName) {
-                    case 'mood_tracker':
-                         toolString += `- Mood Tracker: "${toolInstance.title}" is available.\n`;
-                         break;
-                    case 'checklist':
-                        toolString += `- Checklist: "${toolInstance.title}"\n`;
-                        toolInstance.items.forEach((item, index) => {
-                            toolString += `  ${index + 1}. ${item.text}\n`;
-                        });
-                        break;
-                    case 'affirmation_card':
-                        toolString += `- Affirmation Card: "${toolInstance.title}"\n`;
-                        if (Array.isArray(toolInstance.text)) {
-                            toolInstance.text.forEach(affirmation => {
-                                toolString += `  - "${affirmation}"\n`;
-                            });
-                        }
-                        break;
-                    case 'breathing_exercise':
-                        toolString += `- Breathing Exercise: "${toolInstance.title}" is available.\n`;
-                        break;
+                    case 'mood_tracker': toolString += `- Mood Tracker: "${toolInstance.title}" available.\n`; break;
+                    case 'checklist': toolString += `- Checklist: "${toolInstance.title}"\n${(toolInstance.items || []).map((item, i) => `  ${i + 1}. ${item.text}`).join('\n')}\n`; break;
+                    case 'thought_record': toolString += `- Thought Record: "${toolInstance.title}" (${toolInstance.situation ? 'Situation: '+toolInstance.situation.substring(0,30)+'...' : 'Empty'})\n`; break;
+                    case 'affirmation_card': toolString += `- Affirmation Card: "${toolInstance.title}"\n${Array.isArray(toolInstance.text) ? toolInstance.text.map(t => `  - "${t}"`).join('\n') : ''}\n`; break;
+                    case 'breathing_exercise': toolString += `- Breathing Exercise: "${toolInstance.title}" available.\n`; break;
                 }
             });
         }
     });
-
     return toolString.trim() || 'None';
 }
-
-/**
- * Formats the raw analysis data for the Reflective Agent's prompt.
- */
 function formatReviewDataForAI(data) {
     let summary = "Data Summary:\n";
     summary += `- Completed Tasks: ${data.completedTasks.length > 0 ? data.completedTasks.join(', ') : 'None'}\n`;
     summary += `- Open Tasks: ${data.openTasks.length > 0 ? data.openTasks.map(t => `"${t}"`).join(', ') : 'None'}\n`;
-    
-    if (data.moodHistory.length > 0) {
-        const recentMoods = data.moodHistory.slice(-5).map(m => m.mood).join(', ');
-        summary += `- Recent Moods: ${recentMoods}\n`;
-    }
-    if (data.docContext) {
-        summary += `- Project Context: ${data.docContext}\n`;
-    }
+    if (data.moodHistory.length > 0) { const recentMoods = data.moodHistory.slice(-5).map(m => m.mood).join(', '); summary += `- Recent Moods: ${recentMoods}\n`; }
+    if (data.docContext) { summary += `- Project Context: ${data.docContext}\n`; }
     return summary;
 }
-
-/**
- * This is the Reflective Agent's main action. It gets data,
- * formats it, and asks the AI to synthesize it.
- */
 async function runReflectiveReview() {
     const data = chatManager.getAnalysisData();
-    if (!data) return "Sorry, I couldn't find any data to review.";
-
+    if (!data) return "Sorry, I couldn't find data to review.";
     const dataSummary = formatReviewDataForAI(data);
-    
-    const REFLECTIVE_PROMPT = `You are Aura. A user has asked for a review of their progress. Your task is to synthesize the following data into a single, supportive summary.
-
-// --- DATA SUMMARY ---
-${dataSummary}
-// --- END OF DATA ---
-
-Based on this data, first, write a brief, encouraging summary of their progress.
-
-Second, decide if a new tool would help them.
-- If they have many open tasks and seem stressed (e.g., "Sad" moods), create an 'affirmation_card' for motivation.
-- If they have completed many tasks and seem positive (e.g., "Happy" moods), create a new 'checklist' for 'Next Steps'.
-
-If you create a tool, embed the tag <tool_create type="..." theme="..."/> at the end of your summary.
-Speak directly to the user.`;
-
+    const REFLECTIVE_PROMPT = `You are Aura... Synthesize data...\n${dataSummary}\n...Decide tool...`; // Shortened
     try {
         const modelToUse = getModelName();
-        const response = await fetch(`${OLLAMA_API_BASE_URL}/api/generate`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ model: modelToUse, prompt: REFLECTIVE_PROMPT, stream: false })
-        });
+        const response = await fetch(`${OLLAMA_API_BASE_URL}/api/generate`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ model: modelToUse, prompt: REFLECTIVE_PROMPT, stream: false }) });
         if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
-
         const responseData = await response.json();
         const rawResponse = responseData.response.trim();
-
-        // We need to process the response for any tools it decided to create
         const toolTagRegex = /<tool_create\s+type="([^"]+)"(?:\s+theme="([^"]+)")?\s*\/>/g;
         let cleanedResponse = rawResponse;
         const matchedTags = [...rawResponse.matchAll(toolTagRegex)];
-
         if (matchedTags.length > 0) {
             for (const match of matchedTags) {
-                const toolType = match[1];
-                const toolTheme = match[2] || '';
+                const toolType = match[1]; const toolTheme = match[2] || '';
                 const toolData = await createToolByType(toolType, toolTheme);
                 if (toolData) chatManager.addOrUpdateToolInActiveChat(toolType, toolData);
                 cleanedResponse = cleanedResponse.replace(match[0], '').trim();
             }
         }
-
-        // Save the AI's summary to our chat history
         chatManager.addMessageToActiveChat('ai', cleanedResponse);
         return cleanedResponse;
-
-    } catch (error) {
-        console.error("Reflective Review AI call failed:", error);
-        // Let the main handler inform the user
-        throw error;
-    }
+    } catch (error) { console.error("Reflective Review AI call failed:", error); throw error; }
 }
 
-
-/**
- * The main function for getting a response from the AI.
- * This is used for all *normal* conversation.
- */
+// --- Main AI Interaction ---
 async function getOllamaResponse(prompt, toolFollowUp = null, documentText = null) {
     const modelToUse = getModelName();
     const systemPrompt = getSystemPrompt();
     const chatHistory = chatManager.getActiveChatHistory();
     const activeTools = chatManager.getActiveChatTools();
     const toolsStateString = toolsToString(activeTools);
-    
     let userPromptSegment = '';
-    
-    // Add document context if it exists
-    if (documentText) {
-        userPromptSegment += `[Document Content]:\n${documentText}\n\n`;
-    }
-
-    // Check if this is a follow-up to a tool interaction
+    if (documentText) userPromptSegment += `[Document Content]:\n${documentText}\n\n`;
     if (toolFollowUp) {
-        if (toolFollowUp.type === 'mood_logged') {
-            userPromptSegment += `[System Note: The user just logged their mood as "${toolFollowUp.mood}". Respond with empathy and ask an open-ended question about it.]`;
-        } else if (toolFollowUp.type === 'checklist_item_completed') {
-            userPromptSegment += `[System Note: The user just completed the task "${toolFollowUp.text}" from their checklist. Acknowledge this specific accomplishment and offer encouragement.]`;
-        } else if (toolFollowUp.type === 'breathing_complete') {
-            userPromptSegment += `[System Note: The user just finished a breathing exercise. Gently ask how they are feeling now.]`;
-        }
-    } else {
-        // Otherwise, it's a standard user message
-        userPromptSegment += `User: ${prompt}`;
-    }
-    
-    // Assemble the final prompt with all context
+        if (toolFollowUp.type === 'mood_logged') userPromptSegment += `[System Note: Mood logged "${toolFollowUp.mood}". Respond with empathy...]`; // Shortened
+        else if (toolFollowUp.type === 'checklist_item_completed') userPromptSegment += `[System Note: Task completed "${toolFollowUp.text}". Acknowledge...]`; // Shortened
+        else if (toolFollowUp.type === 'breathing_complete') userPromptSegment += `[System Note: Breathing exercise finished. Ask how they feel.]`; // Shortened
+    } else { userPromptSegment += `User: ${prompt}`; }
     const fullPrompt = `${systemPrompt}\n\n[Current Toolbox State]:\n${toolsStateString}\n\n[Conversation History]:\n${historyToString(chatHistory)}\n\n${userPromptSegment}`;
-
     try {
-        const response = await fetch(`${OLLAMA_API_BASE_URL}/api/generate`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ model: modelToUse, prompt: fullPrompt, stream: false })
-        });
-
+        const response = await fetch(`${OLLAMA_API_BASE_URL}/api/generate`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ model: modelToUse, prompt: fullPrompt, stream: false }) });
         if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
         const data = await response.json();
         return data.response.trim();
-    } catch (error) {
-        console.error('Error in getOllamaResponse:', error);
-        return `I'm sorry, an error occurred: ${error.message}`;
-    }
+    } catch (error) { console.error('Error in getOllamaResponse:', error); return `I'm sorry, an error occurred: ${error.message}`; }
 }
 
 // --- Utility Functions ---
-
-function historyToString(history) {
-    // We now have timestamps, but the AI prompt doesn't need them
-    return history.map(m => {
-        return `${m.role === 'user' ? 'User' : 'Assistant'}: ${m.content}`;
-    }).join('\n');
-}
+function historyToString(history) { return (history || []).map(m => `${m.role === 'user' ? 'User' : 'Assistant'}: ${m.content}`).join('\n'); }
 
 // --- Settings Getters/Setters ---
-
 function getSystemPrompt() { return localStorage.getItem(PROMPT_STORAGE_KEY) || DEFAULT_SYSTEM_PROMPT; }
 function saveSystemPrompt(prompt) { localStorage.setItem(PROMPT_STORAGE_KEY, prompt); }
 function getVoiceName() { return localStorage.getItem(VOICE_STORAGE_KEY); }
@@ -930,5 +647,4 @@ function saveModelName(modelName) { localStorage.setItem(MODEL_STORAGE_KEY, mode
 function getDefaultSystemPrompt() { return DEFAULT_SYSTEM_PROMPT; }
 
 // --- App Initialization ---
-// Create the one and only chat manager instance
 const chatManager = new ChatManager();
