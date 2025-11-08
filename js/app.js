@@ -28,7 +28,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const availableModels = [
         'gemma3:4b', 'gemma3:4b-it-qat', 'gemma3n:e4b-it-q4_K_M', 'deepseek-r1:8b',
         'llama3:8b-instruct-q5_K_M', 'llama3.2:3b', 'qwen3:4b-q4_K_M',
-        'deepseek-v3.1:671b-cloud', 'gpt-oss:120b-cloud', 'kimi-k2:1t-cloud'
+        'deepseek-v3.1:671b-cloud', 'gpt-oss:120b-cloud', 'glm-4.6:cloud'
     ];
 
     // --- State Variables ---
