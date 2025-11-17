@@ -74,7 +74,72 @@ The user logged 'Sad' or 'Angry' moods after discussing these topics:
 //    d. Embed the \`<tool_create type="tool_type" theme="Relevant Theme"/>\` tag for this new tool at the end of your message.`;
 // --- End Cognitive Pattern Agent ---
 
-// The default "brain" for Aura.
+// --- *** NEW *** Memory Agent Prompt ---
+const MEMORY_AGENT_PROMPT = `You are a memory consolidation AI. Your job is to read a conversation and update a JSON object of key facts about the user.
+Do NOT add trivial information. Focus ONLY on:
+1.  **Core Goals:** (e.g., "User wants to reduce anxiety in social situations.")
+2.  **Key People/Entities:** (e.g., "User is stressed about 'Project X' at work.", "User's friend 'Maria' is supportive.")
+3.  **Recurring Triggers:** (e.g., "User often feels sad after talking about their family.")
+4.  **Stated Preferences:** (e.g., "User prefers a gentle, supportive tone.")
+
+Here is the current memory object:
+%CURRENT_MEMORY%
+
+Here is the recent conversation history:
+%CHAT_HISTORY%
+
+Respond ONLY with the updated JSON object. Do not add any conversational text.`;
+// --- End Memory Agent ---
+
+// --- *** NEW *** Master Agent (Router) Prompt ---
+const ROUTER_PROMPT = `You are the master router for Aura, a compassionate AI friend. Your job is to analyze the user's message and route it to the correct specialist.
+
+// --- LONG-TERM MEMORY ---
+// Key facts remembered about the user:
+%MEMORY%
+
+// --- CONVERSATION CONTEXT ---
+// The user's latest message is:
+"%USER_MESSAGE%"
+
+// --- AVAILABLE ROUTES ---
+1.  **CrisisAgent:** If the message contains suicidal ideation, self-harm, or severe distress.
+2.  **CbtAnalystAgent:** If the user is describing a strong negative thought, a difficult situation, or seems to be in a cognitive distortion (e.g., "I always fail," "This is a disaster").
+3.  **PlannerAgent:** If the user wants to set a goal, make a plan, or break down a large task.
+4.  **KnowledgeAgent:** If the user is asking a factual question about a mental health concept, a CBT term, or a technique Aura might know (e.g., "What is Behavioral Activation?", "Tell me about catastrophizing").
+5.  **GeneralFriendAgent:** For all other cases: general chat, follow-ups, empathy, or simple questions.
+
+Respond with ONLY the name of the chosen route (e.g., "CbtAnalystAgent").`;
+// --- End Router Prompt ---
+
+// --- *** NEW *** Knowledge Agent (Mapper) Prompt ---
+const KNOWLEDGE_MAPPER_PROMPT = `You are a keyword extractor. The user is asking a question. Find the single best-matching key from the available list that answers the user's question.
+
+[User Question]:
+"%USER_MESSAGE%"
+
+[Available Keys]:
+all-or-nothing-thinking, catastrophizing, overgeneralization, mental-filter, discounting-the-positive, mind-reading, fortune-telling, emotional-reasoning, labeling, personalization, should-statements, thought-record-info, grounding-techniques, mindfulness-deep-breathing, behavioral-activation
+
+Respond with ONLY the matching key (e.g., "behavioral-activation") or "NULL" if no key matches.`;
+// --- End Mapper Prompt ---
+
+// --- *** NEW *** Knowledge Agent (Synthesizer) Prompt ---
+const KNOWLEDGE_SYNTHESIS_PROMPT = `You are Aura. Your friend asked you a question, and you know the answer.
+[User's Question]:
+"%USER_MESSAGE%"
+
+[Your Knowledge on the Topic]:
+---
+%KNOWLEDGE_CONTENT%
+---
+
+Your Task:
+Answer the user's question in a natural, friendly, and conversational way.
+Summarize your knowledge simply. DO NOT just repeat the content. Talk to them like a friend.`;
+// --- End Synthesizer Prompt ---
+
+// The default "brain" for Aura (now used as 'GeneralFriendAgent').
 const DEFAULT_SYSTEM_PROMPT = `You are a friendly and helpful assistant named Aura. You are an expert in mental health and project planning. Your goal is to be supportive, empathetic, and proactive.
 
 // =================================================================
@@ -135,7 +200,8 @@ const DEFAULT_SYSTEM_PROMPT = `You are a friendly and helpful assistant named Au
 const DEFAULT_MODEL = 'kimi-k2:1t-cloud';
 const DEFAULT_EMBEDDING_MODEL = 'qwen3-embedding:latest ';
 const STATE_STORAGE_KEY = 'multi_chat_app_state';
-const OLLAMA_API_BASE_URL = 'http://localhost:11434';
+// *** MODIFICATION ***
+// OLLAMA_API_BASE_URL is now loaded from config.js, so it's removed from here.
 
 
 // --- Psychoeducation Content Store ---
@@ -210,7 +276,7 @@ class ChatManager {
             id: newChatId,
             title: 'New Chat',
             history: [],
-            memories: [],
+            memories: [], // <-- *** NEW *** This will now be used
             tools: {},
             completed_tasks: [],
             isHeightenedAwareness: false,
@@ -254,9 +320,60 @@ class ChatManager {
                 activeChat.lastUserMessageTimestamp = Date.now();
                 activeChat.reEngagementTriggered = false; // Reset agent flag on user activity
             }
+            
+            // --- *** NEW *** Memory Agent Trigger ---
+            // Run memory consolidation every 5 user messages
+            if (role === 'user' && activeChat.history.length % 5 === 0 && activeChat.history.length > 0) {
+                 console.log("Triggering memory consolidation...");
+                 // We don't need to 'await' this, let it run in the background
+                 this.runMemoryConsolidation(); 
+            }
+            // --- End New ---
+
             this.saveState();
         }
     }
+    
+    // --- *** NEW *** Memory Agent Function ---
+    async runMemoryConsolidation() {
+        if (!this.state.activeChatId) return;
+        const activeChat = this.state.chats[this.state.activeChatId];
+        if (activeChat.history.length < 5) return; // Don't run on short chats
+
+        const historyString = historyToString(activeChat.history.slice(-10)); // Get last 10 messages
+        const memoryString = JSON.stringify(activeChat.memories || []);
+        
+        const prompt = MEMORY_AGENT_PROMPT
+            .replace('%CURRENT_MEMORY%', memoryString)
+            .replace('%CHAT_HISTORY%', historyString);
+
+        try {
+            const modelToUse = getModelName();
+            const response = await fetch(`${OLLAMA_API_BASE_URL}/api/generate`, {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ model: modelToUse, prompt: prompt, stream: false, format: 'json' })
+            });
+            if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+            const data = await response.json();
+            
+            // Try to parse the JSON response
+            let newMemory;
+            if (typeof data.response === 'string') {
+                newMemory = JSON.parse(data.response);
+            } else {
+                newMemory = data.response;
+            }
+            
+            activeChat.memories = newMemory; // Update the memories
+            this.saveState();
+            console.log("MemoryAgent SUCCESS: Memories updated.", activeChat.memories);
+
+        } catch (error) {
+            console.error("MemoryAgent FAILED:", error);
+            // Don't pollute user chat, just log the error
+        }
+    }
+    // --- End New ---
 
     addOrUpdateToolInActiveChat(toolName, toolData) {
         if (this.state.activeChatId && this.state.chats[this.state.activeChatId]) {
@@ -619,28 +736,165 @@ async function runReflectiveReview() {
     } catch (error) { console.error("Reflective Review AI call failed:", error); throw error; }
 }
 
-// --- Main AI Interaction ---
+
+// --- *** NEW *** 100% Local Knowledge Agent Function ---
+async function handleKnowledgeRoute(userMessage, memoryString, modelToUse) {
+    let topicKey = "NULL";
+    const mapperPrompt = KNOWLEDGE_MAPPER_PROMPT.replace('%USER_MESSAGE%', userMessage);
+
+    try {
+        // --- Step 1: Call local LLM to find the topic key ---
+        const response = await fetch(`${OLLAMA_API_BASE_URL}/api/generate`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ model: modelToUse, prompt: mapperPrompt, stream: false }) });
+        if (!response.ok) throw new Error(`Mapper HTTP error! status: ${response.status}`);
+        const data = await response.json();
+        topicKey = data.response.trim();
+
+        if (topicKey === "NULL") {
+            // No local content matched, fall back to GeneralFriendAgent
+            console.log("KnowledgeAgent found no match, falling back to GeneralFriend.");
+            // We build and return the GeneralFriendAgent call from *within* this function
+            const fallbackPrompt = `${getSystemPrompt()}\n\n[Long-Term Memory]:\n${memoryString}\n\n[Conversation History]:\n${historyToString(chatManager.getActiveChatHistory())}\n\nUser: ${userMessage}`;
+            const fallbackResponse = await fetch(`${OLLAMA_API_BASE_URL}/api/generate`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ model: modelToUse, prompt: fallbackPrompt, stream: false }) });
+            if (!fallbackResponse.ok) throw new Error(`Fallback HTTP error! status: ${fallbackResponse.status}`);
+            const fallbackData = await fallbackResponse.json();
+            return fallbackData.response.trim();
+        }
+
+        // --- Step 2: Get the local content using the key ---
+        console.log(`KnowledgeAgent found key: ${topicKey}`);
+        const knowledgeContent = await getContent(topicKey); // Uses your existing function!
+        if (!knowledgeContent) { throw new Error(`Content key ${topicKey} returned null.`); }
+
+        // --- Step 3: Call local LLM to synthesize a friendly answer ---
+        const synthesisPrompt = KNOWLEDGE_SYNTHESIS_PROMPT
+            .replace('%USER_MESSAGE%', userMessage)
+            .replace('%KNOWLEDGE_CONTENT%', knowledgeContent);
+
+        const synthesisResponse = await fetch(`${OLLAMA_API_BASE_URL}/api/generate`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ model: modelToUse, prompt: synthesisPrompt, stream: false }) });
+        if (!synthesisResponse.ok) throw new Error(`Synthesizer HTTP error! status: ${synthesisResponse.status}`);
+        const synthesisData = await synthesisResponse.json();
+        return synthesisData.response.trim();
+
+    } catch (error) {
+        console.error("Error in handleKnowledgeRoute:", error);
+        return "I'm sorry, I tried to look that up in my notes but ran into a little error.";
+    }
+}
+// --- End New ---
+
+
+// --- *** REWRITTEN *** Main AI Interaction (getOllamaResponse) ---
 async function getOllamaResponse(prompt, toolFollowUp = null, documentText = null) {
     const modelToUse = getModelName();
-    const systemPrompt = getSystemPrompt();
+    const systemPrompt = getSystemPrompt(); // This is the "GeneralFriendAgent" prompt
     const chatHistory = chatManager.getActiveChatHistory();
     const activeTools = chatManager.getActiveChatTools();
     const toolsStateString = toolsToString(activeTools);
-    let userPromptSegment = '';
-    if (documentText) userPromptSegment += `[Document Content]:\n${documentText}\n\n`;
+    // Get the new long-term memory
+    const memoryString = JSON.stringify(chatManager.state.chats[chatManager.getActiveChatId()]?.memories || []);
+
+    let userMessage = prompt;
+    let route = 'GeneralFriendAgent'; // Default route
+    
+    // --- 1. HANDLE TOOL FOLLOW-UPS (Skip Router) ---
     if (toolFollowUp) {
-        if (toolFollowUp.type === 'mood_logged') userPromptSegment += `[System Note: User logged mood "${toolFollowUp.mood}". Respond with empathy & open question.]`;
-        else if (toolFollowUp.type === 'checklist_item_completed') userPromptSegment += `[System Note: User completed task "${toolFollowUp.text}". Acknowledge & encourage.]`;
-        else if (toolFollowUp.type === 'breathing_complete') userPromptSegment += `[System Note: User finished breathing exercise. Ask how they feel.]`;
-    } else { userPromptSegment += `User: ${prompt}`; }
-    const fullPrompt = `${systemPrompt}\n\n[Current Toolbox State]:\n${toolsStateString}\n\n[Conversation History]:\n${historyToString(chatHistory)}\n\n${userPromptSegment}`;
+        console.log("Handling tool follow-up:", toolFollowUp.type);
+        let userPromptSegment = '';
+        if (toolFollowUp.type === 'mood_logged') userPromptSegment = `[System Note: User logged mood "${toolFollowUp.mood}". Respond with empathy & open question.]`;
+        else if (toolFollowUp.type === 'checklist_item_completed') userPromptSegment = `[System Note: User completed task "${toolFollowUp.text}". Acknowledge & encourage.]`;
+        else if (toolFollowUp.type === 'breathing_complete') userPromptSegment = `[System Note: User finished breathing exercise. Ask how they feel.]`;
+        
+        const fullPrompt = `${systemPrompt}\n\n[Long-Term Memory]:\n${memoryString}\n\n[Current Toolbox State]:\n${toolsStateString}\n\n[Conversation History]:\n${historyToString(chatHistory)}\n\n${userPromptSegment}`;
+        
+        try {
+            const response = await fetch(`${OLLAMA_API_BASE_URL}/api/generate`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ model: modelToUse, prompt: fullPrompt, stream: false }) });
+            if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+            const data = await response.json();
+            return data.response.trim();
+        } catch (error) {
+            console.error('Error in Tool Follow-up:', error);
+            return `I'm sorry, an error occurred: ${error.message}`;
+        }
+    }
+
+    // --- 2. RUN THE MASTER ROUTER ---
+    const routerPrompt = ROUTER_PROMPT
+        .replace('%MEMORY%', memoryString)
+        .replace('%USER_MESSAGE%', userMessage);
+    
     try {
-        const response = await fetch(`${OLLAMA_API_BASE_URL}/api/generate`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ model: modelToUse, prompt: fullPrompt, stream: false }) });
+        const response = await fetch(`${OLLAMA_API_BASE_URL}/api/generate`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ model: modelToUse, prompt: routerPrompt, stream: false }) });
+        if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+        const data = await response.json();
+        route = data.response.trim();
+        console.log("Master Router Chose:", route);
+    } catch (error) {
+        console.error("Master Router FAILED:", error);
+        route = 'GeneralFriendAgent'; // Fail safe
+    }
+
+    // --- 3. EXECUTE THE CHOSEN ROUTE ---
+    let finalPrompt;
+    switch (route) {
+        case 'CrisisAgent':
+            // This is already handled by preScreenMessage, but if router catches it,
+            // we'll treat it as a high-priority GeneralFriend message.
+            // The preScreenMessage is the *real* safety net.
+            finalPrompt = `${systemPrompt}\n\n[Long-Term Memory]:\n${memoryString}\n\n[Conversation History]:\n${historyToString(chatHistory)}\n\nUser: ${userMessage}`;
+            break;
+
+        case 'CbtAnalystAgent':
+            const cbtChatPrompt = `You are Aura, an expert in CBT. The user's last message seems to contain a negative thought pattern.
+            [User's Message]: "${userMessage}"
+            [Long-Term Memory]: ${memoryString}
+            [Chat History]: ${historyToString(chatHistory)}
+            
+            Your Task:
+            1.  Gently validate their feeling.
+            2.  Ask a curious question to help them explore the thought.
+            3.  Proactively create a "Thought Record" tool to help.
+            4.  Embed the <tool_create type="thought_record" theme="${userMessage.substring(0, 50)}..."/> tag.`;
+            finalPrompt = cbtChatPrompt;
+            break;
+        
+        case 'PlannerAgent':
+            const plannerPrompt = `You are Aura, an expert project planner. The user wants to make a plan.
+            [User's Message]: "${userMessage}"
+            [Long-Term Memory]: ${memoryString}
+            
+            Your Task:
+            1.  Acknowledge the goal.
+            2.  Create a <tool_create type="checklist" theme="Plan: ${userMessage.substring(0, 50)}..."/> tag.
+            3.  Tell the user you've created a checklist to help them get started.`;
+            finalPrompt = plannerPrompt;
+            break;
+
+        case 'KnowledgeAgent':
+            // This route is now handled by its own function
+            return await handleKnowledgeRoute(userMessage, memoryString, modelToUse);
+
+        case 'GeneralFriendAgent':
+        default:
+            let userPromptSegment = '';
+            if (documentText) userPromptSegment += `[Document Content]:\n${documentText}\n\n`;
+            userPromptSegment += `User: ${userMessage}`;
+            finalPrompt = `${systemPrompt}\n\n[Long-Term Memory]:\n${memoryString}\n\n[Current Toolbox State]:\n${toolsStateString}\n\n[Conversation History]:\n${historyToString(chatHistory)}\n\n${userPromptSegment}`;
+            break;
+    }
+
+    // --- 4. FINAL LLM CALL (for all non-knowledge routes) ---
+    try {
+        const response = await fetch(`${OLLAMA_API_BASE_URL}/api/generate`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ model: modelToUse, prompt: finalPrompt, stream: false }) });
         if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
         const data = await response.json();
         return data.response.trim();
-    } catch (error) { console.error('Error in getOllamaResponse:', error); return `I'm sorry, an error occurred: ${error.message}`; }
+    } catch (error) {
+        console.error(`Error in getOllamaResponse (Route: ${route}):`, error);
+        return `I'm sorry, an error occurred: ${error.message}`;
+    }
 }
+// --- End Rewritten Function ---
+
 
 // --- Utility Functions ---
 function historyToString(history) { return (history || []).map(m => `${m.role === 'user' ? 'User' : 'Assistant'}: ${m.content}`).join('\n'); }
