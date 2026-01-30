@@ -107,10 +107,23 @@ function renderThoughtRecordInModal(record, container) {
          <a href="#" class="content-link text-xs text-pink-400 hover:underline mt-1 block" data-topic="thought-record-info">Learn more about Thought Records</a>`;
     container.appendChild(section);
 }
+function renderWebSearchInModal(search, container) {
+    const section = document.createElement('div');
+    section.className = 'web-search-card tool-card';
+    let html = `<h4 class="text-xl font-bold mb-3 text-gray-200">${search.title}</h4><div class="search-results">`;
+    (search.results || []).forEach((result, index) => {
+        html += `
+            <div class="search-result mb-4">
+                <h5 class="text-lg font-semibold text-pink-400"><a href="${result.link}" target="_blank" class="hover:underline">${result.title}</a></h5>
+                <p class="text-gray-300 text-sm">${result.snippet}</p>
+            </div>`;
+    });
+    html += `</div>`; section.innerHTML = html; container.appendChild(section);
+}
 function renderToolsInModal(tools) {
     toolsModalContent.innerHTML = '';
     let hasTools = false;
-    const renderOrder = ['mood_tracker', 'checklist', 'thought_record', 'breathing_exercise', 'affirmation_card'];
+    const renderOrder = ['mood_tracker', 'checklist', 'thought_record', 'breathing_exercise', 'affirmation_card', 'web_search'];
     renderOrder.forEach(toolName => {
         if (tools[toolName]?.length > 0) {
             hasTools = true;
@@ -121,6 +134,7 @@ function renderToolsInModal(tools) {
                     case 'thought_record': renderThoughtRecordInModal(toolInstance, toolsModalContent); break;
                     case 'breathing_exercise': renderBreathingExerciseInModal(toolInstance, toolsModalContent); break;
                     case 'affirmation_card': renderAffirmationCardInModal(toolInstance, toolsModalContent); break;
+                    case 'web_search': renderWebSearchInModal(toolInstance, toolsModalContent); break;
                 }
             });
         }

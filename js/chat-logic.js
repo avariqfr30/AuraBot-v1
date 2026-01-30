@@ -192,13 +192,19 @@ const DEFAULT_SYSTEM_PROMPT = `You are a friendly and helpful assistant named Au
     -   **Trigger:** Use this when a user expresses feelings of high stress, anxiety, or panic.
     -   **Example Tag:** \`<tool_create type="breathing_exercise" />\`
 
+6.  **Web Search**
+    -   **Type:** \`web_search\`
+    -   **Trigger:** Use this when the user asks a factual question that requires up-to-date or external information, such as current events, news, or general knowledge not related to mental health.
+    -   **Theme:** The search query.
+    -   **Example Tag:** \`<tool_create type="web_search" theme="latest news on AI" />\`
+
 // =================================================================
 // --- CONVERSATIONAL STYLE ---
 // =================================================================
 - Your tone is warm, encouraging, and relaxed. Use contractions (you're, it's, let's).
 - Be supportive and proactive. Confidently create tools you think will help and then inform the user what you've done.`;
-const DEFAULT_MODEL = 'kimi-k2:1t-cloud';
-const DEFAULT_EMBEDDING_MODEL = 'qwen3-embedding:latest ';
+const DEFAULT_MODEL = 'gpt-oss:120b-cloud';
+const DEFAULT_EMBEDDING_MODEL = 'bge-m3:latest';
 const STATE_STORAGE_KEY = 'multi_chat_app_state';
 // *** MODIFICATION ***
 // OLLAMA_API_BASE_URL is now loaded from config.js, so it's removed from here.
@@ -675,6 +681,27 @@ async function createToolByType(type, theme = '') {
         case 'thought_record':
             prompt = `Create JSON for a CBT "Thought Record". Theme (optional situation): "${theme}". Structure: { "type": "thought_record", "id": "tr-\${Date.now()}", "title": "Thought Record", "situation": "${theme || ''}", "automaticThoughts": "", "emotions": "", "cognitiveDistortions": "", "evidenceFor": "", "evidenceAgainst": "", "balancedThought": "", "outcomeEmotions": "" }`;
             break;
+        case 'web_search':
+            // Special case: perform web search
+            try {
+                const response = await fetch(`/api/search?query=${encodeURIComponent(theme)}`);
+                if (!response.ok) throw new Error(`Search API error: ${response.status}`);
+                const data = await response.json();
+                return {
+                    type: 'web_search',
+                    id: `search-${Date.now()}`,
+                    title: `Search Results for "${theme}"`,
+                    results: data.results
+                };
+            } catch (error) {
+                console.error('Error performing web search:', error);
+                return {
+                    type: 'web_search',
+                    id: `search-${Date.now()}`,
+                    title: `Search Results for "${theme}"`,
+                    results: [{ title: 'Error', snippet: 'Failed to fetch search results.' }]
+                };
+            }
         default: return null;
     }
     // All prompts now include instruction to output ONLY raw JSON object.
@@ -685,7 +712,7 @@ async function createToolByType(type, theme = '') {
 // --- Agent/Context Formatting ---
 function toolsToString(tools) {
     let toolString = '';
-    const toolOrder = ['mood_tracker', 'checklist', 'thought_record', 'affirmation_card', 'breathing_exercise'];
+    const toolOrder = ['mood_tracker', 'checklist', 'thought_record', 'affirmation_card', 'breathing_exercise', 'web_search'];
     toolOrder.forEach(toolName => {
         if (tools[toolName]?.length > 0) {
             tools[toolName].forEach(toolInstance => {
@@ -695,6 +722,7 @@ function toolsToString(tools) {
                     case 'thought_record': toolString += `- Thought Record: "${toolInstance.title}" (${toolInstance.situation ? 'Situation: '+toolInstance.situation.substring(0,30)+'...' : 'Empty'})\n`; break;
                     case 'affirmation_card': toolString += `- Affirmation Card: "${toolInstance.title}"\n${Array.isArray(toolInstance.text) ? toolInstance.text.map(t => `  - "${t}"`).join('\n') : ''}\n`; break;
                     case 'breathing_exercise': toolString += `- Breathing Exercise: "${toolInstance.title}" available.\n`; break;
+                    case 'web_search': toolString += `- Web Search: "${toolInstance.title}"\n${(toolInstance.results || []).map((result, i) => `  ${i + 1}. ${result.title}: ${result.snippet}`).join('\n')}\n`; break;
                 }
             });
         }
@@ -750,14 +778,31 @@ async function handleKnowledgeRoute(userMessage, memoryString, modelToUse) {
         topicKey = data.response.trim();
 
         if (topicKey === "NULL") {
-            // No local content matched, fall back to GeneralFriendAgent
-            console.log("KnowledgeAgent found no match, falling back to GeneralFriend.");
-            // We build and return the GeneralFriendAgent call from *within* this function
-            const fallbackPrompt = `${getSystemPrompt()}\n\n[Long-Term Memory]:\n${memoryString}\n\n[Conversation History]:\n${historyToString(chatManager.getActiveChatHistory())}\n\nUser: ${userMessage}`;
-            const fallbackResponse = await fetch(`${OLLAMA_API_BASE_URL}/api/generate`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ model: modelToUse, prompt: fallbackPrompt, stream: false }) });
-            if (!fallbackResponse.ok) throw new Error(`Fallback HTTP error! status: ${fallbackResponse.status}`);
-            const fallbackData = await fallbackResponse.json();
-            return fallbackData.response.trim();
+            // No local content matched, try web search for general knowledge
+            console.log("KnowledgeAgent found no match, trying web search.");
+            try {
+                const searchResponse = await fetch(`/api/search?query=${encodeURIComponent(userMessage)}`);
+                if (!searchResponse.ok) throw new Error(`Search API error: ${searchResponse.status}`);
+                const searchData = await searchResponse.json();
+                // Format search results as knowledge content
+                const knowledgeContent = searchData.results.map(result => `${result.title}: ${result.snippet}`).join('\n\n');
+                // Proceed to synthesis with search results
+                const synthesisPrompt = KNOWLEDGE_SYNTHESIS_PROMPT
+                    .replace('%USER_MESSAGE%', userMessage)
+                    .replace('%KNOWLEDGE_CONTENT%', knowledgeContent || "No search results found.");
+                const synthesisResponse = await fetch(`${OLLAMA_API_BASE_URL}/api/generate`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ model: modelToUse, prompt: synthesisPrompt, stream: false }) });
+                if (!synthesisResponse.ok) throw new Error(`Synthesizer HTTP error! status: ${synthesisResponse.status}`);
+                const synthesisData = await synthesisResponse.json();
+                return synthesisData.response.trim();
+            } catch (searchError) {
+                console.error("Web search failed, falling back to GeneralFriend:", searchError);
+                // Fall back to GeneralFriendAgent
+                const fallbackPrompt = `${getSystemPrompt()}\n\n[Long-Term Memory]:\n${memoryString}\n\n[Conversation History]:\n${historyToString(chatManager.getActiveChatHistory())}\n\nUser: ${userMessage}`;
+                const fallbackResponse = await fetch(`${OLLAMA_API_BASE_URL}/api/generate`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ model: modelToUse, prompt: fallbackPrompt, stream: false }) });
+                if (!fallbackResponse.ok) throw new Error(`Fallback HTTP error! status: ${fallbackResponse.status}`);
+                const fallbackData = await fallbackResponse.json();
+                return fallbackData.response.trim();
+            }
         }
 
         // --- Step 2: Get the local content using the key ---

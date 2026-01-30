@@ -42,12 +42,43 @@ ollama pull mxbai-embed-large:latest
 
 ### **2\. Run the Application**
 
-This project is a simple front-end application. There's no complex build process.
+The application now includes a server component for Google Search integration. To run Aura:
 
-1. Clone this repository to your local machine.  
-2. All you need to do is open the index.html file in your web browser. Most modern browsers should be able to run it directly from the filesystem.
+1. Install Node.js dependencies: `npm install`
+2. Start the server: `npm start` or `node js/server.js`
+3. Open your browser and navigate to `http://localhost:3000`
 
-That's it\! You can now start chatting with Aura.
+The server will serve the application and handle search requests. If you prefer the original file-based approach (without search), you can still open index.html directly, but search features will be unavailable.
+
+## **Google Search Integration**
+
+Aura now includes real-time Google Search capabilities to provide more versatile and up-to-date information. When users ask factual questions or need current information, Aura can perform live searches using Google's Custom Search API.
+
+### **Setup Instructions**
+
+1. **Obtain Google API Credentials**:
+   - Go to the [Google Cloud Console](https://console.cloud.google.com/)
+   - Create a new project or select an existing one
+   - Enable the Custom Search JSON API
+   - Create API credentials (API Key)
+   - Set up a Custom Search Engine at [CSE Console](https://cse.google.com/)
+   - Note your Search Engine ID (cx parameter)
+
+2. **Configure Environment Variables**:
+   - Create a `.env` file in the project root
+   - Add your credentials:
+     ```
+     GOOGLE_API_KEY=your_google_api_key_here
+     GOOGLE_CSE_ID=your_custom_search_engine_id_here
+     ```
+
+3. **Run the Search Server**:
+   - Install Node.js if not already installed
+   - Run `npm install express axios dotenv` in the project root
+   - Start the server: `node js/server.js`
+   - The server will run on http://localhost:3000
+
+The search feature provides real-time, latest results based on current date and time, enhancing Aura's ability to answer questions about current events, news, and general knowledge.
 
 ## **The Tech Stack**
 
