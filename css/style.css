@@ -588,24 +588,100 @@ pre::-webkit-scrollbar-thumb:hover {
 /* This overrides the 'space-y-6' class from index.html,
    which added vertical margins we no longer want. */
 #toolsModalContent > * + * {
-    margin-top: 0; 
+    margin-top: 0;
 }
 
-/* This gives all tool cards a flexible width so they
-   can form a grid. */
+/* Adaptive tool cards that respond to content and screen size */
 #toolsModalContent > .checklist-card,
 #toolsModalContent > .breathing-exercise-container,
 #toolsModalContent > .affirmation-card,
 #toolsModalContent > .mood-tracker-card {
-    flex: 1 1 340px; /* Each card will try to be 340px */
-    min-width: 320px; /* But won't shrink smaller than 320px */
+    flex: 1 1 clamp(280px, calc(25vw + 80px), 400px); /* Responsive width based on viewport */
+    min-width: 280px; /* Minimum readable width */
+    max-width: 100%; /* Don't overflow container */
 }
 
-/* Give Thought Record more horizontal space */
+/* Thought Record gets more space but still adaptive */
 #toolsModalContent > .thought-record-card {
-    flex: 1 1 700px; /* Allow this specific card to be much wider */
+    flex: 1 1 clamp(400px, calc(50vw + 100px), 800px); /* More space for detailed content */
     min-width: 320px;
-    max-width: 100%; /* Don't overflow the modal */
+    max-width: 100%;
+}
+
+/* Web search results get full width for readability */
+#toolsModalContent > .web-search-card {
+    flex: 1 1 100%; /* Full width for search results */
+    max-width: 100%;
+}
+
+/* Responsive modal container */
+.toolbox-modal-container {
+    max-height: 90vh; /* Don't exceed viewport height */
+    overflow-y: auto; /* Enable scrolling when needed */
+}
+
+/* Mobile-first responsive adjustments */
+@media (max-width: 640px) {
+    .toolbox-modal-container {
+        margin: 1rem; /* Less margin on small screens */
+        padding: 1.5rem; /* Less padding on small screens */
+        max-height: 95vh; /* Use more screen real estate on mobile */
+    }
+
+    #toolsModalContent {
+        gap: 1rem; /* Smaller gaps on mobile */
+    }
+
+    #toolsModalContent > .checklist-card,
+    #toolsModalContent > .breathing-exercise-container,
+    #toolsModalContent > .affirmation-card,
+    #toolsModalContent > .mood-tracker-card {
+        flex: 1 1 100%; /* Single column on mobile */
+        min-width: 250px;
+    }
+
+    #toolsModalContent > .thought-record-card {
+        flex: 1 1 100%; /* Full width on mobile for readability */
+        min-width: 250px;
+    }
+}
+
+@media (min-width: 641px) and (max-width: 1024px) {
+    .toolbox-modal-container {
+        max-width: calc(100vw - 2rem); /* Use most of screen width on tablets */
+    }
+
+    #toolsModalContent > .checklist-card,
+    #toolsModalContent > .breathing-exercise-container,
+    #toolsModalContent > .affirmation-card,
+    #toolsModalContent > .mood-tracker-card {
+        flex: 1 1 clamp(300px, calc(33vw + 50px), 350px); /* 2-3 columns on tablets */
+    }
+}
+
+@media (min-width: 1025px) {
+    .toolbox-modal-container {
+        max-width: min(90vw, 1400px); /* Large screens get wider modal but not too wide */
+    }
+
+    #toolsModalContent > .checklist-card,
+    #toolsModalContent > .breathing-exercise-container,
+    #toolsModalContent > .affirmation-card,
+    #toolsModalContent > .mood-tracker-card {
+        flex: 1 1 clamp(320px, calc(25vw + 80px), 400px); /* Multiple columns on desktop */
+    }
+}
+
+/* Ensure modal doesn't get too tall on very short screens */
+@media (max-height: 600px) {
+    .toolbox-modal-container {
+        max-height: 95vh;
+        padding: 1rem;
+    }
+
+    #toolsModalContent {
+        gap: 1rem;
+    }
 }
 /* --- END NEW --- */
 
