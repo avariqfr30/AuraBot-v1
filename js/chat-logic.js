@@ -1,4 +1,4 @@
-// chat-logic.js
+// js/chat-logic.js
 // Completely Refactored Architecture: DRY API calls, local Content Store, Master Router, and Vector DB.
 
 // --- 1. CONFIGURATION & PROMPTS ---
@@ -69,7 +69,7 @@ Rule: DO NOT generate any <tool_create> tags. Just provide the information natur
 
 // --- 2. API ABSTRACTION ---
 async function _callLLM(prompt, format = null) {
-    const model = localStorage.getItem(STORAGE_KEYS.MODEL) || 'kimi-k2:1t-cloud';
+    const model = localStorage.getItem(STORAGE_KEYS.MODEL) || 'llama3:8b'; // Set to your default model
     try {
         const res = await fetch(`${OLLAMA_API_BASE_URL}/api/generate`, {
             method: 'POST',
@@ -154,7 +154,7 @@ class ChatManager {
     // Vector Database Store Method
     async vectorizeData(text, metadata = {}) {
         try {
-            await fetch('http://localhost:3000/api/store_memory', {
+            await fetch('http://127.0.0.1:3000/api/store_memory', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ text, metadata })
@@ -165,7 +165,7 @@ class ChatManager {
     // Vector Database Search Method
     async searchVectorData(query) {
         try {
-             const res = await fetch('http://localhost:3000/api/search_memory', {
+             const res = await fetch('http://127.0.0.1:3000/api/search_memory', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ query })
@@ -305,7 +305,7 @@ async function getOllamaResponse(userMessage, toolFollowUp = null, documentText 
         console.log(`[SearchAgent] Sending sanitized query to proxy: "${query}"`);
 
         try {
-            const res = await fetch(`http://localhost:3000/api/search?query=${encodeURIComponent(query)}`);
+            const res = await fetch(`http://127.0.0.1:3000/api/search?query=${encodeURIComponent(query)}`);
             
             // Explicitly catch 400/500 errors from your Express server
             if (!res.ok) {

@@ -1,3 +1,4 @@
+// js/app.js
 document.addEventListener('DOMContentLoaded', () => {
     const userInput = document.getElementById('userInput');
     const sendButton = document.getElementById('sendButton');
@@ -46,8 +47,8 @@ document.addEventListener('DOMContentLoaded', () => {
         hideTypingIndicator();
 
         // 3. Process Tools
-        // This robust regex catches single/double quotes, weird spacing, and missing closing slashes
-        const toolTagRegex = /<tool_create[^>]*type=["']([^"']+)["'][^>]*(?:theme=["']([^"']+)["'])?[^>]*\/?>/gi;   
+        // Robust regex catches single/double quotes, weird spacing, and missing slashes
+        const toolTagRegex = /<tool_create[^>]*type=["']([^"']+)["'][^>]*(?:theme=["']([^"']+)["'])?[^>]*\/?>/gi;
         let cleanedResponse = rawResponse;
         const matchedTags = [...rawResponse.matchAll(toolTagRegex)];
 

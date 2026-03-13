@@ -1,9 +1,9 @@
 /.history
-<<<<<<< HEAD
-.env
-=======
-/.node_modules
-/.venv
-./package-lock.json
-./package.json
->>>>>>> 420df6a (Yee)
+/.env
+node_modules/
+npm-debug.log*
+yarn-error.log*
+dist/
+build/
+.DS_Store
+.vscode/

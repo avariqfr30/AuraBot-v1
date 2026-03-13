@@ -1,3 +1,4 @@
+// js/ui.js
 const chatMessages = document.getElementById('chatMessages');
 const chatList = document.getElementById('chatList');
 const settingsModal = document.getElementById('settingsModal');
@@ -103,23 +104,11 @@ function renderThoughtRecordInModal(record, container) {
         <a href="#" class="content-link text-xs text-pink-400 hover:underline mt-1 block" data-topic="thought-record-info">Learn more about Thought Records</a>`;
     container.appendChild(section);
 }
-function renderWebSearchInModal(search, container) {
-    const section = document.createElement('div');
-    section.className = 'web-search-card tool-card';
-    let html = `<h4 class="text-xl font-bold mb-3 text-gray-200">${search.title}</h4><div class="search-results">`;
-    (search.results || []).forEach((result, index) => {
-        html += `
-            <div class="search-result mb-4">
-                <h5 class="text-lg font-semibold text-pink-400"><a href="${result.link}" target="_blank" class="hover:underline">${result.title}</a></h5>
-                <p class="text-gray-300 text-sm">${result.snippet}</p>
-            </div>`;
-    });
-    html += `</div>`; section.innerHTML = html; container.appendChild(section);
-}
+
 function renderToolsInModal(tools) {
     toolsModalContent.innerHTML = '';
     let hasTools = false;
-    const renderOrder = ['mood_tracker', 'checklist', 'thought_record', 'breathing_exercise', 'affirmation_card', 'web_search'];
+    const renderOrder = ['mood_tracker', 'checklist', 'thought_record', 'breathing_exercise', 'affirmation_card'];
     renderOrder.forEach(toolName => {
         if (tools[toolName]?.length > 0) {
             hasTools = true;
@@ -130,45 +119,11 @@ function renderToolsInModal(tools) {
                     case 'thought_record': renderThoughtRecordInModal(toolInstance, toolsModalContent); break;
                     case 'breathing_exercise': renderBreathingExerciseInModal(toolInstance, toolsModalContent); break;
                     case 'affirmation_card': renderAffirmationCardInModal(toolInstance, toolsModalContent); break;
-                    case 'web_search': renderWebSearchInModal(toolInstance, toolsModalContent); break;
                 }
             });
         }
     });
     if (!hasTools) { toolsModalContent.innerHTML = '<p class="text-gray-400 text-center w-full">No tools created yet.</p>'; }
-
-    // Trigger modal resize after content is rendered
-    setTimeout(() => {
-        if (typeof openToolsModal === 'function') {
-            // Re-run the adaptive sizing logic
-            const modalContainer = document.querySelector('.toolbox-modal-container');
-            if (modalContainer && !toolsModal.classList.contains('hidden')) {
-                const viewportHeight = window.innerHeight;
-                const viewportWidth = window.innerWidth;
-                const contentHeight = toolsModalContent.scrollHeight;
-                const headerHeight = 120;
-                const footerHeight = 80;
-
-                const optimalHeight = Math.min(
-                    contentHeight + headerHeight + footerHeight,
-                    viewportHeight * 0.9
-                );
-
-                let optimalWidth;
-                if (viewportWidth < 640) {
-                    optimalWidth = viewportWidth - 32;
-                } else if (viewportWidth < 1024) {
-                    optimalWidth = Math.min(viewportWidth * 0.9, 1000);
-                } else {
-                    optimalWidth = Math.min(viewportWidth * 0.85, 1400);
-                }
-
-                modalContainer.style.maxHeight = `${optimalHeight}px`;
-                modalContainer.style.width = `${optimalWidth}px`;
-                modalContainer.style.maxWidth = `${optimalWidth}px`;
-            }
-        }
-    }, 50);
 }
 
 // --- Chat Messages ---
@@ -231,61 +186,6 @@ function renderChatList(chats, activeChatId) {
 }
 
 function toggleToolsButton(hasTools) { toolsButton.classList.toggle('hidden', !hasTools); }
-
-// --- Modal Visibility ---
-function openToolsModal() {
-    toolsModal.classList.remove('hidden');
-    // Make modal adaptive to content and screen size
-    setTimeout(() => {
-        const modalContainer = document.querySelector('.toolbox-modal-container');
-        const modalContent = toolsModalContent;
-
-        if (modalContainer && modalContent) {
-            // Reset any previous sizing
-            modalContainer.style.maxHeight = '';
-            modalContainer.style.height = '';
-
-            // Calculate optimal dimensions
-            const viewportHeight = window.innerHeight;
-            const viewportWidth = window.innerWidth;
-            const contentHeight = modalContent.scrollHeight;
-            const headerHeight = 120; // Approximate header + padding
-            const footerHeight = 80; // Approximate footer + padding
-
-            // Adaptive height: use content height but cap at viewport
-            const optimalHeight = Math.min(
-                contentHeight + headerHeight + footerHeight,
-                viewportHeight * 0.9 // Max 90% of viewport
-            );
-
-            // Adaptive width: responsive based on screen size and content
-            let optimalWidth;
-            if (viewportWidth < 640) {
-                // Mobile: use most of screen width
-                optimalWidth = viewportWidth - 32; // Account for margins
-            } else if (viewportWidth < 1024) {
-                // Tablet: use 90% of screen width
-                optimalWidth = Math.min(viewportWidth * 0.9, 1000);
-            } else {
-                // Desktop: use content-based width up to max
-                optimalWidth = Math.min(viewportWidth * 0.85, 1400);
-            }
-
-            // Apply adaptive sizing
-            modalContainer.style.maxHeight = `${optimalHeight}px`;
-            modalContainer.style.width = `${optimalWidth}px`;
-            modalContainer.style.maxWidth = `${optimalWidth}px`;
-
-            // Center the modal
-            modalContainer.style.margin = '0 auto';
-        }
-    }, 10); // Small delay to ensure content is rendered
-}
-function closeToolsModal() { toolsModal.classList.add('hidden'); }
-function openSettingsModal() { settingsModal.classList.remove('hidden'); }
-function closeSettingsModal() { settingsModal.classList.add('hidden'); }
-
-// --- Indicators & States ---
 function showTypingIndicator() {
     if (document.getElementById('typingIndicator')) return;
     const typingDiv = document.createElement('div'); typingDiv.id = 'typingIndicator'; typingDiv.className = 'flex justify-start mb-4';
@@ -363,49 +263,4 @@ function processContentLinks() {
     );
 }
 
-// --- Theme Handling ---
-function applyTheme(theme) {
-    // Only dark mode logic
-    document.documentElement.setAttribute('data-theme', 'dark');
-    document.body.classList.add('bg-gray-950', 'text-gray-200');
-    document.body.classList.remove('bg-white', 'text-gray-900');
-    localStorage.setItem('aura_theme', 'dark');
-    if (themeToggleButton) themeToggleButton.setAttribute('aria-pressed', 'false'); // Assuming button still exists but doesn't toggle
-}
-
-// --- Window Resize Handler for Adaptive Modal ---
-function handleWindowResize() {
-    const modalContainer = document.querySelector('.toolbox-modal-container');
-    if (modalContainer && !toolsModal.classList.contains('hidden')) {
-        // Re-apply adaptive sizing on window resize
-        const viewportHeight = window.innerHeight;
-        const viewportWidth = window.innerWidth;
-        const contentHeight = toolsModalContent.scrollHeight;
-        const headerHeight = 120;
-        const footerHeight = 80;
-
-        const optimalHeight = Math.min(
-            contentHeight + headerHeight + footerHeight,
-            viewportHeight * 0.9
-        );
-
-        let optimalWidth;
-        if (viewportWidth < 640) {
-            optimalWidth = viewportWidth - 32;
-        } else if (viewportWidth < 1024) {
-            optimalWidth = Math.min(viewportWidth * 0.9, 1000);
-        } else {
-            optimalWidth = Math.min(viewportWidth * 0.85, 1400);
-        }
-
-        modalContainer.style.maxHeight = `${optimalHeight}px`;
-        modalContainer.style.width = `${optimalWidth}px`;
-        modalContainer.style.maxWidth = `${optimalWidth}px`;
-    }
-}
-
-document.addEventListener('DOMContentLoaded', () => {
-    applyTheme('dark');
-    // Add window resize listener for adaptive modal
-    window.addEventListener('resize', handleWindowResize);
-});
+document.documentElement.setAttribute('data-theme', 'dark');
