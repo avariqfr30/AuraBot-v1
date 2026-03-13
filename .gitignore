@@ -1,2 +1,9 @@
 /.history
+<<<<<<< HEAD
 .env
+=======
+/.node_modules
+/.venv
+./package-lock.json
+./package.json
+>>>>>>> 420df6a (Yee)
