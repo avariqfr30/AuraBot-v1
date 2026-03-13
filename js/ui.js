@@ -103,7 +103,6 @@ function renderThoughtRecordInModal(record, container) {
         <a href="#" class="content-link text-xs text-pink-400 hover:underline mt-1 block" data-topic="thought-record-info">Learn more about Thought Records</a>`;
     container.appendChild(section);
 }
-<<<<<<< HEAD
 function renderWebSearchInModal(search, container) {
     const section = document.createElement('div');
     section.className = 'web-search-card tool-card';
@@ -117,9 +116,6 @@ function renderWebSearchInModal(search, container) {
     });
     html += `</div>`; section.innerHTML = html; container.appendChild(section);
 }
-=======
-
->>>>>>> 8b0a9f5 (Push change)
 function renderToolsInModal(tools) {
     toolsModalContent.innerHTML = '';
     let hasTools = false;
@@ -235,7 +231,6 @@ function renderChatList(chats, activeChatId) {
 }
 
 function toggleToolsButton(hasTools) { toolsButton.classList.toggle('hidden', !hasTools); }
-<<<<<<< HEAD
 
 // --- Modal Visibility ---
 function openToolsModal() {
@@ -291,8 +286,6 @@ function openSettingsModal() { settingsModal.classList.remove('hidden'); }
 function closeSettingsModal() { settingsModal.classList.add('hidden'); }
 
 // --- Indicators & States ---
-=======
->>>>>>> 8b0a9f5 (Push change)
 function showTypingIndicator() {
     if (document.getElementById('typingIndicator')) return;
     const typingDiv = document.createElement('div'); typingDiv.id = 'typingIndicator'; typingDiv.className = 'flex justify-start mb-4';
@@ -370,7 +363,6 @@ function processContentLinks() {
     );
 }
 
-<<<<<<< HEAD
 // --- Theme Handling ---
 function applyTheme(theme) {
     // Only dark mode logic
@@ -417,6 +409,3 @@ document.addEventListener('DOMContentLoaded', () => {
     // Add window resize listener for adaptive modal
     window.addEventListener('resize', handleWindowResize);
 });
-=======
-document.documentElement.setAttribute('data-theme', 'dark');
->>>>>>> 8b0a9f5 (Push change)
