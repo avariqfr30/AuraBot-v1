@@ -14,7 +14,7 @@ app.use(express.json());
 // Use 127.0.0.1 to avoid Node.js IPv6 resolution issues
 const chroma = new ChromaClient({ path: "http://127.0.0.1:8000" });
 const OLLAMA_URL = process.env.OLLAMA_URL || 'http://127.0.0.1:11434';
-const EMBEDDING_MODEL = 'qwen3-embedding:latest'; // Ensure this model is pulled in Ollama
+const EMBEDDING_MODEL = 'bge-m3:latest'; // Ensure this model is pulled in Ollama
 
 // --- Custom Ollama Embedding Function ---
 const ollamaEmbeddingFunction = {
@@ -70,26 +70,36 @@ app.post('/api/search_memory', async (req, res) => {
     }
 });
 
-// --- Google Search Proxy ---
+// --- Serper.dev Live Search Proxy ---
 app.get('/api/search', async (req, res) => {
     const { query } = req.query;
-    const { GOOGLE_API_KEY, GOOGLE_CX } = process.env;
+    const { SERPER_API_KEY } = process.env;
 
     if (!query) return res.status(400).json({ error: 'Query parameter is required' });
-    if (!GOOGLE_API_KEY || !GOOGLE_CX) return res.status(500).json({ error: 'Missing Google API credentials' });
+    if (!SERPER_API_KEY) return res.status(500).json({ error: 'Missing Serper API credentials' });
 
     try {
-        console.log(`[SearchAgent] Executing: "${query}"`);
-        const response = await axios.get('https://www.googleapis.com/customsearch/v1', {
-            params: { key: GOOGLE_API_KEY, cx: GOOGLE_CX, q: query, num: 3 }
+        console.log(`[SearchAgent] Executing Serper: "${query}"`);
+        
+        // Serper requires a POST request with the query in the body
+        const response = await axios.post('https://google.serper.dev/search', {
+            q: query
+        }, {
+            headers: {
+                'X-API-KEY': SERPER_API_KEY,
+                'Content-Type': 'application/json'
+            }
         });
 
-        const items = response.data.items || [];
-        const results = items.map(({ title, snippet, link }) => ({ title, snippet, link }));
+        // Serper stores the main web results in the 'organic' array
+        const items = response.data.organic || [];
+        
+        // Map it to match our existing format and grab the top 4 results
+        const results = items.slice(0, 4).map(({ title, snippet, link }) => ({ title, snippet, link }));
         
         res.json({ results: results.length ? JSON.stringify(results) : "No results found." });
     } catch (error) {
-        console.error('[SearchAgent] API Error:', error.message);
+        console.error('[SearchAgent] API Error:', error.response?.data || error.message);
         res.status(500).json({ error: 'Search failed' });
     }
 });

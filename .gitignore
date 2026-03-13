@@ -1,5 +1,4 @@
 /.history
-/.env
 node_modules/
 npm-debug.log*
 yarn-error.log*
@@ -7,3 +6,6 @@ dist/
 build/
 .DS_Store
 .vscode/
+.venv/
+package-lock.json
+package.json
