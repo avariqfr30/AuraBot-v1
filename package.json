@@ -1,4 +1,5 @@
 {
+<<<<<<< HEAD
   "name": "aurabot-server",
   "version": "1.0.0",
   "description": "Server component for AuraBot with Google Search integration",
@@ -17,3 +18,25 @@
   "author": "",
   "license": "ISC"
 }
+=======
+  "dependencies": {
+    "axios": "^1.13.6",
+    "chromadb": "^3.3.3",
+    "cors": "^2.8.6",
+    "dotenv": "^17.3.1",
+    "express": "^5.2.1"
+  },
+  "name": "js",
+  "version": "1.0.0",
+  "description": "",
+  "main": "app.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "start": "node server.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs"
+}
+>>>>>>> 8b0a9f5 (Push change)

@@ -1,20 +1,14 @@
-// ui.js
-// Handles DOM manipulation: rendering messages, lists, modals.
-
-// --- DOM Element References ---
 const chatMessages = document.getElementById('chatMessages');
 const chatList = document.getElementById('chatList');
 const settingsModal = document.getElementById('settingsModal');
 const toolsModal = document.getElementById('toolsModal');
 const toolsModalContent = document.getElementById('toolsModalContent');
 const toolsButton = document.getElementById('toolsButton');
-const themeToggleButton = document.getElementById('themeToggleButton');
 let contentModalElement = null;
 
-// --- Utility Functions ---
 function clearChatMessages() { chatMessages.innerHTML = ''; }
 
-// --- Rendering functions for the TOOLS MODAL ---
+// --- Tool Rendering Functions ---
 function renderChecklistInModal(checklist, container) {
     const section = document.createElement('div');
     section.className = 'checklist-card tool-card';
@@ -32,6 +26,7 @@ function renderChecklistInModal(checklist, container) {
     });
     html += `</ul></div>`; section.innerHTML = html; container.appendChild(section);
 }
+
 function renderBreathingExerciseInModal(exercise, container) {
     const section = document.createElement('div');
     section.className = 'breathing-exercise-container tool-card';
@@ -42,6 +37,7 @@ function renderBreathingExerciseInModal(exercise, container) {
         <button class="tool-button mt-4" data-action="start_breathing" data-tool-type="breathing_exercise" data-cycle-inhale="${exercise.cycle.inhale}" data-cycle-hold="${exercise.cycle.hold}" data-cycle-exhale="${exercise.cycle.exhale}">Start</button>`;
     container.appendChild(section);
 }
+
 function renderAffirmationCardInModal(card, container) {
     const section = document.createElement('div');
     section.className = 'affirmation-card tool-card';
@@ -51,9 +47,10 @@ function renderAffirmationCardInModal(card, container) {
     section.innerHTML = `
         <h4 class="text-xl font-bold mb-3 text-gray-200">${card.title || "Your Affirmation"}</h4>
         ${affirmationHTML}
-        <button class="tool-button mt-4" data-action="commit_affirmation" data-tool-type="affirmation_card" data-affirmation-text="${Array.isArray(card.text) ? card.text.join(' ') : (card.text || '')}">${card.buttonText || 'I will remember this.'}</button>`;
+        <button class="tool-button mt-4" data-action="commit_affirmation" data-tool-type="affirmation_card">I will remember this.</button>`;
     container.appendChild(section);
 }
+
 function renderMoodTrackerInModal(tracker, container) {
     const section = document.createElement('div');
     section.className = 'mood-tracker-card tool-card';
@@ -77,36 +74,36 @@ function renderMoodTrackerInModal(tracker, container) {
         <p class="text-gray-400 mb-4">How are you feeling right now?</p>${buttonsHTML}${historyHTML}`;
     container.appendChild(section);
 }
+
 function renderThoughtRecordInModal(record, container) {
     const section = document.createElement('div');
     section.className = 'thought-record-card tool-card'; section.dataset.toolId = record.id;
     const escapeHTML = (str) => str?.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#039;') || '';
     
-    // This helper function now returns a div that our CSS column rule can target
     const createTextarea = (idSuffix, label, value) => `
         <div class="mb-3">
             <label for="${record.id}-${idSuffix}" class="block text-sm font-medium text-gray-300 mb-1">${label}</label>
             <textarea id="${record.id}-${idSuffix}" data-field="${idSuffix}" rows="3" class="w-full p-2 bg-gray-800 rounded-md focus:outline-none focus:ring-2 focus:ring-pink-500 text-gray-200">${escapeHTML(value)}</textarea>
         </div>`;
     
-    // We wrap the fields in the .thought-record-columns div
     section.innerHTML = `
         <h4 class="text-xl font-bold mb-4 text-gray-200">${record.title || 'Thought Record'}</h4>
         <div class="thought-record-columns">
             ${createTextarea('situation', 'Situation (What happened?)', record.situation)}
-            ${createTextarea('automaticThoughts', 'Automatic Thoughts (What went through your mind?)', record.automaticThoughts)}
-            ${createTextarea('emotions', 'Emotions (How did you feel? Rate 0-100)', record.emotions)}
-            ${createTextarea('cognitiveDistortions', 'Cognitive Distortions (Any thinking traps?)', record.cognitiveDistortions)}
+            ${createTextarea('automaticThoughts', 'Automatic Thoughts', record.automaticThoughts)}
+            ${createTextarea('emotions', 'Emotions (Rate 0-100)', record.emotions)}
+            ${createTextarea('cognitiveDistortions', 'Cognitive Distortions', record.cognitiveDistortions)}
             ${createTextarea('evidenceFor', 'Evidence FOR the thought', record.evidenceFor)}
             ${createTextarea('evidenceAgainst', 'Evidence AGAINST the thought', record.evidenceAgainst)}
-            ${createTextarea('balancedThought', 'Alternative / Balanced Thought', record.balancedThought)}
-            ${createTextarea('outcomeEmotions', 'Outcome (How do you feel now? Rate 0-100)', record.outcomeEmotions)}
+            ${createTextarea('balancedThought', 'Balanced Thought', record.balancedThought)}
+            ${createTextarea('outcomeEmotions', 'Outcome (Rate 0-100)', record.outcomeEmotions)}
         </div>
         <button class="tool-button mt-3" data-action="save_thought_record" data-tool-id="${record.id}">Save Record</button>
         <p class="text-xs text-gray-500 mt-2">Your record is saved locally in this chat.</p>
-         <a href="#" class="content-link text-xs text-pink-400 hover:underline mt-1 block" data-topic="thought-record-info">Learn more about Thought Records</a>`;
+        <a href="#" class="content-link text-xs text-pink-400 hover:underline mt-1 block" data-topic="thought-record-info">Learn more about Thought Records</a>`;
     container.appendChild(section);
 }
+<<<<<<< HEAD
 function renderWebSearchInModal(search, container) {
     const section = document.createElement('div');
     section.className = 'web-search-card tool-card';
@@ -120,6 +117,9 @@ function renderWebSearchInModal(search, container) {
     });
     html += `</div>`; section.innerHTML = html; container.appendChild(section);
 }
+=======
+
+>>>>>>> 8b0a9f5 (Push change)
 function renderToolsInModal(tools) {
     toolsModalContent.innerHTML = '';
     let hasTools = false;
@@ -175,7 +175,7 @@ function renderToolsInModal(tools) {
     }, 50);
 }
 
-// --- Chat Message Handling ---
+// --- Chat Messages ---
 function addMessage(sender, content) {
     const messageDiv = document.createElement('div');
     const isUser = sender === 'user';
@@ -190,6 +190,7 @@ function addMessage(sender, content) {
     messageDiv.appendChild(chatBubble); chatMessages.appendChild(messageDiv);
     chatMessages.scrollTo({ top: chatMessages.scrollHeight, behavior: 'smooth' });
 }
+
 function addToolStatusMessage(toolType) {
     const formattedName = toolType.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
     const statusDiv = document.createElement('div');
@@ -203,31 +204,38 @@ function addToolStatusMessage(toolType) {
         </div>`;
     chatMessages.appendChild(statusDiv); chatMessages.scrollTo({ top: chatMessages.scrollHeight, behavior: 'smooth' });
 }
+
 function removeToolStatusMessages() { document.querySelectorAll('.tool-status-message').forEach(msg => msg.remove()); }
+
 function displayChat(history) {
     clearChatMessages();
     (history || []).forEach(message => { addMessage(message.role, message.content); });
     processContentLinks();
 }
 
-// --- Other UI Updates ---
 function renderChatList(chats, activeChatId) {
     chatList.innerHTML = '';
-    const validChats = Object.values(chats || {}).filter(chat => chat?.id && chat.title);
-    const sortedChats = validChats.sort((a, b) => b.id - a.id);
+    const sortedChats = Object.values(chats || {}).filter(c => c?.id).sort((a, b) => b.id - a.id);
     sortedChats.forEach(chat => {
         const chatTab = document.createElement('div');
-        let tabClasses = 'flex justify-between items-center p-3 rounded-lg cursor-pointer transition duration-150 ease-in-out w-full mb-1';
-        if (chat.id === activeChatId) tabClasses += ' bg-gray-700 text-white';
-        else tabClasses += ' text-gray-300 hover:bg-gray-800 hover:text-gray-100';
-        chatTab.className = tabClasses; chatTab.dataset.chatId = chat.id;
-        const chatTitle = document.createElement('span'); chatTitle.textContent = chat.title; chatTitle.className = 'truncate text-sm font-medium';
-        const deleteButton = document.createElement('button'); deleteButton.className = 'delete-chat-button text-gray-500 hover:text-red-500 transition duration-150 opacity-75 hover:opacity-100 shrink-0 ml-2'; deleteButton.dataset.chatId = chat.id; deleteButton.innerHTML = `<svg class="h-4 w-4" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clip-rule="evenodd" /></svg>`;
-        chatTab.appendChild(chatTitle); chatTab.appendChild(deleteButton);
+        chatTab.className = `flex justify-between items-center p-3 rounded-lg cursor-pointer mb-1 ${chat.id === activeChatId ? 'bg-gray-700 text-white' : 'text-gray-300 hover:bg-gray-800'}`;
+        chatTab.dataset.chatId = chat.id;
+        
+        const chatTitle = document.createElement('span'); 
+        chatTitle.textContent = chat.title; chatTitle.className = 'truncate text-sm font-medium';
+        
+        const deleteBtn = document.createElement('button'); 
+        deleteBtn.className = 'delete-chat-button text-gray-500 hover:text-red-500 ml-2'; 
+        deleteBtn.dataset.chatId = chat.id; 
+        deleteBtn.innerHTML = `<svg class="h-4 w-4" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clip-rule="evenodd" /></svg>`;
+        
+        chatTab.appendChild(chatTitle); chatTab.appendChild(deleteBtn);
         chatList.appendChild(chatTab);
     });
 }
+
 function toggleToolsButton(hasTools) { toolsButton.classList.toggle('hidden', !hasTools); }
+<<<<<<< HEAD
 
 // --- Modal Visibility ---
 function openToolsModal() {
@@ -283,6 +291,8 @@ function openSettingsModal() { settingsModal.classList.remove('hidden'); }
 function closeSettingsModal() { settingsModal.classList.add('hidden'); }
 
 // --- Indicators & States ---
+=======
+>>>>>>> 8b0a9f5 (Push change)
 function showTypingIndicator() {
     if (document.getElementById('typingIndicator')) return;
     const typingDiv = document.createElement('div'); typingDiv.id = 'typingIndicator'; typingDiv.className = 'flex justify-start mb-4';
@@ -290,43 +300,77 @@ function showTypingIndicator() {
     chatMessages.appendChild(typingDiv); chatMessages.scrollTo({ top: chatMessages.scrollHeight, behavior: 'smooth' });
 }
 function hideTypingIndicator() { document.getElementById('typingIndicator')?.remove(); }
-function setMicButtonState(state = 'idle') {
-    const micButton = document.getElementById('micButton'); if (!micButton) return;
-    micButton.classList.replace(state === 'listening' ? 'bg-gray-700' : 'bg-red-600', state === 'listening' ? 'bg-red-600' : 'bg-gray-700');
-    micButton.classList.replace(state === 'listening' ? 'hover:bg-gray-600' : 'hover:bg-red-700', state === 'listening' ? 'hover:bg-red-700' : 'hover:bg-gray-600');
-}
 
-// --- Content Modal Functions ---
+// --- Modals ---
+function openToolsModal() { document.getElementById('toolsModal').classList.remove('hidden'); }
+function closeToolsModal() { document.getElementById('toolsModal').classList.add('hidden'); }
+function openSettingsModal() { document.getElementById('settingsModal').classList.remove('hidden'); }
+function closeSettingsModal() { document.getElementById('settingsModal').classList.add('hidden'); }
+
+// Insights Modal Render
+function openInsightsModal() {
+    const modal = document.getElementById('insightsModal');
+    const container = document.getElementById('insightsContent');
+    const store = window.chatManager ? window.chatManager.state.localContentStore : {};
+
+    const renderList = (arr, emptyMsg) => {
+        if (!arr || arr.length === 0) return `<p class="text-gray-500 italic">${emptyMsg}</p>`;
+        return `<ul class="list-disc list-inside space-y-1">${arr.map(i => `<li>${i}</li>`).join('')}</ul>`;
+    };
+
+    container.innerHTML = `
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div class="bg-gray-800 p-4 rounded-lg">
+                <h4 class="text-pink-400 font-semibold mb-2">Communication Style</h4>
+                <p>${store.communicationStyle || "Not established."}</p>
+            </div>
+            <div class="bg-gray-800 p-4 rounded-lg">
+                <h4 class="text-pink-400 font-semibold mb-2">Behavioral Facts</h4>
+                ${renderList(store.behavioralFacts, "No facts learned yet.")}
+            </div>
+            <div class="bg-gray-800 p-4 rounded-lg">
+                <h4 class="text-pink-400 font-semibold mb-2">Mood Patterns</h4>
+                ${renderList(store.moodPatterns, "No strong patterns detected.")}
+            </div>
+            <div class="bg-gray-800 p-4 rounded-lg border border-red-900">
+                <h4 class="text-red-400 font-semibold mb-2">Potential Lapses to Watch</h4>
+                ${renderList(store.potentialLapses, "No immediate risks detected.")}
+            </div>
+        </div>
+    `;
+    modal.classList.remove('hidden');
+}
+function closeInsightsModal() { document.getElementById('insightsModal').classList.add('hidden'); }
+
 function showContentModal(title, markdownContent) {
     closeContentModal();
     contentModalElement = document.createElement('div'); contentModalElement.id = 'contentModal'; contentModalElement.className = 'fixed inset-0 z-[60] overflow-y-auto bg-black bg-opacity-75 flex items-center justify-center p-4';
-    const modalContent = document.createElement('div'); modalContent.className = 'relative bg-gray-900 rounded-lg p-6 w-full max-w-2xl shadow-2xl max-h-[80vh] overflow-y-auto glass-liquid';
-    const renderedContent = DOMPurify.sanitize(marked.parse(markdownContent));
+    const modalContent = document.createElement('div'); modalContent.className = 'relative bg-gray-900 rounded-lg p-6 w-full max-w-2xl shadow-2xl max-h-[80vh] overflow-y-auto';
     modalContent.innerHTML = `
         <h3 class="text-2xl font-bold mb-4 text-gray-100">${title}</h3>
-        <div class="prose prose-invert max-w-none text-gray-300">${renderedContent}</div>
+        <div class="prose prose-invert max-w-none text-gray-300">${DOMPurify.sanitize(marked.parse(markdownContent))}</div>
         <div class="mt-6 flex justify-end">
-            <button id="closeContentButton" class="px-4 py-2 bg-gray-600 hover:bg-gray-500 rounded-md transition duration-200 liquid-btn ghost">Close</button>
+            <button id="closeContentButton" class="px-4 py-2 bg-gray-600 hover:bg-gray-500 rounded-md">Close</button>
         </div>`;
     contentModalElement.appendChild(modalContent); document.body.appendChild(contentModalElement);
     document.getElementById('closeContentButton').addEventListener('click', closeContentModal);
 }
 function closeContentModal() { if (contentModalElement) { contentModalElement.remove(); contentModalElement = null; } }
 
-// --- Content Link Processing ---
 function processContentLinks() {
     const lastMessageBubble = chatMessages.querySelector('.chat-bubble.ai:last-of-type');
     if (!lastMessageBubble) return;
     const linkTagRegex = /&lt;link_content\s+topic="([^"]+)"\s*\/&gt;|<link_content\s+topic="([^"]+)"\s*\/>/g;
     lastMessageBubble.innerHTML = lastMessageBubble.innerHTML.replace(
-        linkTagRegex, (match, topicSlug1, topicSlug2) => {
-            const topicSlug = topicSlug1 || topicSlug2; if (!topicSlug) return match;
-            const title = topicSlug.replace(/-/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
-            return `<a href="#" class="content-link text-pink-400 hover:underline font-semibold" data-topic="${topicSlug}">Learn about ${title}</a>`;
+        linkTagRegex, (match, topic1, topic2) => {
+            const slug = topic1 || topic2; if (!slug) return match;
+            const title = slug.replace(/-/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+            return `<a href="#" class="content-link text-pink-400 hover:underline font-semibold" data-topic="${slug}">Learn about ${title}</a>`;
         }
     );
 }
 
+<<<<<<< HEAD
 // --- Theme Handling ---
 function applyTheme(theme) {
     // Only dark mode logic
@@ -373,3 +417,6 @@ document.addEventListener('DOMContentLoaded', () => {
     // Add window resize listener for adaptive modal
     window.addEventListener('resize', handleWindowResize);
 });
+=======
+document.documentElement.setAttribute('data-theme', 'dark');
+>>>>>>> 8b0a9f5 (Push change)
