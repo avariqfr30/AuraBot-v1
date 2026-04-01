@@ -73,12 +73,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!locationContext) return 'No location captured yet.';
 
         const details = [];
-        if (typeof locationContext.latitude === 'number' && typeof locationContext.longitude === 'number') {
-            details.push(`${locationContext.latitude.toFixed(5)}, ${locationContext.longitude.toFixed(5)}`);
-        }
-        if (typeof locationContext.accuracy === 'number') {
-            details.push(`accuracy ~${Math.round(locationContext.accuracy)}m`);
-        }
+        details.push('Your current device location is available');
         if (locationContext.timestamp) {
             details.push(`updated ${new Date(locationContext.timestamp).toLocaleString()}`);
         }
@@ -114,9 +109,9 @@ document.addEventListener('DOMContentLoaded', () => {
         if (storedLocation) {
             const ageMs = Date.now() - new Date(storedLocation.timestamp).getTime();
             const ageLabel = Number.isFinite(ageMs) && ageMs >= 0
-                ? ` Last refresh ${Math.round(ageMs / 60000)} min ago.`
+                ? ` Refreshed about ${Math.round(ageMs / 60000)} min ago.`
                 : '';
-            setLocationStatus(`Using ${describeLocationContext(storedLocation)}.${ageLabel}`);
+            setLocationStatus(`${describeLocationContext(storedLocation)}.${ageLabel}`);
             return;
         }
 

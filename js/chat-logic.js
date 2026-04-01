@@ -23,6 +23,9 @@ You are chatting with a programmer on a messaging app.
 - Use natural phrasing, occasional mild slang, and conversational filler (e.g., "honestly," "yeah," "hmm").
 - DO NOT sound like a customer service bot, a therapist, or an AI.
 - Mirror the user's energy. Be supportive but realistic.
+- If you use current time, date, or location context, weave it in naturally.
+- Never mention raw coordinates, accuracy metrics, or system metadata unless the user explicitly asks for them.
+- Avoid stiff phrasing like "Current local date" or "System context" in your actual reply.
 
 [FORMATTING RULES - STRICT]
 - Write in short, text-message-style paragraphs (1-3 sentences max).
@@ -177,16 +180,10 @@ function formatLocationContext(locationContext) {
 
     const parts = [];
     if (locationContext.label) parts.push(locationContext.label);
-    if (typeof locationContext.latitude === 'number' && typeof locationContext.longitude === 'number') {
-        parts.push(`Coordinates ${locationContext.latitude.toFixed(5)}, ${locationContext.longitude.toFixed(5)}`);
-    }
-    if (typeof locationContext.accuracy === 'number') {
-        parts.push(`Accuracy approximately ${Math.round(locationContext.accuracy)} meters`);
-    }
     if (locationContext.timestamp) {
         const capturedAt = new Date(locationContext.timestamp);
         if (!Number.isNaN(capturedAt.getTime())) {
-            parts.push(`Captured ${capturedAt.toLocaleString()}`);
+            parts.push(`Last refreshed ${capturedAt.toLocaleString()}`);
         }
     }
 
@@ -201,13 +198,13 @@ function getRuntimeContextString() {
 
     return [
         '[System Context]',
-        `Current local date: ${now.toLocaleDateString(undefined, { dateStyle: 'full' })}`,
-        `Current local time: ${now.toLocaleTimeString(undefined, { timeStyle: 'long' })}`,
-        `Current ISO timestamp: ${now.toISOString()}`,
+        `Date: ${now.toLocaleDateString(undefined, { dateStyle: 'full' })}`,
+        `Time: ${now.toLocaleTimeString(undefined, { timeStyle: 'long' })}`,
         `Timezone: ${timezone}`,
         `Locale: ${navigator.language || 'Unknown'}`,
         `Location access enabled: ${locationEnabled ? 'Yes' : 'No'}`,
-        `Location context: ${locationEnabled ? formatLocationContext(locationContext) : 'Disabled by user.'}`
+        `Location context: ${locationEnabled ? formatLocationContext(locationContext) : 'Disabled by user.'}`,
+        'Use this context only when it helps. Keep references to time or place casual and human.'
     ].join('\n');
 }
 
