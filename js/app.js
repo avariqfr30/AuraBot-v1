@@ -5,17 +5,22 @@ document.addEventListener('DOMContentLoaded', () => {
     const chatListContainer = document.getElementById('chatList');
     const toolsButton = document.getElementById('toolsButton');
     const fileInput = document.getElementById('fileInput');
+    const editMessageIndicator = document.getElementById('editMessageIndicator');
     const fileAttachmentIndicator = document.getElementById('fileAttachmentIndicator');
     const insightsButton = document.getElementById('insightsButton');
     const themeToggleButton = document.getElementById('themeToggleButton');
     const settingsButton = document.getElementById('settingsButton');
     const systemPromptTextarea = document.getElementById('systemPromptTextarea');
     const modelSelectDropdown = document.getElementById('modelSelectDropdown');
+    const locationAccessCheckbox = document.getElementById('locationAccessCheckbox');
+    const locationStatusText = document.getElementById('locationStatusText');
+    const refreshLocationButton = document.getElementById('refreshLocationButton');
     const cancelSettingsButton = document.getElementById('cancelSettingsButton');
     const resetSettingsButton = document.getElementById('resetSettingsButton');
     const saveSettingsButton = document.getElementById('saveSettingsButton');
     const toolsModalContent = document.getElementById('toolsModalContent');
     const TOOL_TAG_REGEX = /<tool_create[^>]*type=["']([^"']+)["'][^>]*(?:theme=["']([^"']+)["'])?[^>]*\/?>/gi;
+    const LOCATION_MAX_AGE_MS = 10 * 60 * 1000;
 
     let attachedFile = null;
 
@@ -54,6 +59,145 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!storedModel || storedModel === 'llama3:8b') {
             localStorage.setItem(STORAGE_KEYS.MODEL, window.AURA_CONFIG.defaultModel);
         }
+    }
+
+    function isLocationSharingEnabled() {
+        return localStorage.getItem(STORAGE_KEYS.LOCATION_ENABLED) === 'true';
+    }
+
+    function getStoredLocationContext() {
+        return safeParseJson(localStorage.getItem(STORAGE_KEYS.LOCATION_CONTEXT), null);
+    }
+
+    function describeLocationContext(locationContext) {
+        if (!locationContext) return 'No location captured yet.';
+
+        const details = [];
+        if (typeof locationContext.latitude === 'number' && typeof locationContext.longitude === 'number') {
+            details.push(`${locationContext.latitude.toFixed(5)}, ${locationContext.longitude.toFixed(5)}`);
+        }
+        if (typeof locationContext.accuracy === 'number') {
+            details.push(`accuracy ~${Math.round(locationContext.accuracy)}m`);
+        }
+        if (locationContext.timestamp) {
+            details.push(`updated ${new Date(locationContext.timestamp).toLocaleString()}`);
+        }
+
+        return details.join(' | ') || 'Location captured.';
+    }
+
+    function setLocationStatus(message) {
+        locationStatusText.textContent = message;
+    }
+
+    async function refreshLocationStatus() {
+        if (!locationAccessCheckbox.checked) {
+            setLocationStatus('Location access is off.');
+            return;
+        }
+
+        if (!navigator.geolocation) {
+            setLocationStatus('Geolocation is not supported in this browser.');
+            return;
+        }
+
+        const storedLocation = getStoredLocationContext();
+        let permissionState = 'unknown';
+
+        if (navigator.permissions?.query) {
+            try {
+                const permission = await navigator.permissions.query({ name: 'geolocation' });
+                permissionState = permission.state;
+            } catch (_error) {}
+        }
+
+        if (storedLocation) {
+            const ageMs = Date.now() - new Date(storedLocation.timestamp).getTime();
+            const ageLabel = Number.isFinite(ageMs) && ageMs >= 0
+                ? ` Last refresh ${Math.round(ageMs / 60000)} min ago.`
+                : '';
+            setLocationStatus(`Using ${describeLocationContext(storedLocation)}.${ageLabel}`);
+            return;
+        }
+
+        if (permissionState === 'denied') {
+            setLocationStatus('Location permission is denied in your browser settings.');
+            return;
+        }
+
+        setLocationStatus('Location is enabled. Click "Refresh Location" to capture your current position.');
+    }
+
+    async function requestCurrentLocation({ silent = false } = {}) {
+        if (!locationAccessCheckbox.checked) {
+            localStorage.removeItem(STORAGE_KEYS.LOCATION_CONTEXT);
+            await refreshLocationStatus();
+            return null;
+        }
+
+        if (!navigator.geolocation) {
+            setLocationStatus('Geolocation is not supported in this browser.');
+            return null;
+        }
+
+        const locationContext = await new Promise((resolve) => {
+            navigator.geolocation.getCurrentPosition(
+                (position) => resolve({
+                    latitude: position.coords.latitude,
+                    longitude: position.coords.longitude,
+                    accuracy: position.coords.accuracy,
+                    timestamp: position.timestamp,
+                    label: 'Approximate device location'
+                }),
+                (error) => {
+                    const reasons = {
+                        1: 'Location permission was denied.',
+                        2: 'Location is temporarily unavailable.',
+                        3: 'Location lookup timed out.'
+                    };
+                    if (!silent) {
+                        setLocationStatus(reasons[error.code] || 'Location lookup failed.');
+                    }
+                    resolve(null);
+                },
+                { enableHighAccuracy: false, timeout: 10000, maximumAge: LOCATION_MAX_AGE_MS }
+            );
+        });
+
+        if (locationContext) {
+            localStorage.setItem(STORAGE_KEYS.LOCATION_CONTEXT, JSON.stringify(locationContext));
+            await refreshLocationStatus();
+        }
+
+        return locationContext;
+    }
+
+    async function ensureRuntimeLocationFresh() {
+        if (!isLocationSharingEnabled()) return null;
+
+        const storedLocation = getStoredLocationContext();
+        if (storedLocation?.timestamp && Date.now() - new Date(storedLocation.timestamp).getTime() < LOCATION_MAX_AGE_MS) {
+            return storedLocation;
+        }
+
+        return requestCurrentLocation({ silent: true });
+    }
+
+    function clearResendDraft() {
+        editMessageIndicator.classList.add('hidden');
+        editMessageIndicator.innerHTML = '';
+    }
+
+    function queueMessageForEditAndResend(messageIndex) {
+        const message = chatManager.getActiveChatHistory()[messageIndex];
+        if (!message?.content) return;
+
+        editMessageIndicator.innerHTML = `Editing an earlier message. Sending will resend it as a new message.<button id="cancelEditResendButton" class="ml-3 text-pink-400 hover:text-pink-300">Cancel</button>`;
+        editMessageIndicator.classList.remove('hidden');
+        userInput.value = message.content;
+        userInput.focus();
+        userInput.setSelectionRange(userInput.value.length, userInput.value.length);
+        document.getElementById('cancelEditResendButton').onclick = clearResendDraft;
     }
 
     function resetAttachment() {
@@ -134,11 +278,13 @@ document.addEventListener('DOMContentLoaded', () => {
         chatManager.addMessageToActiveChat('user', message || displayMessage);
 
         userInput.value = '';
+        clearResendDraft();
         resetAttachment();
         showTypingIndicator();
 
         try {
             const documentText = currentAttachment ? await readAttachedFile(currentAttachment) : null;
+            await ensureRuntimeLocationFresh();
             const screenResult = await chatManager.preScreenMessage(message);
 
             if (screenResult === 'CRISIS') {
@@ -184,19 +330,25 @@ document.addEventListener('DOMContentLoaded', () => {
 
     async function openSettingsPanel() {
         systemPromptTextarea.value = localStorage.getItem(STORAGE_KEYS.PROMPT) || PROMPTS.DEFAULT_SYSTEM;
+        locationAccessCheckbox.checked = isLocationSharingEnabled();
         await populateModelOptions();
+        await refreshLocationStatus();
         openSettingsModal();
     }
 
     function resetSettingsForm() {
         localStorage.removeItem(STORAGE_KEYS.PROMPT);
         localStorage.removeItem(STORAGE_KEYS.MODEL);
+        localStorage.removeItem(STORAGE_KEYS.LOCATION_ENABLED);
+        localStorage.removeItem(STORAGE_KEYS.LOCATION_CONTEXT);
         systemPromptTextarea.value = PROMPTS.DEFAULT_SYSTEM;
         modelSelectDropdown.innerHTML = `<option value="${window.AURA_CONFIG.defaultModel}">${window.AURA_CONFIG.defaultModel}</option>`;
         modelSelectDropdown.value = window.AURA_CONFIG.defaultModel;
+        locationAccessCheckbox.checked = false;
+        setLocationStatus('Location access is off.');
     }
 
-    function saveSettings() {
+    async function saveSettings() {
         const promptValue = systemPromptTextarea.value.trim();
         const selectedModel = modelSelectDropdown.value;
 
@@ -208,6 +360,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
         if (selectedModel) {
             localStorage.setItem(STORAGE_KEYS.MODEL, selectedModel);
+        }
+
+        localStorage.setItem(STORAGE_KEYS.LOCATION_ENABLED, String(locationAccessCheckbox.checked));
+        if (!locationAccessCheckbox.checked) {
+            localStorage.removeItem(STORAGE_KEYS.LOCATION_CONTEXT);
+        } else {
+            await requestCurrentLocation({ silent: false });
         }
 
         closeSettingsModal();
@@ -320,6 +479,8 @@ document.addEventListener('DOMContentLoaded', () => {
     cancelSettingsButton.addEventListener('click', closeSettingsModal);
     resetSettingsButton.addEventListener('click', resetSettingsForm);
     saveSettingsButton.addEventListener('click', saveSettings);
+    locationAccessCheckbox.addEventListener('change', refreshLocationStatus);
+    refreshLocationButton.addEventListener('click', () => requestCurrentLocation({ silent: false }));
 
     toolsModalContent.addEventListener('click', async (event) => {
         const target = event.target.closest('[data-action]');
@@ -374,6 +535,12 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     document.body.addEventListener('click', async (event) => {
+        const resendTarget = event.target.closest('[data-action="edit_resend_message"]');
+        if (resendTarget) {
+            queueMessageForEditAndResend(parseInt(resendTarget.dataset.messageIndex, 10));
+            return;
+        }
+
         const target = event.target.closest('a.content-link');
         if (!target?.dataset.topic) return;
 
@@ -384,6 +551,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
     normalizeStoredModel();
     applyTheme(getStoredTheme());
+    locationAccessCheckbox.checked = isLocationSharingEnabled();
+    refreshLocationStatus();
     refreshUI();
     checkAgents();
 });

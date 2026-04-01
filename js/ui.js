@@ -127,7 +127,7 @@ function renderToolsInModal(tools) {
 }
 
 // --- Chat Messages ---
-function addMessage(sender, content) {
+function addMessage(sender, content, options = {}) {
     const messageDiv = document.createElement('div');
     const isUser = sender === 'user';
     messageDiv.className = isUser ? 'flex justify-end mb-4' : 'flex justify-start mb-4';
@@ -135,6 +135,13 @@ function addMessage(sender, content) {
     chatBubble.className = `chat-bubble max-w-[75%] p-4 rounded-xl shadow-md ${isUser ? 'user' : 'ai'}`;
     if (isUser) {
         const p = document.createElement('p'); p.textContent = content; chatBubble.appendChild(p);
+
+        if (Number.isInteger(options.messageIndex)) {
+            const actionRow = document.createElement('div');
+            actionRow.className = 'message-action-row mt-3 flex justify-end';
+            actionRow.innerHTML = `<button type="button" class="message-action-button" data-action="edit_resend_message" data-message-index="${options.messageIndex}">Edit &amp; Resend</button>`;
+            chatBubble.appendChild(actionRow);
+        }
     } else {
         chatBubble.innerHTML = DOMPurify.sanitize(marked.parse(String(content || '')));
     }
@@ -160,7 +167,7 @@ function removeToolStatusMessages() { document.querySelectorAll('.tool-status-me
 
 function displayChat(history) {
     clearChatMessages();
-    (history || []).forEach(message => { addMessage(message.role, message.content); });
+    (history || []).forEach((message, index) => { addMessage(message.role, message.content, { messageIndex: index }); });
     processContentLinks();
 }
 

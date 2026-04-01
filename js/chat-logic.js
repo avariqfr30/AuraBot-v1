@@ -2,7 +2,9 @@ const STORAGE_KEYS = {
     STATE: 'aura_app_state',
     PROMPT: 'aura_system_prompt',
     MODEL: 'aura_model_name',
-    THEME: 'aura_theme'
+    THEME: 'aura_theme',
+    LOCATION_ENABLED: 'aura_location_enabled',
+    LOCATION_CONTEXT: 'aura_location_context'
 };
 
 const API_ENDPOINTS = {
@@ -44,6 +46,7 @@ To deploy a tool, embed this exact tag in your response: <tool_create type="[typ
 
     ROUTER: `Analyze the user's message and route it to the correct agent.
 [Behavioral Profile]: %PROFILE%
+[Runtime Context]: %RUNTIME%
 [Message]: "%USER_MESSAGE%"
 
 Routes:
@@ -67,6 +70,7 @@ Respond ONLY with the updated JSON object matching the input structure.`,
 Turn the user message into a compact JSON search plan.
 
 [Behavioral Profile]: %PROFILE%
+[Runtime Context]: %RUNTIME%
 [User Message]: "%MESSAGE%"
 
 Return ONLY valid JSON with this exact shape:
@@ -96,6 +100,9 @@ Answer the user using ONLY this OSINT brief and the cited sources inside it.
 [Behavioral Profile]
 %PROFILE%
 
+[Runtime Context]
+%RUNTIME%
+
 Rules:
 - Lead with the direct answer.
 - Add the most useful details you found, but stay concise and natural.
@@ -110,6 +117,7 @@ Question: "%MESSAGE%". Respond ONLY with the key or "NULL".`,
 
     KNOWLEDGE_SYNTHESIS: `You are Aura. Answer the user conversationally using this knowledge base:
 %CONTENT%
+[Runtime Context]: %RUNTIME%
 Question: "%MESSAGE%"
 Rule: DO NOT generate any <tool_create> tags. Just provide the information naturally.`,
 
@@ -162,6 +170,45 @@ function extractErrorMessage(errorPayload, fallbackMessage) {
     if (typeof errorPayload.error === 'string') return errorPayload.error;
     if (typeof errorPayload.details === 'string') return errorPayload.details;
     return fallbackMessage;
+}
+
+function formatLocationContext(locationContext) {
+    if (!locationContext) return 'Unavailable.';
+
+    const parts = [];
+    if (locationContext.label) parts.push(locationContext.label);
+    if (typeof locationContext.latitude === 'number' && typeof locationContext.longitude === 'number') {
+        parts.push(`Coordinates ${locationContext.latitude.toFixed(5)}, ${locationContext.longitude.toFixed(5)}`);
+    }
+    if (typeof locationContext.accuracy === 'number') {
+        parts.push(`Accuracy approximately ${Math.round(locationContext.accuracy)} meters`);
+    }
+    if (locationContext.timestamp) {
+        const capturedAt = new Date(locationContext.timestamp);
+        if (!Number.isNaN(capturedAt.getTime())) {
+            parts.push(`Captured ${capturedAt.toLocaleString()}`);
+        }
+    }
+
+    return parts.join(' | ') || 'Unavailable.';
+}
+
+function getRuntimeContextString() {
+    const now = new Date();
+    const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'Unknown';
+    const locationEnabled = localStorage.getItem(STORAGE_KEYS.LOCATION_ENABLED) === 'true';
+    const locationContext = safeParseJson(localStorage.getItem(STORAGE_KEYS.LOCATION_CONTEXT), null);
+
+    return [
+        '[System Context]',
+        `Current local date: ${now.toLocaleDateString(undefined, { dateStyle: 'full' })}`,
+        `Current local time: ${now.toLocaleTimeString(undefined, { timeStyle: 'long' })}`,
+        `Current ISO timestamp: ${now.toISOString()}`,
+        `Timezone: ${timezone}`,
+        `Locale: ${navigator.language || 'Unknown'}`,
+        `Location access enabled: ${locationEnabled ? 'Yes' : 'No'}`,
+        `Location context: ${locationEnabled ? formatLocationContext(locationContext) : 'Disabled by user.'}`
+    ].join('\n');
 }
 
 async function requestJson(url, options = {}) {
@@ -466,10 +513,11 @@ async function createToolByType(type, theme = '') {
     return parsed && typeof parsed === 'object' ? parsed : null;
 }
 
-async function buildSearchPlan(userMessage, profileStr) {
+async function buildSearchPlan(userMessage, profileStr, runtimeContext) {
     const response = await _callLLM(
         PROMPTS.SEARCH_PLAN
             .replace('%PROFILE%', profileStr)
+            .replace('%RUNTIME%', runtimeContext)
             .replace('%MESSAGE%', userMessage),
         'json'
     );
@@ -504,9 +552,12 @@ function formatOsintBrief(report) {
 
 async function getOllamaResponse(userMessage, toolFollowUp = null, documentText = null) {
     const profileStr = JSON.stringify(chatManager.state.localContentStore, null, 2);
+    const runtimeContext = getRuntimeContextString();
 
     if (toolFollowUp) {
         const prompt = `${localStorage.getItem(STORAGE_KEYS.PROMPT) || PROMPTS.DEFAULT_SYSTEM}
+[System Context]:
+${runtimeContext}
 [Profile]:
 ${profileStr}
 [Note]: User interacted with tool: ${JSON.stringify(toolFollowUp)}`;
@@ -516,6 +567,7 @@ ${profileStr}
 
     const routePrompt = PROMPTS.ROUTER
         .replace('%PROFILE%', profileStr)
+        .replace('%RUNTIME%', runtimeContext)
         .replace('%USER_MESSAGE%', userMessage);
     const route = (await _callLLM(routePrompt)) || 'GeneralFriendAgent';
 
@@ -528,6 +580,7 @@ ${profileStr}
                     (await _callLLM(
                         PROMPTS.KNOWLEDGE_SYNTHESIS
                             .replace('%MESSAGE%', userMessage)
+                            .replace('%RUNTIME%', runtimeContext)
                             .replace('%CONTENT%', content)
                     )) || "I couldn't pull that knowledge entry together right now."
                 );
@@ -537,12 +590,13 @@ ${profileStr}
 
     if (route.includes('Search')) {
         try {
-            const searchPlan = await buildSearchPlan(userMessage, profileStr);
+            const searchPlan = await buildSearchPlan(userMessage, profileStr, runtimeContext);
             const osintReport = await postJson(API_ENDPOINTS.osint, searchPlan);
 
             const synthesisPrompt = PROMPTS.SEARCH_SYNTHESIS
                 .replace('%OSINT%', formatOsintBrief(osintReport))
                 .replace('%MESSAGE%', userMessage)
+                .replace('%RUNTIME%', runtimeContext)
                 .replace('%PROFILE%', profileStr);
 
             return (
@@ -562,6 +616,9 @@ ${profileStr}
         .join('\n');
 
     let finalPrompt = `${localStorage.getItem(STORAGE_KEYS.PROMPT) || PROMPTS.DEFAULT_SYSTEM}
+
+[System Context]:
+${runtimeContext}
 
 [Behavioral Profile]: ${profileStr}
 

@@ -232,6 +232,12 @@ header,
     color: var(--text-muted) !important;
 }
 
+#editMessageIndicator {
+    background: var(--accent-soft) !important;
+    border: 1px solid var(--bubble-user-border);
+    color: var(--text-main) !important;
+}
+
 #userInput,
 #systemPromptTextarea,
 #modelSelectDropdown,
@@ -326,6 +332,21 @@ header,
 
 .delete-chat-button:hover {
     color: var(--accent) !important;
+}
+
+.message-action-button {
+    border: 1px solid var(--bubble-user-border);
+    border-radius: 9999px;
+    background: rgba(255, 255, 255, 0.04);
+    color: var(--text-main);
+    font-size: 0.75rem;
+    font-weight: 600;
+    padding: 0.3rem 0.7rem;
+}
+
+.message-action-button:hover {
+    background: var(--accent-soft);
+    color: var(--text-strong);
 }
 
 .prose,
