@@ -5,10 +5,13 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "start:with-chroma": "docker compose up -d chromadb && npm start",
-    "chroma:up": "docker compose up -d chromadb",
-    "chroma:down": "docker compose stop chromadb",
-    "chroma:logs": "docker compose logs -f chromadb",
+    "start:with-chroma": "npm run chroma:up && npm start",
+    "chroma:up": "node ./scripts/chroma-up.js",
+    "chroma:down": "node ./scripts/chroma-down.js",
+    "chroma:logs": "./scripts/chroma-logs.sh",
+    "chroma:up:docker": "docker compose up -d chromadb",
+    "chroma:down:docker": "docker compose stop chromadb",
+    "chroma:logs:docker": "docker compose logs -f chromadb",
     "check": "node --check server.js && node --check js/app.js && node --check js/chat-logic.js && node --check js/config.js && node --check js/ui.js",
     "test": "npm run check"
   },

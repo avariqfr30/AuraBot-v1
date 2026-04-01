@@ -296,7 +296,7 @@ app.post('/api/store_memory', async (req, res) => {
             console.error('[Vector store]', error.message);
             return res.status(503).json({
                 error: 'ChromaDB is unavailable',
-                details: 'Start ChromaDB with `docker compose up -d chromadb` in the project root, or set CHROMA_URL to a running server.'
+                details: 'Start ChromaDB with `npm run chroma:up` in the project root, or set CHROMA_URL to a running server.'
             });
         }
 
@@ -324,7 +324,7 @@ app.post('/api/search_memory', async (req, res) => {
             console.error('[Vector search]', error.message);
             return res.status(503).json({
                 error: 'ChromaDB is unavailable',
-                details: 'Start ChromaDB with `docker compose up -d chromadb` in the project root, or set CHROMA_URL to a running server.'
+                details: 'Start ChromaDB with `npm run chroma:up` in the project root, or set CHROMA_URL to a running server.'
             });
         }
 

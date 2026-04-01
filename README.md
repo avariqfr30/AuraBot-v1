@@ -54,6 +54,8 @@ cp .env.example .env
 npm run chroma:up
 ```
 
+This now uses the local Python/CLI route by default, not Docker. It will use `./.venv/bin/chroma` if present, then fall back to a `chroma` executable on your `PATH`.
+
 5. Start Aura:
 
 ```bash
@@ -131,13 +133,34 @@ npm run chroma:logs
 npm run chroma:down
 ```
 
-By default, the included [docker-compose.yml](docker-compose.yml) starts ChromaDB on `http://127.0.0.1:8000` and stores data in `./chroma-data`.
+By default, Aura starts ChromaDB on `http://127.0.0.1:8000` and stores data in `./chroma-data`.
+
+If the `chroma` CLI is missing, install it with:
+
+```bash
+python3 -m venv .venv
+./.venv/bin/python -m pip install -U pip chromadb
+```
+
+### Optional Docker fallback
+
+If you ever want Docker after all, the old path is still there:
+
+```bash
+npm run chroma:up:docker
+npm run chroma:down:docker
+```
 
 ### Running ChromaDB without Docker
 
-Chroma’s official docs also support running a local server from the CLI with `chroma run --path ...` or `npx chroma run --path ...`:
+Chroma’s official docs support running a local server from the CLI with:
 
-- [Run a Chroma Server](https://docs.trychroma.com/docs/cli/run)
+```bash
+chroma run --path ./chroma-data --host 127.0.0.1 --port 8000
+```
+
+That is the same approach Aura now uses under the hood.
+
 - [Client-Server Mode](https://docs.trychroma.com/docs/run-chroma/client-server)
 
 ## OSINT Flow
