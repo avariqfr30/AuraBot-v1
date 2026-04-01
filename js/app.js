@@ -3,6 +3,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const sendButton = document.getElementById('sendButton');
     const newChatButton = document.getElementById('newChatButton');
     const chatListContainer = document.getElementById('chatList');
+    const chatMessagesSurface = document.getElementById('chatMessages');
     const toolsButton = document.getElementById('toolsButton');
     const fileInput = document.getElementById('fileInput');
     const editMessageIndicator = document.getElementById('editMessageIndicator');
@@ -23,6 +24,48 @@ document.addEventListener('DOMContentLoaded', () => {
     const LOCATION_MAX_AGE_MS = 10 * 60 * 1000;
 
     let attachedFile = null;
+
+    function updateLiquidTarget(target, clientX, clientY) {
+        const rect = target.getBoundingClientRect();
+        if (!rect.width || !rect.height) return;
+
+        const x = ((clientX - rect.left) / rect.width) * 100;
+        const y = ((clientY - rect.top) / rect.height) * 100;
+        const tiltX = ((x - 50) / 50) * 4;
+        const tiltY = ((y - 50) / 50) * -3;
+
+        target.style.setProperty('--glass-x', `${x}%`);
+        target.style.setProperty('--glass-y', `${y}%`);
+        target.style.setProperty('--glass-tilt-x', `${tiltX}deg`);
+        target.style.setProperty('--glass-tilt-y', `${tiltY}deg`);
+    }
+
+    function resetLiquidTarget(target) {
+        target.style.setProperty('--glass-x', '50%');
+        target.style.setProperty('--glass-y', '0%');
+        target.style.setProperty('--glass-tilt-x', '0deg');
+        target.style.setProperty('--glass-tilt-y', '0deg');
+    }
+
+    function setupLiquidGlassInteractions() {
+        const targets = document.querySelectorAll(
+            '[data-liquid], .liquid-control, .liquid-icon-button, .liquid-primary-button, .liquid-send-button, #refreshLocationButton, #cancelSettingsButton, #resetSettingsButton, #saveSettingsButton, #closeToolsButton, #closeInsightsButton, #closeContentButton'
+        );
+
+        targets.forEach((target) => {
+            resetLiquidTarget(target);
+            if (target.dataset.liquidBound === 'true') return;
+            target.dataset.liquidBound = 'true';
+            target.addEventListener('pointermove', (event) => updateLiquidTarget(target, event.clientX, event.clientY));
+            target.addEventListener('pointerleave', () => resetLiquidTarget(target));
+        });
+    }
+
+    window.setupLiquidGlassInteractions = setupLiquidGlassInteractions;
+
+    function syncChromeCompression() {
+        document.body.classList.toggle('glass-condensed', chatMessagesSurface.scrollTop > 18);
+    }
 
     function getStoredTheme() {
         const storedTheme = localStorage.getItem(STORAGE_KEYS.THEME);
@@ -246,6 +289,7 @@ document.addEventListener('DOMContentLoaded', () => {
         displayChat(chatManager.getActiveChatHistory());
         const tools = chatManager.getActiveChatTools();
         toggleToolsButton(Object.values(tools).some((entries) => entries && entries.length > 0));
+        setupLiquidGlassInteractions();
     }
 
     async function triggerAIFollowUp(followUp) {
@@ -548,6 +592,9 @@ document.addEventListener('DOMContentLoaded', () => {
     applyTheme(getStoredTheme());
     locationAccessCheckbox.checked = isLocationSharingEnabled();
     refreshLocationStatus();
+    setupLiquidGlassInteractions();
+    chatMessagesSurface.addEventListener('scroll', syncChromeCompression, { passive: true });
+    syncChromeCompression();
     refreshUI();
     checkAgents();
 });

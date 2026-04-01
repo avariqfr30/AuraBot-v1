@@ -245,14 +245,15 @@ function closeInsightsModal() { document.getElementById('insightsModal').classLi
 function showContentModal(title, markdownContent) {
     closeContentModal();
     contentModalElement = document.createElement('div'); contentModalElement.id = 'contentModal'; contentModalElement.className = 'fixed inset-0 z-[60] overflow-y-auto bg-black bg-opacity-75 flex items-center justify-center p-4';
-    const modalContent = document.createElement('div'); modalContent.className = 'relative bg-gray-900 rounded-lg p-6 w-full max-w-2xl shadow-2xl max-h-[80vh] overflow-y-auto';
+    const modalContent = document.createElement('div'); modalContent.className = 'relative liquid-glass liquid-panel rounded-3xl p-6 w-full max-w-2xl shadow-2xl max-h-[80vh] overflow-y-auto'; modalContent.setAttribute('data-liquid', '');
     modalContent.innerHTML = `
         <h3 class="text-2xl font-bold mb-4 text-gray-100">${title}</h3>
         <div class="prose prose-invert max-w-none text-gray-300">${DOMPurify.sanitize(marked.parse(markdownContent))}</div>
         <div class="mt-6 flex justify-end">
-            <button id="closeContentButton" class="px-4 py-2 bg-gray-600 hover:bg-gray-500 rounded-md">Close</button>
+            <button id="closeContentButton" class="px-4 py-2 rounded-xl transition duration-200">Close</button>
         </div>`;
     contentModalElement.appendChild(modalContent); document.body.appendChild(contentModalElement);
+    if (window.setupLiquidGlassInteractions) window.setupLiquidGlassInteractions();
     document.getElementById('closeContentButton').addEventListener('click', closeContentModal);
 }
 function closeContentModal() { if (contentModalElement) { contentModalElement.remove(); contentModalElement = null; } }
