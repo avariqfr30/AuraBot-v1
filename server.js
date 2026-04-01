@@ -223,6 +223,23 @@ function respondWithUpstreamError(res, label, error) {
     });
 }
 
+function isChromaUnavailable(error) {
+    const message = String(error?.message || '');
+    const body = JSON.stringify(error?.response?.data || '');
+
+    return (
+        message.includes('Failed to connect to chromadb') ||
+        message.includes('ECONNREFUSED') ||
+        message.includes('connect') ||
+        body.includes('Failed to connect to chromadb')
+    );
+}
+
+function isSerperUnauthorized(error) {
+    const status = error.response?.status;
+    return status === 401 || status === 403;
+}
+
 app.get('/api/health', async (_req, res) => {
     res.json({
         status: 'ok',
@@ -275,6 +292,14 @@ app.post('/api/store_memory', async (req, res) => {
 
         res.json({ success: true });
     } catch (error) {
+        if (isChromaUnavailable(error)) {
+            console.error('[Vector store]', error.message);
+            return res.status(503).json({
+                error: 'ChromaDB is unavailable',
+                details: 'Start ChromaDB with `docker compose up -d chromadb` in the project root, or set CHROMA_URL to a running server.'
+            });
+        }
+
         respondWithUpstreamError(res, 'Vector store', error);
     }
 });
@@ -295,6 +320,14 @@ app.post('/api/search_memory', async (req, res) => {
 
         res.json({ results });
     } catch (error) {
+        if (isChromaUnavailable(error)) {
+            console.error('[Vector search]', error.message);
+            return res.status(503).json({
+                error: 'ChromaDB is unavailable',
+                details: 'Start ChromaDB with `docker compose up -d chromadb` in the project root, or set CHROMA_URL to a running server.'
+            });
+        }
+
         respondWithUpstreamError(res, 'Vector search', error);
     }
 });
@@ -308,6 +341,14 @@ app.post('/api/osint', async (req, res) => {
         const report = await buildOsintReport(req.body || {});
         res.json(report);
     } catch (error) {
+        if (isSerperUnauthorized(error)) {
+            console.error('[OSINT research]', error.response?.data || error.message);
+            return res.status(403).json({
+                error: 'Serper authorization failed',
+                details: 'Check SERPER_API_KEY in your .env file. Make sure it is a real key from serper.dev and that the account still has access/credits.'
+            });
+        }
+
         respondWithUpstreamError(res, 'OSINT research', error);
     }
 });
@@ -326,6 +367,14 @@ app.get('/api/search', async (req, res) => {
 
         res.json(report);
     } catch (error) {
+        if (isSerperUnauthorized(error)) {
+            console.error('[Search]', error.response?.data || error.message);
+            return res.status(403).json({
+                error: 'Serper authorization failed',
+                details: 'Check SERPER_API_KEY in your .env file. Make sure it is a real key from serper.dev and that the account still has access/credits.'
+            });
+        }
+
         respondWithUpstreamError(res, 'Search', error);
     }
 });

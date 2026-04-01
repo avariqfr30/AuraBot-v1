@@ -5,6 +5,10 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
+    "start:with-chroma": "docker compose up -d chromadb && npm start",
+    "chroma:up": "docker compose up -d chromadb",
+    "chroma:down": "docker compose stop chromadb",
+    "chroma:logs": "docker compose logs -f chromadb",
     "check": "node --check server.js && node --check js/app.js && node --check js/chat-logic.js && node --check js/config.js && node --check js/ui.js",
     "test": "npm run check"
   },

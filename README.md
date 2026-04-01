@@ -24,12 +24,13 @@ The app now runs in a host-machine model: the machine running Aura can act as th
 - Chroma running on the host machine
 - A Serper API key for live search
 
-Suggested Ollama models:
+Suggested embedding model:
 
 ```bash
-ollama pull llama3:8b
 ollama pull bge-m3:latest
 ```
+
+The default chat model in the app is now `gpt-oss:120b-cloud`. If your Ollama-compatible backend exposes a different model name, you can change it in Settings.
 
 ## Local Setup
 
@@ -47,13 +48,25 @@ cp .env.example .env
 
 3. Update `.env` with real values, especially `SERPER_API_KEY`.
 
-4. Start Aura:
+4. Start ChromaDB:
+
+```bash
+npm run chroma:up
+```
+
+5. Start Aura:
 
 ```bash
 npm start
 ```
 
-5. Open the app:
+You can also do both in one shot:
+
+```bash
+npm run start:with-chroma
+```
+
+6. Open the app:
 
 - On the same machine: `http://127.0.0.1:3000`
 - From another device on the LAN: `http://<host-machine-ip>:3000`
@@ -79,6 +92,53 @@ See [.env.example](.env.example) for the full set. The main ones are:
 - `CHROMA_URL`: Chroma base URL on the host machine
 - `EMBEDDING_MODEL`: embedding model used for memory
 - `SERPER_API_KEY`: API key for live OSINT/search
+
+## Troubleshooting
+
+### Serper `403 Unauthorized`
+
+If you see:
+
+```text
+[OSINT research] { message: 'Unauthorized.', statusCode: 403 }
+```
+
+then `SERPER_API_KEY` in `.env` is wrong, expired, or still a placeholder.
+
+Fix:
+
+1. Get a real API key from [serper.dev](https://serper.dev/).
+2. Put it in `.env`:
+
+```env
+SERPER_API_KEY=your_real_key_here
+```
+
+3. Restart Aura with `npm start`.
+
+### ChromaDB not running
+
+If you see memory/vector-store errors, the easiest fix is:
+
+```bash
+npm run chroma:up
+```
+
+Useful helper commands:
+
+```bash
+npm run chroma:logs
+npm run chroma:down
+```
+
+By default, the included [docker-compose.yml](docker-compose.yml) starts ChromaDB on `http://127.0.0.1:8000` and stores data in `./chroma-data`.
+
+### Running ChromaDB without Docker
+
+Chroma’s official docs also support running a local server from the CLI with `chroma run --path ...` or `npx chroma run --path ...`:
+
+- [Run a Chroma Server](https://docs.trychroma.com/docs/cli/run)
+- [Client-Server Mode](https://docs.trychroma.com/docs/run-chroma/client-server)
 
 ## OSINT Flow
 
