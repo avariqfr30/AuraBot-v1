@@ -7,8 +7,8 @@
     --panel-edge: rgba(255, 255, 255, 0.08);
     --panel-shadow: 0 28px 80px rgba(0, 0, 0, 0.5);
     --panel-shadow-strong: 0 40px 120px rgba(0, 0, 0, 0.62);
-    --panel-highlight: rgba(255, 255, 255, 0.08);
-    --panel-highlight-soft: rgba(255, 255, 255, 0.035);
+    --panel-highlight: rgba(255, 255, 255, 0.03);
+    --panel-highlight-soft: rgba(255, 255, 255, 0.02);
     --text-main: #ececf1;
     --text-muted: #aaa8b3;
     --text-strong: #fffdfd;
@@ -31,8 +31,8 @@
     --scrollbar-thumb: rgba(255, 255, 255, 0.12);
     --header-icon: rgba(255, 255, 255, 0.72);
     --surface-contrast: #0a0a0d;
-    --glass-tint-a: rgba(255, 255, 255, 0.07);
-    --glass-tint-b: rgba(255, 79, 168, 0.035);
+    --glass-tint-a: rgba(255, 255, 255, 0.025);
+    --glass-tint-b: rgba(255, 79, 168, 0.015);
     --glass-blur: 24px;
     --glass-saturate: 145%;
 }
@@ -83,8 +83,8 @@ body {
     position: relative;
     overflow: hidden;
     background:
-        radial-gradient(circle at top center, rgba(255, 255, 255, 0.02), transparent 24%),
-        radial-gradient(circle at 82% 10%, rgba(255, 79, 168, 0.035), transparent 26%),
+        radial-gradient(circle at top center, rgba(255, 255, 255, 0.01), transparent 22%),
+        radial-gradient(circle at 82% 10%, rgba(255, 79, 168, 0.02), transparent 24%),
         linear-gradient(145deg, var(--page-bg), var(--page-bg-2) 42%, var(--page-bg-3));
     color: var(--text-main);
     transition: background-color 0.35s ease, color 0.35s ease;
@@ -182,9 +182,8 @@ body::before {
     isolation: isolate;
     overflow: hidden;
     background:
-        linear-gradient(180deg, rgba(255, 255, 255, 0.07), transparent 22%),
-        linear-gradient(155deg, rgba(255, 255, 255, 0.04), transparent 42%),
-        linear-gradient(180deg, var(--panel-bg), rgba(255, 255, 255, 0.02));
+        linear-gradient(180deg, rgba(255, 255, 255, 0.028), transparent 18%),
+        linear-gradient(180deg, var(--panel-bg), rgba(255, 255, 255, 0.012));
     border: 1px solid var(--panel-edge);
     box-shadow: var(--panel-shadow), inset 0 1px 0 var(--panel-highlight-soft);
     backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
@@ -202,9 +201,8 @@ body::before {
 .liquid-glass::before {
     background:
         radial-gradient(160px 100px at var(--glass-x) var(--glass-y), var(--panel-highlight), transparent 70%),
-        linear-gradient(180deg, rgba(255, 255, 255, 0.08), transparent 12%);
-    opacity: 0.54;
-    mix-blend-mode: screen;
+        linear-gradient(180deg, rgba(255, 255, 255, 0.03), transparent 10%);
+    opacity: 0.2;
 }
 
 .liquid-glass::after {
@@ -213,12 +211,12 @@ body::before {
     background:
         radial-gradient(circle at 20% 0%, var(--glass-tint-a), transparent 32%),
         radial-gradient(circle at 80% 100%, var(--glass-tint-b), transparent 28%);
-    opacity: 0.4;
+    opacity: 0.16;
 }
 
 [data-liquid]:hover {
-    box-shadow: var(--panel-shadow-strong), inset 0 1px 0 rgba(255, 255, 255, 0.06);
-    filter: saturate(1.03);
+    box-shadow: var(--panel-shadow-strong), inset 0 1px 0 rgba(255, 255, 255, 0.035);
+    filter: saturate(1.01);
 }
 
 .liquid-panel {
@@ -262,7 +260,7 @@ body.glass-condensed .liquid-dock {
     overflow: hidden;
     border: 1px solid rgba(255, 255, 255, 0.07);
     box-shadow:
-        inset 0 1px 0 rgba(255, 255, 255, 0.08),
+        inset 0 1px 0 rgba(255, 255, 255, 0.04),
         0 10px 24px rgba(0, 0, 0, 0.24);
     backdrop-filter: blur(16px) saturate(150%);
     -webkit-backdrop-filter: blur(16px) saturate(150%);
@@ -285,7 +283,7 @@ body.glass-condensed .liquid-dock {
     content: "";
     position: absolute;
     inset: 0;
-    background: linear-gradient(180deg, rgba(255, 255, 255, 0.08), transparent 30%);
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.028), transparent 24%);
     pointer-events: none;
 }
 
@@ -304,7 +302,7 @@ body.glass-condensed .liquid-dock {
 .message-action-button:hover {
     transform: translateY(-1px) scale(1.015);
     box-shadow:
-        inset 0 1px 0 rgba(255, 255, 255, 0.12),
+        inset 0 1px 0 rgba(255, 255, 255, 0.06),
         0 16px 30px rgba(0, 0, 0, 0.28);
 }
 
@@ -315,7 +313,7 @@ body.glass-condensed .liquid-dock {
     width: 2.8rem;
     height: 2.8rem;
     border-radius: 9999px;
-    background: linear-gradient(180deg, rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0.02));
+    background: rgba(255, 255, 255, 0.028);
     color: var(--header-icon) !important;
 }
 
@@ -330,7 +328,7 @@ body.glass-condensed .liquid-dock {
     min-width: 4.9rem;
     padding: 0.55rem 0.9rem;
     border-radius: 9999px;
-    background: linear-gradient(180deg, rgba(255, 255, 255, 0.075), rgba(255, 255, 255, 0.025));
+    background: rgba(255, 255, 255, 0.03);
     color: var(--header-icon);
     font-size: 0.85rem;
     font-weight: 600;
@@ -344,16 +342,15 @@ body.glass-condensed .liquid-dock {
 .liquid-send-button,
 #saveSettingsButton {
     background:
-        linear-gradient(180deg, rgba(255, 255, 255, 0.1), transparent 28%),
-        linear-gradient(180deg, rgba(255, 79, 168, 0.78), rgba(179, 24, 98, 0.74));
+        linear-gradient(180deg, rgba(255, 79, 168, 0.72), rgba(166, 22, 92, 0.7));
     border-color: rgba(255, 195, 224, 0.16);
     color: #fff !important;
 }
 
 .liquid-primary-button {
     box-shadow:
-        inset 0 1px 0 rgba(255, 255, 255, 0.16),
-        0 14px 30px var(--accent-glow);
+        inset 0 1px 0 rgba(255, 255, 255, 0.08),
+        0 10px 24px var(--accent-glow);
 }
 
 .liquid-send-button {
@@ -364,8 +361,8 @@ body.glass-condensed .liquid-dock {
     height: 3rem;
     border-radius: 9999px;
     box-shadow:
-        inset 0 1px 0 rgba(255, 255, 255, 0.16),
-        0 14px 32px var(--accent-glow);
+        inset 0 1px 0 rgba(255, 255, 255, 0.08),
+        0 10px 24px var(--accent-glow);
 }
 
 .floating-input-area {
