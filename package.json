@@ -1,0 +1,30 @@
+{
+  "name": "aurabot-v1",
+  "version": "1.0.0",
+  "description": "Aura is a locally-run, privacy-focused AI companion designed to be a supportive partner for mental wellness and personal productivity. Built with a focus on proactive assistance, Aura doesn't just answer questions—it anticipates your needs and provides interactive tools to help you organize your thoughts, manage stress, and stay motivated.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "check": "node --check server.js && node --check js/app.js && node --check js/chat-logic.js && node --check js/config.js && node --check js/ui.js",
+    "test": "npm run check"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/avariqfr30/AuraBot-v1.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/avariqfr30/AuraBot-v1/issues"
+  },
+  "homepage": "https://github.com/avariqfr30/AuraBot-v1#readme",
+  "dependencies": {
+    "axios": "^1.13.6",
+    "chromadb": "^3.3.3",
+    "cors": "^2.8.6",
+    "dotenv": "^17.3.1",
+    "express": "^5.2.1"
+  }
+}

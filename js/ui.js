@@ -195,10 +195,10 @@ function showTypingIndicator() {
 function hideTypingIndicator() { document.getElementById('typingIndicator')?.remove(); }
 
 // --- Modals ---
-function openToolsModal() { document.getElementById('toolsModal').classList.remove('hidden'); }
-function closeToolsModal() { document.getElementById('toolsModal').classList.add('hidden'); }
-function openSettingsModal() { document.getElementById('settingsModal').classList.remove('hidden'); }
-function closeSettingsModal() { document.getElementById('settingsModal').classList.add('hidden'); }
+function openToolsModal() { toolsModal.classList.remove('hidden'); }
+function closeToolsModal() { toolsModal.classList.add('hidden'); }
+function openSettingsModal() { settingsModal.classList.remove('hidden'); }
+function closeSettingsModal() { settingsModal.classList.add('hidden'); }
 
 // Insights Modal Render
 function openInsightsModal() {

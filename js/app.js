@@ -1,4 +1,3 @@
-// js/app.js
 document.addEventListener('DOMContentLoaded', () => {
     const userInput = document.getElementById('userInput');
     const sendButton = document.getElementById('sendButton');
@@ -6,159 +5,342 @@ document.addEventListener('DOMContentLoaded', () => {
     const chatListContainer = document.getElementById('chatList');
     const toolsButton = document.getElementById('toolsButton');
     const fileInput = document.getElementById('fileInput');
+    const fileAttachmentIndicator = document.getElementById('fileAttachmentIndicator');
     const insightsButton = document.getElementById('insightsButton');
-    
+    const settingsButton = document.getElementById('settingsButton');
+    const systemPromptTextarea = document.getElementById('systemPromptTextarea');
+    const modelSelectDropdown = document.getElementById('modelSelectDropdown');
+    const cancelSettingsButton = document.getElementById('cancelSettingsButton');
+    const resetSettingsButton = document.getElementById('resetSettingsButton');
+    const saveSettingsButton = document.getElementById('saveSettingsButton');
+    const toolsModalContent = document.getElementById('toolsModalContent');
+    const TOOL_TAG_REGEX = /<tool_create[^>]*type=["']([^"']+)["'][^>]*(?:theme=["']([^"']+)["'])?[^>]*\/?>/gi;
+
     let attachedFile = null;
 
-    // --- Core Chat Handling ---
-    async function handleSendMessage() {
-        const message = userInput.value.trim();
-        if (!message && !attachedFile) return;
+    function resetAttachment() {
+        attachedFile = null;
+        fileInput.value = '';
+        fileAttachmentIndicator.classList.add('hidden');
+        fileAttachmentIndicator.innerHTML = '';
+    }
 
-        let documentText = null;
-        if (attachedFile) {
-            documentText = await new Promise(resolve => {
-                const reader = new FileReader();
-                reader.onload = () => resolve(reader.result);
-                reader.readAsText(attachedFile);
-            });
+    function setAttachment(file) {
+        attachedFile = file;
+        fileAttachmentIndicator.innerHTML = `<span>${file.name}</span><button id="removeFile" class="ml-2 text-gray-500 hover:text-white">&times;</button>`;
+        fileAttachmentIndicator.classList.remove('hidden');
+        document.getElementById('removeFile').onclick = resetAttachment;
+    }
+
+    async function readAttachedFile(file) {
+        return new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(reader.result);
+            reader.onerror = () => reject(new Error(`Failed to read ${file.name}`));
+            reader.readAsText(file);
+        });
+    }
+
+    function buildDisplayedUserMessage(message, file) {
+        if (!file) return message;
+        return message ? `[Attached: ${file.name}]\n\n${message}` : `[Attached: ${file.name}]`;
+    }
+
+    async function processToolTags(rawResponse) {
+        let cleanedResponse = rawResponse || '';
+        const matchedTags = [...cleanedResponse.matchAll(TOOL_TAG_REGEX)];
+
+        if (matchedTags.length > 0) {
+            matchedTags.forEach((match) => addToolStatusMessage(match[1]));
         }
 
-        const displayMessage = attachedFile ? `[Attached: ${attachedFile.name}]\n\n${message}` : message;
-        addMessage('user', displayMessage);
-        chatManager.addMessageToActiveChat('user', message);
-        
-        userInput.value = '';
-        if (attachedFile) { attachedFile = null; document.getElementById('fileAttachmentIndicator').classList.add('hidden'); }
-
-        showTypingIndicator();
-        
-        // 1. Pre-Screen for Crisis
-        const screenResult = await chatManager.preScreenMessage(message);
-        if (screenResult === 'CRISIS') {
-            const safeMessage = await chatManager.triggerSafetyIntervention(message);
-            hideTypingIndicator();
-            addMessage('ai', safeMessage);
-            refreshUI(); return;
-        }
-
-        // 2. Normal Route
-        const rawResponse = await getOllamaResponse(message, null, documentText);
-        hideTypingIndicator();
-
-        // 3. Process Tools
-        // Robust regex catches single/double quotes, weird spacing, and missing slashes
-        const toolTagRegex = /<tool_create[^>]*type=["']([^"']+)["'][^>]*(?:theme=["']([^"']+)["'])?[^>]*\/?>/gi;
-        let cleanedResponse = rawResponse;
-        const matchedTags = [...rawResponse.matchAll(toolTagRegex)];
-
-        if (matchedTags.length > 0) matchedTags.forEach(m => addToolStatusMessage(m[1]));
-        
         for (const match of matchedTags) {
             const toolData = await createToolByType(match[1], match[2] || '');
             if (toolData) chatManager.addOrUpdateToolInActiveChat(match[1], toolData);
             cleanedResponse = cleanedResponse.replace(match[0], '').trim();
         }
+
         removeToolStatusMessages();
-
-        addMessage('ai', cleanedResponse);
-        chatManager.addMessageToActiveChat('ai', rawResponse);
-        refreshUI();
-    }
-
-    async function triggerAIFollowUp(followUp) {
-        showTypingIndicator();
-        const response = await getOllamaResponse('', followUp);
-        hideTypingIndicator();
-        addMessage('ai', response);
-        chatManager.addMessageToActiveChat('ai', response);
-        refreshUI();
+        return cleanedResponse;
     }
 
     function refreshUI() {
         renderChatList(chatManager.state.chats, chatManager.getActiveChatId());
         displayChat(chatManager.getActiveChatHistory());
         const tools = chatManager.getActiveChatTools();
-        toggleToolsButton(Object.values(tools).some(arr => arr && arr.length > 0));
+        toggleToolsButton(Object.values(tools).some((entries) => entries && entries.length > 0));
+    }
+
+    async function triggerAIFollowUp(followUp) {
+        showTypingIndicator();
+
+        try {
+            const response = await getOllamaResponse('', followUp);
+            if (response) {
+                addMessage('ai', response);
+                chatManager.addMessageToActiveChat('ai', response);
+                refreshUI();
+            }
+        } finally {
+            hideTypingIndicator();
+        }
+    }
+
+    async function handleSendMessage() {
+        const message = userInput.value.trim();
+        if (!message && !attachedFile) return;
+
+        const currentAttachment = attachedFile;
+        const displayMessage = buildDisplayedUserMessage(message, currentAttachment);
+        addMessage('user', displayMessage);
+        chatManager.addMessageToActiveChat('user', message || displayMessage);
+
+        userInput.value = '';
+        resetAttachment();
+        showTypingIndicator();
+
+        try {
+            const documentText = currentAttachment ? await readAttachedFile(currentAttachment) : null;
+            const screenResult = await chatManager.preScreenMessage(message);
+
+            if (screenResult === 'CRISIS') {
+                const safeMessage = await chatManager.triggerSafetyIntervention(message);
+                addMessage('ai', safeMessage);
+                refreshUI();
+                return;
+            }
+
+            const rawResponse = await getOllamaResponse(message, null, documentText);
+            const cleanedResponse = await processToolTags(rawResponse);
+
+            addMessage('ai', cleanedResponse || "I'm here. I just didn't manage to form a full reply that time.");
+            chatManager.addMessageToActiveChat('ai', rawResponse || cleanedResponse || '');
+            refreshUI();
+        } catch (error) {
+            console.error('Message handling failed:', error);
+            addMessage('ai', "I hit a snag while working on that. Try again in a second and I'll take another pass.");
+        } finally {
+            hideTypingIndicator();
+            removeToolStatusMessages();
+        }
+    }
+
+    async function populateModelOptions() {
+        const storedModel = localStorage.getItem(STORAGE_KEYS.MODEL) || 'llama3:8b';
+
+        try {
+            const data = await requestJson(`${window.AURA_CONFIG.ollamaBaseUrl}/tags`, { method: 'GET' });
+            const models = (data.models || []).map((model) => model.name).filter(Boolean);
+            const uniqueModels = [...new Set([storedModel, ...models])];
+
+            modelSelectDropdown.innerHTML = uniqueModels
+                .map((modelName) => `<option value="${modelName}">${modelName}</option>`)
+                .join('');
+        } catch (error) {
+            console.error('Failed to load models:', error);
+            modelSelectDropdown.innerHTML = `<option value="${storedModel}">${storedModel}</option>`;
+        }
+
+        modelSelectDropdown.value = storedModel;
+    }
+
+    async function openSettingsPanel() {
+        systemPromptTextarea.value = localStorage.getItem(STORAGE_KEYS.PROMPT) || PROMPTS.DEFAULT_SYSTEM;
+        await populateModelOptions();
+        openSettingsModal();
+    }
+
+    function resetSettingsForm() {
+        localStorage.removeItem(STORAGE_KEYS.PROMPT);
+        localStorage.removeItem(STORAGE_KEYS.MODEL);
+        systemPromptTextarea.value = PROMPTS.DEFAULT_SYSTEM;
+        modelSelectDropdown.innerHTML = '<option value="llama3:8b">llama3:8b</option>';
+        modelSelectDropdown.value = 'llama3:8b';
+    }
+
+    function saveSettings() {
+        const promptValue = systemPromptTextarea.value.trim();
+        const selectedModel = modelSelectDropdown.value;
+
+        if (promptValue) {
+            localStorage.setItem(STORAGE_KEYS.PROMPT, promptValue);
+        } else {
+            localStorage.removeItem(STORAGE_KEYS.PROMPT);
+        }
+
+        if (selectedModel) {
+            localStorage.setItem(STORAGE_KEYS.MODEL, selectedModel);
+        }
+
+        closeSettingsModal();
     }
 
     async function checkAgents() {
         const pattern = chatManager.checkForWithdrawalPattern();
-        if (pattern) {
-             showTypingIndicator();
-             const msg = await chatManager.triggerReEngagement(pattern);
-             hideTypingIndicator();
-             if (msg) { addMessage('ai', msg); refreshUI(); }
+        if (!pattern) return;
+
+        showTypingIndicator();
+
+        try {
+            const message = await chatManager.triggerReEngagement(pattern);
+            if (message) {
+                addMessage('ai', message);
+                refreshUI();
+            }
+        } finally {
+            hideTypingIndicator();
         }
     }
 
-    // --- Event Listeners ---
-    userInput.addEventListener('keypress', (e) => { if (e.key === 'Enter') handleSendMessage(); });
-    sendButton.addEventListener('click', () => handleSendMessage());
-    newChatButton.addEventListener('click', () => { chatManager.createNewChat(); refreshUI(); });
-    
-    fileInput.addEventListener('change', (e) => {
-        const file = e.target.files[0];
-        if (file) {
-            attachedFile = file;
-            const ind = document.getElementById('fileAttachmentIndicator');
-            ind.innerHTML = `<span>${file.name}</span><button id="removeFile" class="ml-2 text-gray-500 hover:text-white">&times;</button>`;
-            ind.classList.remove('hidden');
-            document.getElementById('removeFile').onclick = () => { attachedFile = null; ind.classList.add('hidden'); };
+    function runBreathingExercise(button) {
+        const container = button.closest('.breathing-exercise-container');
+        if (!container || container.dataset.running === 'true') return;
+
+        const pacer = container.querySelector('.breathing-pacer');
+        const status = container.querySelector('.breathing-status');
+        const phases = [
+            { key: 'inhale', label: `Inhale for ${button.dataset.cycleInhale}s`, duration: Number(button.dataset.cycleInhale) || 4 },
+            { key: 'hold', label: `Hold for ${button.dataset.cycleHold}s`, duration: Number(button.dataset.cycleHold) || 4 },
+            { key: 'exhale', label: `Exhale for ${button.dataset.cycleExhale}s`, duration: Number(button.dataset.cycleExhale) || 6 }
+        ];
+
+        let phaseIndex = 0;
+        let completedRounds = 0;
+
+        container.dataset.running = 'true';
+        button.disabled = true;
+        button.textContent = 'Breathing...';
+
+        const runPhase = () => {
+            const phase = phases[phaseIndex];
+            pacer.dataset.phase = phase.key;
+            status.textContent = phase.label;
+
+            container._breathingTimer = window.setTimeout(() => {
+                phaseIndex = (phaseIndex + 1) % phases.length;
+                if (phaseIndex === 0) completedRounds += 1;
+
+                if (completedRounds >= 3) {
+                    pacer.dataset.phase = 'idle';
+                    status.textContent = 'Nice. Take a moment and notice how your body feels.';
+                    container.dataset.running = 'false';
+                    button.disabled = false;
+                    button.textContent = 'Start Again';
+                    return;
+                }
+
+                runPhase();
+            }, phase.duration * 1000);
+        };
+
+        runPhase();
+    }
+
+    userInput.addEventListener('keypress', (event) => {
+        if (event.key === 'Enter') handleSendMessage();
+    });
+    sendButton.addEventListener('click', handleSendMessage);
+    newChatButton.addEventListener('click', () => {
+        chatManager.createNewChat();
+        refreshUI();
+    });
+
+    fileInput.addEventListener('change', (event) => {
+        const file = event.target.files[0];
+        if (file) setAttachment(file);
+    });
+
+    chatListContainer.addEventListener('click', (event) => {
+        const deleteButton = event.target.closest('.delete-chat-button');
+        const chatTab = event.target.closest('[data-chat-id]');
+
+        if (deleteButton) {
+            if (confirm('Delete chat?')) {
+                chatManager.deleteChat(deleteButton.dataset.chatId);
+                refreshUI();
+            }
+            return;
+        }
+
+        if (chatTab && chatTab.dataset.chatId !== chatManager.getActiveChatId()) {
+            chatManager.setActiveChat(chatTab.dataset.chatId);
+            refreshUI();
+            checkAgents();
         }
     });
 
-    chatListContainer.addEventListener('click', (e) => {
-        const delBtn = e.target.closest('.delete-chat-button');
-        const tab = e.target.closest('[data-chat-id]');
-        if (delBtn) {
-            if (confirm('Delete chat?')) { chatManager.deleteChat(delBtn.dataset.chatId); refreshUI(); }
-        } else if (tab && tab.dataset.chatId !== chatManager.getActiveChatId()) {
-            chatManager.setActiveChat(tab.dataset.chatId); refreshUI(); checkAgents();
-        }
+    toolsButton.addEventListener('click', () => {
+        renderToolsInModal(chatManager.getActiveChatTools());
+        openToolsModal();
     });
-
-    toolsButton.addEventListener('click', () => { renderToolsInModal(chatManager.getActiveChatTools()); openToolsModal(); });
     document.getElementById('closeToolsButton').addEventListener('click', closeToolsModal);
-    
-    // Insights listeners
+
     if (insightsButton) insightsButton.addEventListener('click', openInsightsModal);
     document.getElementById('closeInsightsButton').addEventListener('click', closeInsightsModal);
+    if (settingsButton) settingsButton.addEventListener('click', openSettingsPanel);
+    cancelSettingsButton.addEventListener('click', closeSettingsModal);
+    resetSettingsButton.addEventListener('click', resetSettingsForm);
+    saveSettingsButton.addEventListener('click', saveSettings);
 
-    // Tool interactions
-    document.getElementById('toolsModalContent').addEventListener('click', async (e) => {
-        const target = e.target.closest('[data-action]');
+    toolsModalContent.addEventListener('click', async (event) => {
+        const target = event.target.closest('[data-action]');
         if (!target) return;
+
         const action = target.dataset.action;
-        
+
         if (action === 'log_mood') {
             chatManager.logMoodToTracker(target.dataset.mood);
-            closeToolsModal(); await triggerAIFollowUp({ type: 'mood_logged', mood: target.dataset.mood });
-        } else if (action === 'commit_affirmation') {
-            target.textContent = 'Committed!'; target.disabled = true;
-        } else if (action === 'save_thought_record') {
+            closeToolsModal();
+            await triggerAIFollowUp({ type: 'mood_logged', mood: target.dataset.mood });
+            return;
+        }
+
+        if (action === 'commit_affirmation') {
+            target.textContent = 'Committed!';
+            target.disabled = true;
+            return;
+        }
+
+        if (action === 'save_thought_record') {
             const card = target.closest('.thought-record-card');
             const data = {};
-            card.querySelectorAll('textarea').forEach(t => data[t.dataset.field] = t.value);
+            card.querySelectorAll('textarea').forEach((textarea) => {
+                data[textarea.dataset.field] = textarea.value;
+            });
             chatManager.updateThoughtRecord(target.dataset.toolId, data);
-            target.textContent = 'Saved!'; setTimeout(() => target.textContent = 'Save Record', 1500);
+            target.textContent = 'Saved!';
+            window.setTimeout(() => {
+                target.textContent = 'Save Record';
+            }, 1500);
+            return;
+        }
+
+        if (action === 'start_breathing') {
+            runBreathingExercise(target);
         }
     });
 
-    document.getElementById('toolsModalContent').addEventListener('change', async (e) => {
-        if (e.target.type === 'checkbox' && e.target.dataset.toolType === 'checklist') {
-            const text = chatManager.completeAndRemoveChecklistItem(e.target.dataset.toolId, parseInt(e.target.dataset.itemIndex));
-            if (text) { closeToolsModal(); await triggerAIFollowUp({ type: 'checklist_item_completed', text }); }
+    toolsModalContent.addEventListener('change', async (event) => {
+        if (event.target.type === 'checkbox' && event.target.dataset.toolType === 'checklist') {
+            const itemText = chatManager.completeAndRemoveChecklistItem(
+                event.target.dataset.toolId,
+                parseInt(event.target.dataset.itemIndex, 10)
+            );
+
+            if (itemText) {
+                closeToolsModal();
+                await triggerAIFollowUp({ type: 'checklist_item_completed', text: itemText });
+            }
         }
     });
 
-    document.body.addEventListener('click', async (e) => {
-        const target = e.target.closest('a.content-link');
-        if (target && target.dataset.topic) {
-            e.preventDefault();
-            const content = await fetchMarkdownContent(target.dataset.topic);
-            if (content) showContentModal(target.dataset.topic.replace(/-/g, ' '), content);
-        }
+    document.body.addEventListener('click', async (event) => {
+        const target = event.target.closest('a.content-link');
+        if (!target?.dataset.topic) return;
+
+        event.preventDefault();
+        const content = await fetchMarkdownContent(target.dataset.topic);
+        if (content) showContentModal(target.dataset.topic.replace(/-/g, ' '), content);
     });
 
     refreshUI();

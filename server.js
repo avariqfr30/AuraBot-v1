@@ -1,107 +1,343 @@
-// server.js
 require('dotenv').config();
+
+const path = require('path');
 const express = require('express');
 const cors = require('cors');
 const axios = require('axios');
 const { ChromaClient } = require('chromadb');
 
 const app = express();
-const PORT = process.env.PORT || 3000;
+
+const HOST = process.env.HOST || '0.0.0.0';
+const PORT = Number(process.env.PORT || 3000);
+const APP_ROOT = __dirname;
+const REQUEST_TIMEOUT_MS = Number(process.env.REQUEST_TIMEOUT_MS || 45000);
+const CHROMA_URL = process.env.CHROMA_URL || 'http://127.0.0.1:8000';
+const OLLAMA_URL = process.env.OLLAMA_URL || 'http://127.0.0.1:11434';
+const EMBEDDING_MODEL = process.env.EMBEDDING_MODEL || 'bge-m3:latest';
+const SERPER_API_KEY = process.env.SERPER_API_KEY || '';
+const chromaTarget = new URL(CHROMA_URL);
+const chroma = new ChromaClient({
+    host: chromaTarget.hostname,
+    port: Number(chromaTarget.port || 8000),
+    ssl: chromaTarget.protocol === 'https:'
+});
+let memoryCollectionPromise = null;
 
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '2mb' }));
+app.use(express.static(APP_ROOT));
 
-// Use 127.0.0.1 to avoid Node.js IPv6 resolution issues
-const chroma = new ChromaClient({ path: "http://127.0.0.1:8000" });
-const OLLAMA_URL = process.env.OLLAMA_URL || 'http://127.0.0.1:11434';
-const EMBEDDING_MODEL = 'bge-m3:latest'; // Ensure this model is pulled in Ollama
-
-// --- Custom Ollama Embedding Function ---
 const ollamaEmbeddingFunction = {
     generate: async (texts) => {
-        try {
-            const response = await axios.post(`${OLLAMA_URL}/api/embed`, {
-                model: EMBEDDING_MODEL,
-                input: texts 
-            });
-            return response.data.embeddings;
-        } catch (error) {
-            console.error("[Ollama Embed] Failed to generate embeddings:", error.message);
-            throw error;
-        }
+        const response = await axios.post(
+            `${OLLAMA_URL}/api/embed`,
+            { model: EMBEDDING_MODEL, input: texts },
+            { timeout: REQUEST_TIMEOUT_MS }
+        );
+        return response.data.embeddings;
     }
 };
 
-// --- Vector Storage ---
+function getMemoryCollection() {
+    if (!memoryCollectionPromise) {
+        memoryCollectionPromise = chroma.getOrCreateCollection({
+            name: 'aura_long_term_memory',
+            embeddingFunction: ollamaEmbeddingFunction
+        });
+    }
+    return memoryCollectionPromise;
+}
+
+function cleanSearchQuery(value) {
+    if (typeof value !== 'string') return '';
+
+    return value
+        .replace(/^(here is the query|query|search query):\s*/i, '')
+        .replace(/^["']|["']$/g, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+
+function normalizeSourceLink(item = {}) {
+    return item.link || item.website || item.descriptionLink || null;
+}
+
+function dedupeByLink(items) {
+    const seen = new Set();
+
+    return items.filter((item) => {
+        const key = item.link || `${item.kind}:${item.title}:${item.query}`;
+        if (!key || seen.has(key)) return false;
+        seen.add(key);
+        return true;
+    });
+}
+
+function pickOrganicResults(query, data) {
+    return (data.organic || []).slice(0, 4).map((item, index) => ({
+        kind: 'web',
+        query,
+        rank: item.position || index + 1,
+        title: item.title || 'Untitled result',
+        snippet: item.snippet || '',
+        link: item.link || null,
+        source: item.source || item.domain || null,
+        date: item.date || null
+    }));
+}
+
+function pickNewsResults(query, data) {
+    return (data.news || []).slice(0, 4).map((item, index) => ({
+        kind: 'news',
+        query,
+        rank: item.position || index + 1,
+        title: item.title || 'Untitled article',
+        snippet: item.snippet || '',
+        link: item.link || null,
+        source: item.source || null,
+        date: item.date || null
+    }));
+}
+
+function buildSearchBriefing(query, data) {
+    const answerBox = data.answerBox
+        ? {
+              title: data.answerBox.title || data.answerBox.answer || 'Featured result',
+              snippet: data.answerBox.snippet || data.answerBox.answer || data.answerBox.title || '',
+              link: normalizeSourceLink(data.answerBox)
+          }
+        : null;
+
+    const knowledgeGraph = data.knowledgeGraph
+        ? {
+              title: data.knowledgeGraph.title || '',
+              type: data.knowledgeGraph.type || '',
+              description: data.knowledgeGraph.description || '',
+              website: data.knowledgeGraph.website || null,
+              source: data.knowledgeGraph.descriptionSource || null,
+              link: normalizeSourceLink(data.knowledgeGraph),
+              attributes: data.knowledgeGraph.attributes || {}
+          }
+        : null;
+
+    const peopleAlsoAsk = (data.peopleAlsoAsk || []).slice(0, 3).map((item) => ({
+        question: item.question || '',
+        snippet: item.snippet || '',
+        link: item.link || null
+    }));
+
+    const places = (data.places || []).slice(0, 3).map((item, index) => ({
+        kind: 'place',
+        query,
+        rank: item.position || index + 1,
+        title: item.title || 'Untitled place',
+        snippet: [item.address, item.description, item.phoneNumber].filter(Boolean).join(' | '),
+        link: item.website || null,
+        source: item.category || item.type || 'Local result',
+        rating: item.rating || null
+    }));
+
+    const relatedSearches = (data.relatedSearches || []).slice(0, 5).map((item) => item.query).filter(Boolean);
+
+    const organic = pickOrganicResults(query, data);
+
+    return {
+        query,
+        answerBox,
+        knowledgeGraph,
+        peopleAlsoAsk,
+        relatedSearches,
+        organic,
+        places
+    };
+}
+
+async function requestSerper(endpoint, query) {
+    const response = await axios.post(
+        `https://google.serper.dev${endpoint}`,
+        { q: query },
+        {
+            headers: {
+                'X-API-KEY': SERPER_API_KEY,
+                'Content-Type': 'application/json'
+            },
+            timeout: REQUEST_TIMEOUT_MS
+        }
+    );
+
+    return response.data;
+}
+
+async function buildOsintReport({ primaryQuery, supportingQueries = [], includeNews = true }) {
+    const cleanedPrimaryQuery = cleanSearchQuery(primaryQuery);
+    const cleanedSupportingQueries = [...new Set((supportingQueries || []).map(cleanSearchQuery))]
+        .filter(Boolean)
+        .filter((query) => query !== cleanedPrimaryQuery)
+        .slice(0, 2);
+
+    if (!cleanedPrimaryQuery) {
+        throw new Error('A primary query is required for OSINT research');
+    }
+
+    const webQueries = [cleanedPrimaryQuery, ...cleanedSupportingQueries];
+    const webResponses = await Promise.all(webQueries.map((query) => requestSerper('/search', query)));
+    const newsResponse = includeNews ? await requestSerper('/news', cleanedPrimaryQuery) : null;
+
+    const searches = webResponses.map((data, index) => buildSearchBriefing(webQueries[index], data));
+    const news = newsResponse ? pickNewsResults(cleanedPrimaryQuery, newsResponse) : [];
+
+    const evidence = dedupeByLink(
+        searches.flatMap((search) => [...search.organic, ...search.places]).concat(news)
+    );
+
+    const sources = evidence.slice(0, 12).map(({ kind, title, link, source, query, date }) => ({
+        kind,
+        title,
+        link,
+        source,
+        query,
+        date
+    }));
+
+    return {
+        executedAt: new Date().toISOString(),
+        primaryQuery: cleanedPrimaryQuery,
+        supportingQueries: cleanedSupportingQueries,
+        searches,
+        news,
+        sources,
+        evidence
+    };
+}
+
+function respondWithUpstreamError(res, label, error) {
+    const status = error.response?.status || 500;
+    const details = error.response?.data || error.message;
+
+    console.error(`[${label}]`, details);
+
+    res.status(status).json({
+        error: `${label} failed`,
+        details
+    });
+}
+
+app.get('/api/health', async (_req, res) => {
+    res.json({
+        status: 'ok',
+        port: PORT,
+        hostedMode: true,
+        services: {
+            ollama: OLLAMA_URL,
+            chroma: CHROMA_URL,
+            serperConfigured: Boolean(SERPER_API_KEY)
+        }
+    });
+});
+
+app.get('/api/ollama/tags', async (_req, res) => {
+    try {
+        const response = await axios.get(`${OLLAMA_URL}/api/tags`, {
+            timeout: REQUEST_TIMEOUT_MS
+        });
+        res.json(response.data);
+    } catch (error) {
+        respondWithUpstreamError(res, 'Ollama tags request', error);
+    }
+});
+
+app.post('/api/ollama/generate', async (req, res) => {
+    try {
+        const response = await axios.post(`${OLLAMA_URL}/api/generate`, req.body, {
+            timeout: REQUEST_TIMEOUT_MS
+        });
+        res.json(response.data);
+    } catch (error) {
+        respondWithUpstreamError(res, 'Ollama generate request', error);
+    }
+});
+
 app.post('/api/store_memory', async (req, res) => {
     try {
         const { text, metadata, id } = req.body;
-        const collection = await chroma.getOrCreateCollection({ 
-            name: "aura_long_term_memory",
-            embeddingFunction: ollamaEmbeddingFunction 
-        });
+
+        if (!text) {
+            return res.status(400).json({ error: 'Memory text is required' });
+        }
+
+        const collection = await getMemoryCollection();
         await collection.add({
             ids: [id || `mem_${Date.now()}`],
             metadatas: [metadata || {}],
             documents: [text]
         });
+
         res.json({ success: true });
     } catch (error) {
-        console.error("[Vector Store] Error:", error.message);
-        res.status(500).json({ error: error.message });
+        respondWithUpstreamError(res, 'Vector store', error);
     }
 });
 
 app.post('/api/search_memory', async (req, res) => {
     try {
         const { query, nResults = 3 } = req.body;
-        const collection = await chroma.getOrCreateCollection({ 
-            name: "aura_long_term_memory",
-            embeddingFunction: ollamaEmbeddingFunction
-        });
+
+        if (!query) {
+            return res.status(400).json({ error: 'A search query is required' });
+        }
+
+        const collection = await getMemoryCollection();
         const results = await collection.query({
-            queryTexts: [query], 
-            nResults: nResults
+            queryTexts: [query],
+            nResults
         });
+
         res.json({ results });
     } catch (error) {
-        console.error("[Vector Search] Error:", error.message);
-        res.status(500).json({ error: error.message });
+        respondWithUpstreamError(res, 'Vector search', error);
     }
 });
 
-// --- Serper.dev Live Search Proxy ---
-app.get('/api/search', async (req, res) => {
-    const { query } = req.query;
-    const { SERPER_API_KEY } = process.env;
-
-    if (!query) return res.status(400).json({ error: 'Query parameter is required' });
-    if (!SERPER_API_KEY) return res.status(500).json({ error: 'Missing Serper API credentials' });
+app.post('/api/osint', async (req, res) => {
+    if (!SERPER_API_KEY) {
+        return res.status(500).json({ error: 'Missing Serper API credentials' });
+    }
 
     try {
-        console.log(`[SearchAgent] Executing Serper: "${query}"`);
-        
-        // Serper requires a POST request with the query in the body
-        const response = await axios.post('https://google.serper.dev/search', {
-            q: query
-        }, {
-            headers: {
-                'X-API-KEY': SERPER_API_KEY,
-                'Content-Type': 'application/json'
-            }
-        });
-
-        // Serper stores the main web results in the 'organic' array
-        const items = response.data.organic || [];
-        
-        // Map it to match our existing format and grab the top 4 results
-        const results = items.slice(0, 4).map(({ title, snippet, link }) => ({ title, snippet, link }));
-        
-        res.json({ results: results.length ? JSON.stringify(results) : "No results found." });
+        const report = await buildOsintReport(req.body || {});
+        res.json(report);
     } catch (error) {
-        console.error('[SearchAgent] API Error:', error.response?.data || error.message);
-        res.status(500).json({ error: 'Search failed' });
+        respondWithUpstreamError(res, 'OSINT research', error);
     }
 });
 
-app.listen(PORT, () => console.log(`Aura search & vector proxy live on port ${PORT}`));
+app.get('/api/search', async (req, res) => {
+    if (!SERPER_API_KEY) {
+        return res.status(500).json({ error: 'Missing Serper API credentials' });
+    }
+
+    try {
+        const report = await buildOsintReport({
+            primaryQuery: req.query.query,
+            supportingQueries: [],
+            includeNews: true
+        });
+
+        res.json(report);
+    } catch (error) {
+        respondWithUpstreamError(res, 'Search', error);
+    }
+});
+
+app.use((req, res) => {
+    if (req.path.startsWith('/api/')) {
+        return res.status(404).json({ error: 'Not found' });
+    }
+
+    return res.sendFile(path.join(APP_ROOT, 'index.html'));
+});
+
+app.listen(PORT, HOST, () => {
+    console.log(`Aura app server live on http://${HOST}:${PORT}`);
+});

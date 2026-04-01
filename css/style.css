@@ -1,12 +1,22 @@
-/* css/style.css */
-/* Aura Liquid Glass Theme (iOS 26 Inspired) */
+:root {
+    --bg-start: #0f172a;
+    --bg-mid: #1e1b4b;
+    --bg-end: #311144;
+    --glass-surface: rgba(15, 23, 42, 0.45);
+    --glass-border: rgba(255, 255, 255, 0.08);
+    --bubble-user: rgba(236, 72, 153, 0.25);
+    --bubble-user-border: rgba(236, 72, 153, 0.3);
+    --bubble-ai: rgba(30, 41, 59, 0.5);
+    --bubble-ai-border: rgba(255, 255, 255, 0.05);
+    --text-main: #e2e8f0;
+    --text-strong: #ffffff;
+}
 
-/* Animated Mesh Gradient Background */
 body {
-    background: linear-gradient(45deg, #0f172a, #1e1b4b, #171717, #311144);
+    background: linear-gradient(45deg, var(--bg-start), var(--bg-mid), #171717, var(--bg-end));
     background-size: 400% 400%;
     animation: liquidBackground 15s ease infinite;
-    color: #e2e8f0;
+    color: var(--text-main);
 }
 
 @keyframes liquidBackground {
@@ -15,25 +25,37 @@ body {
     100% { background-position: 0% 50%; }
 }
 
-/* Core Liquid Glass Material */
+@keyframes breatheIn {
+    from { transform: scale(0.9); opacity: 0.8; }
+    to { transform: scale(1.18); opacity: 1; }
+}
+
+@keyframes breatheHold {
+    from { transform: scale(1.18); opacity: 1; }
+    to { transform: scale(1.18); opacity: 1; }
+}
+
+@keyframes breatheOut {
+    from { transform: scale(1.18); opacity: 1; }
+    to { transform: scale(0.86); opacity: 0.7; }
+}
+
 .liquid-glass {
-    background: rgba(15, 23, 42, 0.45);
+    background: var(--glass-surface);
     backdrop-filter: blur(24px) saturate(180%);
     -webkit-backdrop-filter: blur(24px) saturate(180%);
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    box-shadow: 
+    border: 1px solid var(--glass-border);
+    box-shadow:
         0 12px 40px rgba(0, 0, 0, 0.4),
         inset 0 1px 0 rgba(255, 255, 255, 0.1);
 }
 
-/* Floating Input Pill (iOS 26 style bottom nav) */
 .floating-input-area {
     margin: 0 1rem 1rem 1rem;
-    border-radius: 9999px; /* Maximum pill shape */
+    border-radius: 9999px;
     padding: 0.5rem;
 }
 
-/* Chat Bubbles */
 .chat-bubble {
     padding: 1rem 1.25rem;
     line-height: 1.5;
@@ -44,29 +66,26 @@ body {
     transform: scale(1.01);
 }
 
-/* User Bubble: Vibrant, refractive brand color */
 .chat-bubble.user {
-    background: rgba(236, 72, 153, 0.25); /* Translucent Pink */
+    background: var(--bubble-user);
     backdrop-filter: blur(20px) saturate(150%);
     -webkit-backdrop-filter: blur(20px) saturate(150%);
-    border: 1px solid rgba(236, 72, 153, 0.3);
-    border-radius: 24px 24px 4px 24px; /* Organic squircle tail */
+    border: 1px solid var(--bubble-user-border);
+    border-radius: 24px 24px 4px 24px;
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.2);
-    color: #fff;
+    color: var(--text-strong);
 }
 
-/* AI Bubble: Deeper, frosted glass */
 .chat-bubble.ai {
-    background: rgba(30, 41, 59, 0.5);
+    background: var(--bubble-ai);
     backdrop-filter: blur(20px) saturate(150%);
     -webkit-backdrop-filter: blur(20px) saturate(150%);
-    border: 1px solid rgba(255, 255, 255, 0.05);
-    border-radius: 24px 24px 24px 4px; 
+    border: 1px solid var(--bubble-ai-border);
+    border-radius: 24px 24px 24px 4px;
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
-    color: #e2e8f0;
+    color: var(--text-main);
 }
 
-/* Tool Cards inside Chat */
 .tool-card {
     background: rgba(255, 255, 255, 0.03);
     border: 1px solid rgba(255, 255, 255, 0.05);
@@ -75,17 +94,78 @@ body {
     margin-top: 0.75rem;
 }
 
-/* Scrollbar styling for glass effect */
+.breathing-exercise-container {
+    display: grid;
+    place-items: center;
+    text-align: center;
+    gap: 0.75rem;
+}
+
+.breathing-pacer {
+    width: 8rem;
+    height: 8rem;
+    border-radius: 9999px;
+    background:
+        radial-gradient(circle at 30% 30%, rgba(255, 255, 255, 0.25), transparent 40%),
+        radial-gradient(circle, rgba(236, 72, 153, 0.42), rgba(59, 130, 246, 0.28));
+    box-shadow:
+        0 0 0 10px rgba(255, 255, 255, 0.04),
+        0 18px 40px rgba(15, 23, 42, 0.45);
+    transform: scale(0.9);
+    transition: transform 0.3s ease, opacity 0.3s ease;
+}
+
+.breathing-pacer[data-phase="inhale"] {
+    animation: breatheIn 4s ease-in-out forwards;
+}
+
+.breathing-pacer[data-phase="hold"] {
+    animation: breatheHold 4s linear forwards;
+}
+
+.breathing-pacer[data-phase="exhale"] {
+    animation: breatheOut 6s ease-in-out forwards;
+}
+
+.breathing-pacer[data-phase="idle"] {
+    transform: scale(0.9);
+    opacity: 0.85;
+}
+
+.breathing-status {
+    color: rgba(226, 232, 240, 0.9);
+    font-size: 0.95rem;
+}
+
 ::-webkit-scrollbar {
     width: 6px;
 }
+
 ::-webkit-scrollbar-track {
     background: transparent;
 }
+
 ::-webkit-scrollbar-thumb {
     background: rgba(255, 255, 255, 0.1);
     border-radius: 10px;
 }
+
 ::-webkit-scrollbar-thumb:hover {
     background: rgba(255, 255, 255, 0.2);
+}
+
+@media (max-width: 900px) {
+    #chatSidebar {
+        display: none;
+    }
+
+    .floating-input-area {
+        margin-left: 0.75rem;
+        margin-right: 0.75rem;
+        border-radius: 1.5rem;
+    }
+
+    .chat-bubble {
+        max-width: 88%;
+    }
 }
