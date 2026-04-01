@@ -6,5 +6,7 @@ const ACTIVE_APP_ORIGIN = window.location.origin.startsWith('http')
 window.AURA_CONFIG = {
     appOrigin: ACTIVE_APP_ORIGIN,
     apiBaseUrl: `${ACTIVE_APP_ORIGIN}/api`,
-    ollamaBaseUrl: `${ACTIVE_APP_ORIGIN}/api/ollama`
+    ollamaBaseUrl: `${ACTIVE_APP_ORIGIN}/api/ollama`,
+    defaultModel: 'gpt-oss:120b-cloud',
+    defaultTheme: 'dark'
 };

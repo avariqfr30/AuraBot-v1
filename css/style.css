@@ -1,53 +1,76 @@
 :root {
-    --bg-start: #0f172a;
-    --bg-mid: #1e1b4b;
-    --bg-end: #311144;
-    --glass-surface: rgba(15, 23, 42, 0.45);
+    --page-bg: #050505;
+    --page-bg-muted: #0d0d0f;
+    --page-elevated: rgba(18, 18, 20, 0.92);
+    --page-elevated-solid: #141417;
+    --glass-surface: rgba(18, 18, 20, 0.78);
     --glass-border: rgba(255, 255, 255, 0.08);
-    --bubble-user: rgba(236, 72, 153, 0.25);
-    --bubble-user-border: rgba(236, 72, 153, 0.3);
-    --bubble-ai: rgba(30, 41, 59, 0.5);
-    --bubble-ai-border: rgba(255, 255, 255, 0.05);
-    --text-main: #e2e8f0;
+    --glass-shadow: 0 22px 44px rgba(0, 0, 0, 0.45);
+    --text-main: #ececf1;
+    --text-muted: #a8a8b3;
     --text-strong: #ffffff;
+    --accent: #ec4899;
+    --accent-strong: #db2777;
+    --accent-soft: rgba(236, 72, 153, 0.16);
+    --bubble-user: rgba(236, 72, 153, 0.2);
+    --bubble-user-border: rgba(236, 72, 153, 0.34);
+    --bubble-ai: rgba(26, 26, 30, 0.94);
+    --bubble-ai-border: rgba(255, 255, 255, 0.07);
+    --tool-card-bg: rgba(255, 255, 255, 0.03);
+    --tool-card-border: rgba(255, 255, 255, 0.06);
+    --modal-overlay: rgba(0, 0, 0, 0.76);
+    --input-pill-bg: rgba(255, 255, 255, 0.04);
+    --input-pill-border: rgba(255, 255, 255, 0.08);
+    --scrollbar-thumb: rgba(255, 255, 255, 0.16);
+    --header-icon: #9ca3af;
+    --surface-contrast: #0b0b0d;
+}
+
+:root[data-theme="light"] {
+    --page-bg: #f7f4f8;
+    --page-bg-muted: #fff7fb;
+    --page-elevated: rgba(255, 255, 255, 0.92);
+    --page-elevated-solid: #ffffff;
+    --glass-surface: rgba(255, 255, 255, 0.84);
+    --glass-border: rgba(17, 24, 39, 0.08);
+    --glass-shadow: 0 22px 44px rgba(17, 24, 39, 0.12);
+    --text-main: #1f1726;
+    --text-muted: #6f5d72;
+    --text-strong: #120d15;
+    --accent: #db2777;
+    --accent-strong: #be185d;
+    --accent-soft: rgba(219, 39, 119, 0.1);
+    --bubble-user: rgba(219, 39, 119, 0.12);
+    --bubble-user-border: rgba(219, 39, 119, 0.24);
+    --bubble-ai: rgba(255, 255, 255, 0.92);
+    --bubble-ai-border: rgba(17, 24, 39, 0.08);
+    --tool-card-bg: rgba(17, 24, 39, 0.03);
+    --tool-card-border: rgba(17, 24, 39, 0.08);
+    --modal-overlay: rgba(17, 24, 39, 0.32);
+    --input-pill-bg: rgba(17, 24, 39, 0.04);
+    --input-pill-border: rgba(17, 24, 39, 0.08);
+    --scrollbar-thumb: rgba(17, 24, 39, 0.18);
+    --header-icon: #5b5564;
+    --surface-contrast: #f4eef3;
+}
+
+html,
+body {
+    min-height: 100%;
 }
 
 body {
-    background: linear-gradient(45deg, var(--bg-start), var(--bg-mid), #171717, var(--bg-end));
-    background-size: 400% 400%;
-    animation: liquidBackground 15s ease infinite;
+    background: var(--page-bg);
     color: var(--text-main);
-}
-
-@keyframes liquidBackground {
-    0% { background-position: 0% 50%; }
-    50% { background-position: 100% 50%; }
-    100% { background-position: 0% 50%; }
-}
-
-@keyframes breatheIn {
-    from { transform: scale(0.9); opacity: 0.8; }
-    to { transform: scale(1.18); opacity: 1; }
-}
-
-@keyframes breatheHold {
-    from { transform: scale(1.18); opacity: 1; }
-    to { transform: scale(1.18); opacity: 1; }
-}
-
-@keyframes breatheOut {
-    from { transform: scale(1.18); opacity: 1; }
-    to { transform: scale(0.86); opacity: 0.7; }
+    transition: background-color 0.2s ease, color 0.2s ease;
 }
 
 .liquid-glass {
     background: var(--glass-surface);
-    backdrop-filter: blur(24px) saturate(180%);
-    -webkit-backdrop-filter: blur(24px) saturate(180%);
+    backdrop-filter: blur(22px) saturate(140%);
+    -webkit-backdrop-filter: blur(22px) saturate(140%);
     border: 1px solid var(--glass-border);
-    box-shadow:
-        0 12px 40px rgba(0, 0, 0, 0.4),
-        inset 0 1px 0 rgba(255, 255, 255, 0.1);
+    box-shadow: var(--glass-shadow), inset 0 1px 0 rgba(255, 255, 255, 0.04);
 }
 
 .floating-input-area {
@@ -68,30 +91,53 @@ body {
 
 .chat-bubble.user {
     background: var(--bubble-user);
-    backdrop-filter: blur(20px) saturate(150%);
-    -webkit-backdrop-filter: blur(20px) saturate(150%);
+    backdrop-filter: blur(18px) saturate(140%);
+    -webkit-backdrop-filter: blur(18px) saturate(140%);
     border: 1px solid var(--bubble-user-border);
     border-radius: 24px 24px 4px 24px;
-    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.2);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12);
     color: var(--text-strong);
 }
 
 .chat-bubble.ai {
     background: var(--bubble-ai);
-    backdrop-filter: blur(20px) saturate(150%);
-    -webkit-backdrop-filter: blur(20px) saturate(150%);
+    backdrop-filter: blur(18px) saturate(140%);
+    -webkit-backdrop-filter: blur(18px) saturate(140%);
     border: 1px solid var(--bubble-ai-border);
     border-radius: 24px 24px 24px 4px;
-    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
     color: var(--text-main);
 }
 
 .tool-card {
-    background: rgba(255, 255, 255, 0.03);
-    border: 1px solid rgba(255, 255, 255, 0.05);
+    background: var(--tool-card-bg);
+    border: 1px solid var(--tool-card-border);
     border-radius: 20px;
     padding: 1.25rem;
     margin-top: 0.75rem;
+}
+
+.theme-toggle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 4.75rem;
+    padding: 0.45rem 0.75rem;
+    border-radius: 9999px;
+    border: 1px solid var(--glass-border);
+    background: var(--input-pill-bg);
+    color: var(--text-main);
+    font-size: 0.85rem;
+    font-weight: 600;
+}
+
+.theme-toggle:hover {
+    background: var(--accent-soft);
+    color: var(--text-strong);
+}
+
+.theme-toggle-label {
+    line-height: 1;
 }
 
 .breathing-exercise-container {
@@ -106,13 +152,28 @@ body {
     height: 8rem;
     border-radius: 9999px;
     background:
-        radial-gradient(circle at 30% 30%, rgba(255, 255, 255, 0.25), transparent 40%),
-        radial-gradient(circle, rgba(236, 72, 153, 0.42), rgba(59, 130, 246, 0.28));
+        radial-gradient(circle at 30% 30%, rgba(255, 255, 255, 0.22), transparent 40%),
+        radial-gradient(circle, rgba(236, 72, 153, 0.42), rgba(244, 114, 182, 0.18));
     box-shadow:
         0 0 0 10px rgba(255, 255, 255, 0.04),
-        0 18px 40px rgba(15, 23, 42, 0.45);
+        0 18px 40px rgba(15, 23, 42, 0.25);
     transform: scale(0.9);
     transition: transform 0.3s ease, opacity 0.3s ease;
+}
+
+@keyframes breatheIn {
+    from { transform: scale(0.9); opacity: 0.8; }
+    to { transform: scale(1.18); opacity: 1; }
+}
+
+@keyframes breatheHold {
+    from { transform: scale(1.18); opacity: 1; }
+    to { transform: scale(1.18); opacity: 1; }
+}
+
+@keyframes breatheOut {
+    from { transform: scale(1.18); opacity: 1; }
+    to { transform: scale(0.86); opacity: 0.7; }
 }
 
 .breathing-pacer[data-phase="inhale"] {
@@ -133,8 +194,143 @@ body {
 }
 
 .breathing-status {
-    color: rgba(226, 232, 240, 0.9);
+    color: var(--text-muted);
     font-size: 0.95rem;
+}
+
+#chatSidebar h2,
+header h1,
+#settingsModal h3,
+#toolsModal h3,
+#insightsModal h3,
+#contentModal h3,
+.tool-card h4,
+.tool-card h5 {
+    color: var(--text-strong) !important;
+}
+
+#chatSidebar,
+header,
+.floating-input-area,
+#settingsModal .liquid-glass,
+#toolsModal .liquid-glass,
+#insightsModal .liquid-glass,
+#contentModal > div {
+    background-color: var(--page-elevated);
+}
+
+#settingsModal,
+#toolsModal,
+#insightsModal,
+#contentModal {
+    background: var(--modal-overlay) !important;
+}
+
+#fileAttachmentIndicator {
+    background: var(--input-pill-bg) !important;
+    border: 1px solid var(--input-pill-border);
+    color: var(--text-muted) !important;
+}
+
+#userInput,
+#systemPromptTextarea,
+#modelSelectDropdown,
+.thought-record-card textarea {
+    color: var(--text-main) !important;
+    background: var(--input-pill-bg) !important;
+    border: 1px solid var(--input-pill-border);
+}
+
+#userInput::placeholder,
+#systemPromptTextarea::placeholder,
+.thought-record-card textarea::placeholder {
+    color: var(--text-muted);
+}
+
+#chatList [data-chat-id] {
+    border: 1px solid transparent;
+}
+
+#chatList [data-chat-id]:not(.bg-gray-700) {
+    color: var(--text-main) !important;
+}
+
+#chatList [data-chat-id].bg-gray-700 {
+    background: var(--accent-soft) !important;
+    border-color: var(--bubble-user-border);
+    color: var(--text-strong) !important;
+}
+
+#chatList [data-chat-id]:hover {
+    background: var(--accent-soft) !important;
+}
+
+#insightsButton,
+#toolsButton,
+#settingsButton {
+    color: var(--header-icon) !important;
+}
+
+#insightsButton:hover,
+#toolsButton:hover,
+#settingsButton:hover {
+    color: var(--accent) !important;
+}
+
+#newChatButton,
+#sendButton,
+#saveSettingsButton,
+.tool-button,
+.mood-button:hover {
+    background: var(--accent-strong) !important;
+    color: #fff !important;
+}
+
+#newChatButton:hover,
+#sendButton:hover,
+#saveSettingsButton:hover,
+.tool-button:hover {
+    background: var(--accent) !important;
+}
+
+#resetSettingsButton,
+#closeToolsButton,
+#closeInsightsButton,
+#closeContentButton {
+    background: var(--input-pill-bg) !important;
+    color: var(--text-main) !important;
+    border: 1px solid var(--input-pill-border);
+}
+
+#cancelSettingsButton {
+    color: var(--text-main) !important;
+}
+
+#insightsContent > div > div,
+.mood-tracker-card,
+.affirmation-card,
+.checklist-card,
+.thought-record-card,
+.breathing-exercise-container {
+    background: var(--tool-card-bg);
+    color: var(--text-main);
+}
+
+.content-link {
+    color: var(--accent) !important;
+}
+
+.delete-chat-button {
+    color: var(--text-muted) !important;
+}
+
+.delete-chat-button:hover {
+    color: var(--accent) !important;
+}
+
+.prose,
+.prose * {
+    color: var(--text-main) !important;
 }
 
 ::-webkit-scrollbar {
@@ -146,12 +342,12 @@ body {
 }
 
 ::-webkit-scrollbar-thumb {
-    background: rgba(255, 255, 255, 0.1);
+    background: var(--scrollbar-thumb);
     border-radius: 10px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-    background: rgba(255, 255, 255, 0.2);
+    background: var(--accent);
 }
 
 @media (max-width: 900px) {
@@ -167,5 +363,11 @@ body {
 
     .chat-bubble {
         max-width: 88%;
+    }
+
+    .theme-toggle {
+        min-width: 4.25rem;
+        padding-left: 0.65rem;
+        padding-right: 0.65rem;
     }
 }

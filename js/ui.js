@@ -262,5 +262,3 @@ function processContentLinks() {
         }
     );
 }
-
-document.documentElement.setAttribute('data-theme', 'dark');

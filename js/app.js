@@ -7,6 +7,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const fileInput = document.getElementById('fileInput');
     const fileAttachmentIndicator = document.getElementById('fileAttachmentIndicator');
     const insightsButton = document.getElementById('insightsButton');
+    const themeToggleButton = document.getElementById('themeToggleButton');
     const settingsButton = document.getElementById('settingsButton');
     const systemPromptTextarea = document.getElementById('systemPromptTextarea');
     const modelSelectDropdown = document.getElementById('modelSelectDropdown');
@@ -17,6 +18,43 @@ document.addEventListener('DOMContentLoaded', () => {
     const TOOL_TAG_REGEX = /<tool_create[^>]*type=["']([^"']+)["'][^>]*(?:theme=["']([^"']+)["'])?[^>]*\/?>/gi;
 
     let attachedFile = null;
+
+    function getStoredTheme() {
+        const storedTheme = localStorage.getItem(STORAGE_KEYS.THEME);
+        return storedTheme === 'light' || storedTheme === 'dark'
+            ? storedTheme
+            : window.AURA_CONFIG.defaultTheme;
+    }
+
+    function updateThemeToggleLabel(theme) {
+        if (!themeToggleButton) return;
+
+        const nextTheme = theme === 'dark' ? 'light' : 'dark';
+        const label = nextTheme.charAt(0).toUpperCase() + nextTheme.slice(1);
+        const textNode = themeToggleButton.querySelector('.theme-toggle-label');
+
+        if (textNode) textNode.textContent = label;
+        themeToggleButton.setAttribute('title', `Switch to ${nextTheme} mode`);
+        themeToggleButton.setAttribute('aria-label', `Switch to ${nextTheme} mode`);
+    }
+
+    function applyTheme(theme) {
+        document.documentElement.setAttribute('data-theme', theme);
+        localStorage.setItem(STORAGE_KEYS.THEME, theme);
+        updateThemeToggleLabel(theme);
+    }
+
+    function toggleTheme() {
+        const nextTheme = getStoredTheme() === 'dark' ? 'light' : 'dark';
+        applyTheme(nextTheme);
+    }
+
+    function normalizeStoredModel() {
+        const storedModel = localStorage.getItem(STORAGE_KEYS.MODEL);
+        if (!storedModel || storedModel === 'llama3:8b') {
+            localStorage.setItem(STORAGE_KEYS.MODEL, window.AURA_CONFIG.defaultModel);
+        }
+    }
 
     function resetAttachment() {
         attachedFile = null;
@@ -126,7 +164,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     async function populateModelOptions() {
-        const storedModel = localStorage.getItem(STORAGE_KEYS.MODEL) || 'llama3:8b';
+        const storedModel = localStorage.getItem(STORAGE_KEYS.MODEL) || window.AURA_CONFIG.defaultModel;
 
         try {
             const data = await requestJson(`${window.AURA_CONFIG.ollamaBaseUrl}/tags`, { method: 'GET' });
@@ -154,8 +192,8 @@ document.addEventListener('DOMContentLoaded', () => {
         localStorage.removeItem(STORAGE_KEYS.PROMPT);
         localStorage.removeItem(STORAGE_KEYS.MODEL);
         systemPromptTextarea.value = PROMPTS.DEFAULT_SYSTEM;
-        modelSelectDropdown.innerHTML = '<option value="llama3:8b">llama3:8b</option>';
-        modelSelectDropdown.value = 'llama3:8b';
+        modelSelectDropdown.innerHTML = `<option value="${window.AURA_CONFIG.defaultModel}">${window.AURA_CONFIG.defaultModel}</option>`;
+        modelSelectDropdown.value = window.AURA_CONFIG.defaultModel;
     }
 
     function saveSettings() {
@@ -277,6 +315,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     if (insightsButton) insightsButton.addEventListener('click', openInsightsModal);
     document.getElementById('closeInsightsButton').addEventListener('click', closeInsightsModal);
+    if (themeToggleButton) themeToggleButton.addEventListener('click', toggleTheme);
     if (settingsButton) settingsButton.addEventListener('click', openSettingsPanel);
     cancelSettingsButton.addEventListener('click', closeSettingsModal);
     resetSettingsButton.addEventListener('click', resetSettingsForm);
@@ -343,6 +382,8 @@ document.addEventListener('DOMContentLoaded', () => {
         if (content) showContentModal(target.dataset.topic.replace(/-/g, ' '), content);
     });
 
+    normalizeStoredModel();
+    applyTheme(getStoredTheme());
     refreshUI();
     checkAgents();
 });

@@ -1,7 +1,8 @@
 const STORAGE_KEYS = {
     STATE: 'aura_app_state',
     PROMPT: 'aura_system_prompt',
-    MODEL: 'aura_model_name'
+    MODEL: 'aura_model_name',
+    THEME: 'aura_theme'
 };
 
 const API_ENDPOINTS = {
@@ -185,7 +186,7 @@ async function postJson(url, body) {
 }
 
 async function _callLLM(prompt, format = null) {
-    const model = localStorage.getItem(STORAGE_KEYS.MODEL) || 'llama3:8b';
+    const model = localStorage.getItem(STORAGE_KEYS.MODEL) || window.AURA_CONFIG.defaultModel;
 
     try {
         const data = await postJson(API_ENDPOINTS.ollamaGenerate, {
