@@ -7,6 +7,12 @@ window.AURA_CONFIG = {
     appOrigin: ACTIVE_APP_ORIGIN,
     apiBaseUrl: `${ACTIVE_APP_ORIGIN}/api`,
     ollamaBaseUrl: `${ACTIVE_APP_ORIGIN}/api/ollama`,
-    defaultModel: 'gpt-oss:120b-cloud',
+    defaultModel: 'medgemma1.5:4b',
+    preferredModels: [
+        'medgemma1.5:4b',
+        'dcarrascosa/medgemma-1.5-4b-it:Q4_K_M',
+        'medgemma-1.5-4b-it:Q4_K_M',
+        'google/medgemma-1.5-4b-it'
+    ],
     defaultTheme: 'dark'
 };

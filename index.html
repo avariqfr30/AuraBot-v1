@@ -11,66 +11,99 @@
     <link rel="stylesheet" href="css/style.css">
 </head>
 <body class="font-sans text-gray-200">
-    <div class="ambient-stage" aria-hidden="true">
-        <div class="ambient-grid"></div>
-        <div class="ambient-blob ambient-blob-a"></div>
-        <div class="ambient-blob ambient-blob-b"></div>
-        <div class="ambient-blob ambient-blob-c"></div>
-    </div>
-
-    <div class="app-shell flex h-screen">
-        <div id="chatSidebar" data-liquid class="w-64 liquid-glass liquid-panel flex flex-col p-4 m-4 rounded-3xl">
-            <div class="flex items-center justify-start mb-4 pl-1">
-                <div id="animated-cat-container">
-                    <svg width="32" height="32" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg"><path d="M50 10 C 20 10, 10 30, 10 50 C 10 90, 40 100, 50 100 C 60 100, 90 90, 90 50 C 90 30, 80 10, 50 10 Z" fill="#111827"/><path d="M30 10 L 25 20 L 40 25 Z" fill="#111827"/><path d="M70 10 L 75 20 L 60 25 Z" fill="#111827"/><path d="M50 70 C 40 70, 35 60, 35 60 L 65 60 C 65 60, 60 70, 50 70 Z" fill="white"/><path d="M40 85 C 40 95, 60 95, 60 85 L 60 70 L 40 70 Z" fill="white"/><circle cx="35" cy="45" r="5" fill="white"/><circle cx="65" cy='45' r='5' fill='white'/></svg>
+    <div class="browser-shell">
+        <div class="browser-frame">
+            <header class="browser-toolbar" aria-label="Workspace chrome">
+                <div class="browser-toolbar-left">
+                    <div class="browser-dots" aria-hidden="true">
+                        <span class="dot dot-pink"></span>
+                        <span class="dot dot-blue"></span>
+                        <span class="dot dot-neutral"></span>
+                    </div>
+                    <div class="browser-nav" aria-hidden="true">
+                        <button type="button" class="chrome-icon-button">
+                            <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8"><path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7" /></svg>
+                        </button>
+                        <button type="button" class="chrome-icon-button">
+                            <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7" /></svg>
+                        </button>
+                    </div>
                 </div>
-                <h2 class="text-xl font-semibold text-gray-100 ml-2">Chats</h2>
-            </div>
-            <button type="button" id="newChatButton" class="w-full liquid-primary-button font-semibold py-2 px-4 rounded-xl mb-4 transition duration-200" aria-label="Start New Chat" title="Start New Chat">
-                + New Chat
-            </button>
-            <div id="chatList" class="flex-grow overflow-y-auto pr-2"></div>
-        </div>
-
-        <div class="flex-1 flex flex-col">
-            <header data-liquid class="p-4 liquid-glass liquid-toolbar mx-4 mt-4 rounded-3xl flex justify-between items-center mb-2">
-                <h1 class="text-xl font-bold text-gray-100">Aura AI Companion</h1>
-                <div class="flex items-center space-x-4">
-                    <button id="insightsButton" title="Aura's Insights" class="liquid-icon-button transition duration-200">
-                        <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
-                    </button>
-                    <button id="toolsButton" title="Tools" class="hidden liquid-icon-button transition duration-200">
-                        <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" /></svg>
-                    </button>
-                    <button id="themeToggleButton" title="Toggle Light Or Dark Mode" class="theme-toggle liquid-control transition duration-200" aria-label="Toggle light or dark mode">
-                        <span class="theme-toggle-label">Light</span>
-                    </button>
-                    <button id="settingsButton" title="Settings" class="liquid-icon-button transition duration-200">
-                        <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826 3.31 2.37-2.37.525.322.956.51 1.066 1.065z" /><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
+                <div class="browser-address">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 address-icon" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8"><path stroke-linecap="round" stroke-linejoin="round" d="M16.5 10.5V7.875a4.125 4.125 0 10-8.25 0V10.5m-.75 0h9a.75.75 0 01.75.75v7.5a.75.75 0 01-.75.75h-9a.75.75 0 01-.75-.75v-7.5a.75.75 0 01.75-.75z" /></svg>
+                    <span class="browser-address-text">aura.workspace</span>
+                </div>
+                <div class="browser-toolbar-right" aria-hidden="true">
+                    <button type="button" class="chrome-icon-button">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8"><path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12a7.5 7.5 0 1015 0 7.5 7.5 0 00-15 0z" /><path stroke-linecap="round" stroke-linejoin="round" d="M12 8.25v4.5l3 1.5" /></svg>
+                        </button>
+                    <button type="button" class="chrome-icon-button">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8"><path stroke-linecap="round" stroke-linejoin="round" d="M7.5 12h9m-4.5-4.5L16.5 12 12 16.5" /><path stroke-linecap="round" stroke-linejoin="round" d="M21 15v3a2.25 2.25 0 01-2.25 2.25H5.25A2.25 2.25 0 013 18v-3" /></svg>
                     </button>
                 </div>
             </header>
 
-            <main id="chatMessages" class="flex-1 overflow-y-auto px-4 pb-4 space-y-4"></main>
+            <div class="app-shell">
+                <aside id="chatSidebar" data-liquid class="side-rail liquid-glass liquid-panel">
+                    <div class="rail-brand">
+                        <div class="rail-logo" id="animated-cat-container" aria-hidden="true">
+                            <svg width="34" height="34" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg"><path d="M50 10 C 20 10, 10 30, 10 50 C 10 90, 40 100, 50 100 C 60 100, 90 90, 90 50 C 90 30, 80 10, 50 10 Z" fill="#0d1118"/><path d="M30 10 L 25 20 L 40 25 Z" fill="#0d1118"/><path d="M70 10 L 75 20 L 60 25 Z" fill="#0d1118"/><path d="M50 70 C 40 70, 35 60, 35 60 L 65 60 C 65 60, 60 70, 50 70 Z" fill="white"/><path d="M40 85 C 40 95, 60 95, 60 85 L 60 70 L 40 70 Z" fill="white"/><circle cx="35" cy="45" r="5" fill="white"/><circle cx="65" cy="45" r="5" fill="white"/></svg>
+                        </div>
+                        <span class="rail-brand-text">Aura</span>
+                    </div>
 
-            <footer data-liquid class="floating-input-area liquid-glass liquid-dock p-2">
-                <div id="editMessageIndicator" class="hidden items-center text-sm rounded-2xl px-4 py-2 mb-2 max-w-max ml-2"></div>
-                <div id="fileAttachmentIndicator" class="hidden items-center text-sm bg-gray-800/50 text-gray-300 rounded-full px-4 py-1 mb-2 max-w-max ml-2"></div>
-                <div class="flex items-center space-x-2">
-                    <label for="fileInput" id="fileUploadButton" title="Attach document" class="liquid-icon-button transition duration-200 cursor-pointer">
-                        <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                            <path stroke-linecap="round" stroke-linejoin="round" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
-                        </svg>
-                    </label>
-                    <input type="file" id="fileInput" class="hidden" accept=".txt,.md" aria-label="Attach a text or markdown document" title="Attach a document">
-                    
-                    <input id="userInput" type="text" placeholder="Message Aura..." aria-label="Type your message to Aura" title="Type your message" class="flex-1 p-3 bg-transparent text-gray-100 placeholder-gray-400 focus:outline-none transition duration-200">
-                    
-                    <button type="button" id="sendButton" class="liquid-send-button transition duration-200" aria-label="Send Message" title="Send Message">
-                        <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" viewBox="0 0 20 20" fill="currentColor"><path d="M10.894 2.553a1 1 0 00-1.788 0l-7 14a1 1 0 00.957 1.454h14a1 1 0 00.957-1.454l-7-14z" /></svg>
-                    </button>
-                </div>
-            </footer>
+                    <div class="rail-actions">
+                        <button id="insightsButton" title="Aura's Insights" class="rail-button liquid-icon-button transition duration-200">
+                            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
+                        </button>
+                        <button id="toolsButton" title="Tools" class="hidden rail-button liquid-icon-button transition duration-200">
+                            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" /></svg>
+                        </button>
+                        <button id="settingsButton" title="Settings" class="rail-button liquid-icon-button transition duration-200">
+                            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826 3.31 2.37-2.37.525.322.956.51 1.066 1.065z" /><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
+                        </button>
+                    </div>
+
+                    <div class="rail-footer">
+                        <button id="themeToggleButton" title="Toggle Light Or Dark Mode" class="theme-toggle liquid-control transition duration-200" aria-label="Toggle light or dark mode">
+                            <span class="theme-toggle-label">Light</span>
+                        </button>
+                        <div class="rail-avatar" aria-hidden="true">A</div>
+                    </div>
+                </aside>
+
+                <section class="workspace-main">
+                    <div class="tab-strip liquid-glass liquid-panel">
+                        <button type="button" id="newChatButton" class="tab-create-button liquid-primary-button transition duration-200" aria-label="Start New Chat" title="Start New Chat">
+                            <span>New Chat</span>
+                        </button>
+                        <div id="chatList" class="chat-tab-list" aria-label="Chat tabs"></div>
+                    </div>
+
+                    <div class="workspace-stage liquid-glass liquid-panel">
+                        <main id="chatMessages" class="chat-thread"></main>
+
+                        <footer data-liquid class="floating-input-area composer-shell">
+                            <div id="editMessageIndicator" class="hidden items-center text-sm rounded-2xl px-4 py-2 mb-2 max-w-max"></div>
+                            <div id="fileAttachmentIndicator" class="hidden items-center text-sm rounded-full px-4 py-1 mb-2 max-w-max"></div>
+                            <div class="composer-row">
+                                <label for="fileInput" id="fileUploadButton" title="Attach document" class="composer-icon-button liquid-icon-button transition duration-200 cursor-pointer">
+                                    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                                        <path stroke-linecap="round" stroke-linejoin="round" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
+                                    </svg>
+                                </label>
+                                <input type="file" id="fileInput" class="hidden" accept=".txt,.md" aria-label="Attach a text or markdown document" title="Attach a document">
+
+                                <input id="userInput" type="text" placeholder="Ask Aura something..." aria-label="Type your message to Aura" title="Type your message" class="flex-1 p-3 bg-transparent text-gray-100 placeholder-gray-400 focus:outline-none transition duration-200">
+
+                                <button type="button" id="sendButton" class="liquid-send-button transition duration-200" aria-label="Send Message" title="Send Message">
+                                    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path d="M3.105 3.105a1.25 1.25 0 011.367-.271l11.25 5a1.25 1.25 0 010 2.332l-11.25 5A1.25 1.25 0 013 14.023V11.12a1.25 1.25 0 011.035-1.232l4.229-.745-4.23-.745A1.25 1.25 0 013 7.165V4.26a1.25 1.25 0 01.105-1.155z" /></svg>
+                                </button>
+                            </div>
+                        </footer>
+                    </div>
+                </section>
+            </div>
         </div>
     </div>
 

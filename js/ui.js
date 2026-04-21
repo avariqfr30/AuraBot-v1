@@ -7,7 +7,37 @@ const toolsModalContent = document.getElementById('toolsModalContent');
 const toolsButton = document.getElementById('toolsButton');
 let contentModalElement = null;
 
-function clearChatMessages() { chatMessages.innerHTML = ''; }
+function clearChatMessages() {
+    chatMessages.innerHTML = '';
+    chatMessages.classList.remove('is-empty');
+}
+
+function renderEmptyState() {
+    chatMessages.classList.add('is-empty');
+    chatMessages.innerHTML = `
+        <section class="empty-state-panel" aria-label="Start a new conversation">
+            <div class="empty-state-badge" aria-hidden="true">
+                <svg width="42" height="42" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M50 10 C 20 10, 10 30, 10 50 C 10 90, 40 100, 50 100 C 60 100, 90 90, 90 50 C 90 30, 80 10, 50 10 Z" fill="#0d1118"/>
+                    <path d="M30 10 L 25 20 L 40 25 Z" fill="#0d1118"/>
+                    <path d="M70 10 L 75 20 L 60 25 Z" fill="#0d1118"/>
+                    <path d="M50 70 C 40 70, 35 60, 35 60 L 65 60 C 65 60, 60 70, 50 70 Z" fill="white"/>
+                    <path d="M40 85 C 40 95, 60 95, 60 85 L 60 70 L 40 70 Z" fill="white"/>
+                    <circle cx="35" cy="45" r="5" fill="white"/>
+                    <circle cx="65" cy="45" r="5" fill="white"/>
+                </svg>
+            </div>
+            <h2 class="empty-state-title">What do you want to work through?</h2>
+            <p class="empty-state-subtitle">Aura can chat, reason through health questions, look things up, and help you sort out your next step without changing how the app already works.</p>
+            <div class="prompt-label">Try one of these</div>
+            <div class="prompt-chip-grid">
+                <button type="button" class="prompt-chip" data-prompt-suggestion="Help me understand a symptom in plain English.">Help me understand a symptom</button>
+                <button type="button" class="prompt-chip" data-prompt-suggestion="Walk me through what details matter before I panic.">Help me sort out what matters</button>
+                <button type="button" class="prompt-chip" data-prompt-suggestion="Research this medical topic and give me source-backed takeaways.">Research a medical topic</button>
+                <button type="button" class="prompt-chip" data-prompt-suggestion="Give me a calm, practical next step for what I am dealing with.">Give me a calm next step</button>
+            </div>
+        </section>`;
+}
 
 // --- Tool Rendering Functions ---
 function renderChecklistInModal(checklist, container) {
@@ -128,6 +158,8 @@ function renderToolsInModal(tools) {
 
 // --- Chat Messages ---
 function addMessage(sender, content, options = {}) {
+    chatMessages.querySelector('.empty-state-panel')?.remove();
+    chatMessages.classList.remove('is-empty');
     const messageDiv = document.createElement('div');
     const isUser = sender === 'user';
     messageDiv.className = isUser ? 'flex justify-end mb-4' : 'flex justify-start mb-4';
@@ -150,6 +182,8 @@ function addMessage(sender, content, options = {}) {
 }
 
 function addToolStatusMessage(toolType) {
+    chatMessages.querySelector('.empty-state-panel')?.remove();
+    chatMessages.classList.remove('is-empty');
     const formattedName = toolType.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
     const statusDiv = document.createElement('div');
     statusDiv.className = 'flex justify-start tool-status-message mb-4';
@@ -167,6 +201,10 @@ function removeToolStatusMessages() { document.querySelectorAll('.tool-status-me
 
 function displayChat(history) {
     clearChatMessages();
+    if (!history || history.length === 0) {
+        renderEmptyState();
+        return;
+    }
     (history || []).forEach((message, index) => { addMessage(message.role, message.content, { messageIndex: index }); });
     processContentLinks();
 }
@@ -176,15 +214,18 @@ function renderChatList(chats, activeChatId) {
     const sortedChats = Object.values(chats || {}).filter(c => c?.id).sort((a, b) => b.id - a.id);
     sortedChats.forEach(chat => {
         const chatTab = document.createElement('div');
-        chatTab.className = `flex justify-between items-center p-3 rounded-lg cursor-pointer mb-1 ${chat.id === activeChatId ? 'bg-gray-700 text-white' : 'text-gray-300 hover:bg-gray-800'}`;
+        chatTab.className = `chat-tab cursor-pointer ${chat.id === activeChatId ? 'bg-gray-700 text-white' : 'text-gray-300 hover:bg-gray-800'}`;
         chatTab.dataset.chatId = chat.id;
+        chatTab.setAttribute('role', 'tab');
+        chatTab.setAttribute('aria-selected', chat.id === activeChatId ? 'true' : 'false');
         
-        const chatTitle = document.createElement('span'); 
-        chatTitle.textContent = chat.title; chatTitle.className = 'truncate text-sm font-medium';
+        const chatTitle = document.createElement('span');
+        chatTitle.textContent = chat.title;
+        chatTitle.className = 'chat-tab-title';
         
-        const deleteBtn = document.createElement('button'); 
-        deleteBtn.className = 'delete-chat-button text-gray-500 hover:text-red-500 ml-2'; 
-        deleteBtn.dataset.chatId = chat.id; 
+        const deleteBtn = document.createElement('button');
+        deleteBtn.className = 'delete-chat-button ml-1';
+        deleteBtn.dataset.chatId = chat.id;
         deleteBtn.innerHTML = `<svg class="h-4 w-4" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clip-rule="evenodd" /></svg>`;
         
         chatTab.appendChild(chatTitle); chatTab.appendChild(deleteBtn);
@@ -195,6 +236,8 @@ function renderChatList(chats, activeChatId) {
 function toggleToolsButton(hasTools) { toolsButton.classList.toggle('hidden', !hasTools); }
 function showTypingIndicator() {
     if (document.getElementById('typingIndicator')) return;
+    chatMessages.querySelector('.empty-state-panel')?.remove();
+    chatMessages.classList.remove('is-empty');
     const typingDiv = document.createElement('div'); typingDiv.id = 'typingIndicator'; typingDiv.className = 'flex justify-start mb-4';
     typingDiv.innerHTML = `<div class="chat-bubble bg-gray-800 max-w-[75%] p-4 rounded-xl shadow-md"><div class="flex items-center space-x-1.5"><div class="w-2.5 h-2.5 bg-gray-500 rounded-full animate-bounce" style="animation-delay: -0.3s;"></div><div class="w-2.5 h-2.5 bg-gray-500 rounded-full animate-bounce" style="animation-delay: -0.15s;"></div><div class="w-2.5 h-2.5 bg-gray-500 rounded-full animate-bounce"></div></div></div>`;
     chatMessages.appendChild(typingDiv); chatMessages.scrollTo({ top: chatMessages.scrollHeight, behavior: 'smooth' });

@@ -47,6 +47,19 @@ Available Tools & Exact Triggers:
 
 To deploy a tool, embed this exact tag in your response: <tool_create type="[type]" theme="[brief theme]" />`,
 
+    MEDGEMMA_CLINICAL_APPENDIX: `[MEDGEMMA MEDICAL MODE]
+Apply this section only when the user's request is about symptoms, medications, labs, diagnoses, imaging, treatment, or other health topics.
+
+Rules:
+- First decide whether the user may need urgent or same-day care. If yes, say that in the first 1 to 2 sentences in plain language.
+- Do not present a diagnosis as certain when multiple explanations are plausible.
+- Say what seems most likely, what is uncertain, and what extra information or evaluation would usually clarify it.
+- For medication dosing, interactions, abnormal lab values, or worrying symptoms, do not guess. Tell the user to confirm with a clinician, pharmacist, or the medication instructions.
+- Prefer practical next steps, red flags to watch for, and what level of care makes sense.
+- Ask at most one short clarifying question when it materially changes the answer.
+- Never invent guidelines, thresholds, citations, or test results.
+- Keep the same natural Aura voice: human, concise, and easy to follow.`,
+
     ROUTER: `Analyze the user's message and route it to the correct agent.
 [Behavioral Profile]: %PROFILE%
 [Runtime Context]: %RUNTIME%
@@ -129,12 +142,80 @@ Rule: DO NOT generate any <tool_create> tags. Just provide the information natur
     RE_ENGAGEMENT: `The user hasn't chatted in %DAYS% days (%REASON%). Be supportive. Create a <tool_create type="checklist" theme="One small, easy step for today" />.`
 };
 
+const MEDGEMMA_FEW_SHOTS = [
+    {
+        user: 'I have crushing chest pain and shortness of breath right now. Could it just be anxiety?',
+        assistant: `That combo can be serious, so I would not treat it like a wait-and-see thing. If it's happening right now, get urgent medical help now, especially if the pain spreads to your arm, back, jaw, or you feel faint or sweaty.
+
+Anxiety can overlap with some of those symptoms, but chest pain plus shortness of breath needs real-world evaluation first.`
+    },
+    {
+        user: 'My HbA1c came back 8.4%. What does that usually mean?',
+        assistant: `In general, that suggests your average blood sugar has been running above target over the last 2 to 3 months. It is useful, but it is still one piece of the picture, so I would look at it alongside your meds, food, activity, and any home glucose data instead of overreading one number.`
+    },
+    {
+        user: 'I missed one dose of my antidepressant. Should I double the next one?',
+        assistant: `I would not assume doubling is safe. The right next step depends on the medication, the dose, and how close you are to the next scheduled dose, so the safest move is to check the label instructions or ask your pharmacist or prescriber before changing it.`
+    }
+];
+
 function safeParseJson(value, fallback = null) {
     try {
         return typeof value === 'string' ? JSON.parse(value) : value;
     } catch (_error) {
         return fallback;
     }
+}
+
+function getSelectedModelName() {
+    return localStorage.getItem(STORAGE_KEYS.MODEL) || window.AURA_CONFIG.defaultModel;
+}
+
+function isMedGemmaModel(modelName = '') {
+    return /(^|[/:_-])medgemma/i.test(modelName);
+}
+
+function buildFewShotBlock(examples = []) {
+    return examples
+        .map(
+            (example, index) => `[Example ${index + 1}]
+User: ${example.user}
+Aura: ${example.assistant}`
+        )
+        .join('\n\n');
+}
+
+function buildResponseSystemPrompt(basePrompt, modelName) {
+    if (!isMedGemmaModel(modelName)) return basePrompt;
+
+    return [
+        basePrompt,
+        PROMPTS.MEDGEMMA_CLINICAL_APPENDIX,
+        '[Few-shot examples]',
+        buildFewShotBlock(MEDGEMMA_FEW_SHOTS)
+    ].join('\n\n');
+}
+
+function getModelGenerationOptions(modelName, format = null, callType = 'default') {
+    if (format === 'json') {
+        return isMedGemmaModel(modelName)
+            ? { temperature: 0, top_p: 0.9 }
+            : { temperature: 0 };
+    }
+
+    if (callType === 'analysis') {
+        return isMedGemmaModel(modelName)
+            ? { temperature: 0, top_p: 0.9 }
+            : { temperature: 0 };
+    }
+
+    if (!isMedGemmaModel(modelName)) return {};
+
+    return {
+        temperature: 0.2,
+        top_p: 0.9,
+        repeat_penalty: 1.05
+    };
 }
 
 function buildChatTitle(content) {
@@ -229,14 +310,16 @@ async function postJson(url, body) {
     });
 }
 
-async function _callLLM(prompt, format = null) {
-    const model = localStorage.getItem(STORAGE_KEYS.MODEL) || window.AURA_CONFIG.defaultModel;
+async function _callLLM(prompt, format = null, callType = 'default') {
+    const model = getSelectedModelName();
+    const options = getModelGenerationOptions(model, format, callType);
 
     try {
         const data = await postJson(API_ENDPOINTS.ollamaGenerate, {
             model,
             prompt,
             stream: false,
+            ...(Object.keys(options).length ? { options } : {}),
             ...(format ? { format } : {})
         });
 
@@ -459,7 +542,7 @@ class ChatManager {
 
     async preScreenMessage(message) {
         if (!this.state.chats[this.state.activeChatId]?.isHeightenedAwareness) return 'OK';
-        const response = await _callLLM(PROMPTS.CRISIS_DETECTION.replace('%MESSAGE%', message));
+        const response = await _callLLM(PROMPTS.CRISIS_DETECTION.replace('%MESSAGE%', message), null, 'analysis');
         return response?.includes('CRISIS') ? 'CRISIS' : 'OK';
     }
 
@@ -548,11 +631,16 @@ function formatOsintBrief(report) {
 }
 
 async function getOllamaResponse(userMessage, toolFollowUp = null, documentText = null) {
+    const activeModel = getSelectedModelName();
+    const responseSystemPrompt = buildResponseSystemPrompt(
+        localStorage.getItem(STORAGE_KEYS.PROMPT) || PROMPTS.DEFAULT_SYSTEM,
+        activeModel
+    );
     const profileStr = JSON.stringify(chatManager.state.localContentStore, null, 2);
     const runtimeContext = getRuntimeContextString();
 
     if (toolFollowUp) {
-        const prompt = `${localStorage.getItem(STORAGE_KEYS.PROMPT) || PROMPTS.DEFAULT_SYSTEM}
+        const prompt = `${responseSystemPrompt}
 [System Context]:
 ${runtimeContext}
 [Profile]:
@@ -566,16 +654,18 @@ ${profileStr}
         .replace('%PROFILE%', profileStr)
         .replace('%RUNTIME%', runtimeContext)
         .replace('%USER_MESSAGE%', userMessage);
-    const route = (await _callLLM(routePrompt)) || 'GeneralFriendAgent';
+    const route = (await _callLLM(routePrompt, null, 'analysis')) || 'GeneralFriendAgent';
 
     if (route.includes('Knowledge')) {
-        const key = await _callLLM(PROMPTS.KNOWLEDGE_MAPPER.replace('%MESSAGE%', userMessage));
+        const key = await _callLLM(PROMPTS.KNOWLEDGE_MAPPER.replace('%MESSAGE%', userMessage), null, 'analysis');
         if (key && key !== 'NULL') {
             const content = await fetchMarkdownContent(key.toLowerCase());
             if (content) {
                 return (
                     (await _callLLM(
-                        PROMPTS.KNOWLEDGE_SYNTHESIS
+                        `${responseSystemPrompt}
+
+${PROMPTS.KNOWLEDGE_SYNTHESIS}`
                             .replace('%MESSAGE%', userMessage)
                             .replace('%RUNTIME%', runtimeContext)
                             .replace('%CONTENT%', content)
@@ -597,7 +687,7 @@ ${profileStr}
                 .replace('%PROFILE%', profileStr);
 
             return (
-                (await _callLLM(synthesisPrompt)) ||
+                (await _callLLM(`${responseSystemPrompt}\n\n${synthesisPrompt}`)) ||
                 "I found some live sources, but I couldn't turn them into a clean answer just yet."
             );
         } catch (error) {
@@ -612,7 +702,7 @@ ${profileStr}
         .map((message) => `${message.role}: ${message.content}`)
         .join('\n');
 
-    let finalPrompt = `${localStorage.getItem(STORAGE_KEYS.PROMPT) || PROMPTS.DEFAULT_SYSTEM}
+    let finalPrompt = `${responseSystemPrompt}
 
 [System Context]:
 ${runtimeContext}

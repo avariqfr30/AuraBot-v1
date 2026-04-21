@@ -22,6 +22,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const toolsModalContent = document.getElementById('toolsModalContent');
     const TOOL_TAG_REGEX = /<tool_create[^>]*type=["']([^"']+)["'][^>]*(?:theme=["']([^"']+)["'])?[^>]*\/?>/gi;
     const LOCATION_MAX_AGE_MS = 10 * 60 * 1000;
+    const LEGACY_DEFAULT_MODELS = new Set(['llama3:8b', 'gpt-oss:120b-cloud']);
 
     let attachedFile = null;
 
@@ -67,9 +68,37 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function normalizeStoredModel() {
         const storedModel = localStorage.getItem(STORAGE_KEYS.MODEL);
-        if (!storedModel || storedModel === 'llama3:8b') {
+        if (!storedModel || LEGACY_DEFAULT_MODELS.has(storedModel)) {
             localStorage.setItem(STORAGE_KEYS.MODEL, window.AURA_CONFIG.defaultModel);
         }
+    }
+
+    function getPrioritizedModels(models = []) {
+        const preferredModels = window.AURA_CONFIG.preferredModels || [window.AURA_CONFIG.defaultModel];
+        const preferredSet = new Set(preferredModels);
+
+        return [...models].sort((left, right) => {
+            const leftPreferred = preferredSet.has(left);
+            const rightPreferred = preferredSet.has(right);
+
+            if (leftPreferred && !rightPreferred) return -1;
+            if (!leftPreferred && rightPreferred) return 1;
+            return left.localeCompare(right);
+        });
+    }
+
+    function resolvePreferredStoredModel(storedModel, availableModels = []) {
+        const preferredModels = window.AURA_CONFIG.preferredModels || [window.AURA_CONFIG.defaultModel];
+        const availableSet = new Set(availableModels);
+        const hasStoredModel = storedModel && availableSet.has(storedModel);
+
+        if (storedModel && !LEGACY_DEFAULT_MODELS.has(storedModel) && (hasStoredModel || availableModels.length === 0)) {
+            return storedModel;
+        }
+
+        const preferredAvailableModel = preferredModels.find((modelName) => availableSet.has(modelName));
+
+        return preferredAvailableModel || storedModel || window.AURA_CONFIG.defaultModel;
     }
 
     function isLocationSharingEnabled() {
@@ -322,17 +351,26 @@ document.addEventListener('DOMContentLoaded', () => {
         try {
             const data = await requestJson(`${window.AURA_CONFIG.ollamaBaseUrl}/tags`, { method: 'GET' });
             const models = (data.models || []).map((model) => model.name).filter(Boolean);
-            const uniqueModels = [...new Set([storedModel, ...models])];
+            const resolvedModel = resolvePreferredStoredModel(storedModel, models);
+            const uniqueModels = getPrioritizedModels([...new Set([resolvedModel, ...models])]);
+
+            if (resolvedModel !== storedModel) {
+                localStorage.setItem(STORAGE_KEYS.MODEL, resolvedModel);
+            }
 
             modelSelectDropdown.innerHTML = uniqueModels
-                .map((modelName) => `<option value="${modelName}">${modelName}</option>`)
+                .map((modelName) => {
+                    const isPreferred = (window.AURA_CONFIG.preferredModels || []).includes(modelName);
+                    const label = isPreferred ? `${modelName} (Preferred)` : modelName;
+                    return `<option value="${modelName}">${label}</option>`;
+                })
                 .join('');
         } catch (error) {
             console.error('Failed to load models:', error);
             modelSelectDropdown.innerHTML = `<option value="${storedModel}">${storedModel}</option>`;
         }
 
-        modelSelectDropdown.value = storedModel;
+        modelSelectDropdown.value = localStorage.getItem(STORAGE_KEYS.MODEL) || storedModel;
     }
 
     async function openSettingsPanel() {
@@ -545,6 +583,14 @@ document.addEventListener('DOMContentLoaded', () => {
         const resendTarget = event.target.closest('[data-action="edit_resend_message"]');
         if (resendTarget) {
             queueMessageForEditAndResend(parseInt(resendTarget.dataset.messageIndex, 10));
+            return;
+        }
+
+        const suggestionTarget = event.target.closest('[data-prompt-suggestion]');
+        if (suggestionTarget) {
+            userInput.value = suggestionTarget.dataset.promptSuggestion || '';
+            userInput.focus();
+            userInput.setSelectionRange(userInput.value.length, userInput.value.length);
             return;
         }
 

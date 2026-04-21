@@ -30,7 +30,15 @@ Suggested embedding model:
 ollama pull bge-m3:latest
 ```
 
-The default chat model in the app is now `gpt-oss:120b-cloud`. If your Ollama-compatible backend exposes a different model name, you can change it in Settings.
+The app now prefers MedGemma for chat and ships with `medgemma1.5:4b` as the default model name. If your Ollama setup exposes a different MedGemma tag, you can switch to it in Settings. The model picker also prioritizes common MedGemma tag variants automatically.
+
+On a host with MedGemma installed, verify the tag with:
+
+```bash
+ollama list
+```
+
+If you already have a MedGemma build under a different name, select that exact name in Settings.
 
 ## Local Setup
 
@@ -177,3 +185,4 @@ Aura’s search path now does more than a single query:
 
 - Full chat, memory, and search features depend on the Aura server. Opening `index.html` directly is no longer the recommended path.
 - If you expose Aura beyond your local network, put it behind proper authentication and TLS before treating it as an internet-facing service.
+- MedGemma 1.5 is a medical model. Aura now adds MedGemma-specific prompt guidance for triage, uncertainty, and red-flag handling when that family of model is selected, but this is still not a substitute for clinician review or deployment-specific validation.
