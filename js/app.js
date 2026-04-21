@@ -294,11 +294,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
         try {
             const response = await getOllamaResponse('', followUp);
-            if (response) {
-                addMessage('ai', response);
-                chatManager.addMessageToActiveChat('ai', response);
-                refreshUI();
+            const cleanedResponse = await processToolTags(response);
+
+            if (cleanedResponse) {
+                addMessage('ai', cleanedResponse);
+                chatManager.addMessageToActiveChat('ai', cleanedResponse);
             }
+            refreshUI();
         } finally {
             hideTypingIndicator();
         }
@@ -334,7 +336,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const cleanedResponse = await processToolTags(rawResponse);
 
             addMessage('ai', cleanedResponse || "I'm here. I just didn't manage to form a full reply that time.");
-            chatManager.addMessageToActiveChat('ai', rawResponse || cleanedResponse || '');
+            chatManager.addMessageToActiveChat('ai', cleanedResponse || "I'm here. I just didn't manage to form a full reply that time.");
             refreshUI();
         } catch (error) {
             console.error('Message handling failed:', error);
@@ -425,10 +427,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
         try {
             const message = await chatManager.triggerReEngagement(pattern);
-            if (message) {
-                addMessage('ai', message);
-                refreshUI();
+            const cleanedMessage = await processToolTags(message);
+            if (cleanedMessage) {
+                addMessage('ai', cleanedMessage);
+                chatManager.addMessageToActiveChat('ai', cleanedMessage);
             }
+            refreshUI();
         } finally {
             hideTypingIndicator();
         }

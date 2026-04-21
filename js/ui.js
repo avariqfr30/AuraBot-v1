@@ -175,7 +175,12 @@ function addMessage(sender, content, options = {}) {
             chatBubble.appendChild(actionRow);
         }
     } else {
-        chatBubble.innerHTML = DOMPurify.sanitize(marked.parse(String(content || '')));
+        const safeContent = typeof window.getDisplaySafeAssistantContent === 'function'
+            ? window.getDisplaySafeAssistantContent(content)
+            : String(content || '');
+        chatBubble.innerHTML = DOMPurify.sanitize(
+            marked.parse(safeContent || "That came through a little messy. Ask again and I'll clean it up.")
+        );
     }
     messageDiv.appendChild(chatBubble); chatMessages.appendChild(messageDiv);
     chatMessages.scrollTo({ top: chatMessages.scrollHeight, behavior: 'smooth' });

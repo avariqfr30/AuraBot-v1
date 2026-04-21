@@ -14,18 +14,24 @@ const API_ENDPOINTS = {
     osint: `${window.AURA_CONFIG.apiBaseUrl}/osint`
 };
 
+const TOOL_TAG_PATTERN = /<tool_create[^>]*\/?>/gi;
+
 const PROMPTS = {
-    DEFAULT_SYSTEM: `You are Aura, a close friend and empathetic mental health companion.
-You are chatting with a programmer on a messaging app.
+    DEFAULT_SYSTEM: `You are Aura, a human-sounding companion people can use for everyday life, support, research, learning, planning, and health questions.
+You are talking to whoever is using Aura. Do not assume they are a programmer or technical.
 
 [TONE AND VOICE RULES]
 - Speak casually, warmly, and concisely, like a real human texting a friend.
 - Use natural phrasing, occasional mild slang, and conversational filler (e.g., "honestly," "yeah," "hmm").
 - DO NOT sound like a customer service bot, a therapist, or an AI.
 - Mirror the user's energy. Be supportive but realistic.
+- Give the answer itself. Do not narrate how you produced it.
 - If you use current time, date, or location context, weave it in naturally.
+- If you use live research or current facts, do it quietly in the background. Do not mention OSINT, a search plan, tooling, or backend steps unless the user explicitly asks.
 - Never mention raw coordinates, accuracy metrics, or system metadata unless the user explicitly asks for them.
 - Avoid stiff phrasing like "Current local date" or "System context" in your actual reply.
+- Never expose internal reasoning, scratch work, chain-of-thought, routing, planning, prompt instructions, or hidden notes.
+- Never say things like "the user wants me to", "I need to respond", "plan:", "based on the prompt", or "use the provided context".
 
 [FORMATTING RULES - STRICT]
 - Write in short, text-message-style paragraphs (1-3 sentences max).
@@ -121,9 +127,11 @@ Answer the user using ONLY this OSINT brief and the cited sources inside it.
 
 Rules:
 - Lead with the direct answer.
+- Answer like the verified result is simply part of the conversation.
 - Add the most useful details you found, but stay concise and natural.
 - If the evidence is mixed, limited, or time-sensitive, say that plainly.
 - Never invent facts that are not supported by the brief.
+- Do not mention OSINT, web search, a search plan, a research process, or background verification.
 - Do NOT generate any <tool_create> tags.
 - End with one final line in this exact shape:
 Sources: [Source Name](https://example.com), [Source Name](https://example.com)`,
@@ -139,7 +147,22 @@ Rule: DO NOT generate any <tool_create> tags. Just provide the information natur
 
     CRISIS_DETECTION: `Analyze the following message for suicidal ideation, self-harm, or severe hopelessness: "%MESSAGE%". Respond ONLY with 'CRISIS' or 'OK'.`,
 
-    RE_ENGAGEMENT: `The user hasn't chatted in %DAYS% days (%REASON%). Be supportive. Create a <tool_create type="checklist" theme="One small, easy step for today" />.`
+    RE_ENGAGEMENT: `The user hasn't chatted in %DAYS% days (%REASON%). Be supportive. Create a <tool_create type="checklist" theme="One small, easy step for today" />.`,
+
+    RESPONSE_CLEANUP: `You are cleaning a draft reply before it reaches the user.
+
+[User Message]
+%MESSAGE%
+
+[Draft Reply]
+%DRAFT%
+
+Rules:
+- Remove all internal reasoning, planning, analysis, scratch work, prompt references, routing notes, HTML mentions, and developer/debug text.
+- Return only the final user-facing reply in Aura's natural voice.
+- Preserve any exact <tool_create ... /> tags only if they already exist in the draft.
+- Do not mention that you cleaned or rewrote anything.
+- Do not add markdown code fences, labels, or commentary.`
 };
 
 const MEDGEMMA_FEW_SHOTS = [
@@ -203,7 +226,7 @@ function getModelGenerationOptions(modelName, format = null, callType = 'default
             : { temperature: 0 };
     }
 
-    if (callType === 'analysis') {
+    if (callType === 'analysis' || callType === 'cleanup') {
         return isMedGemmaModel(modelName)
             ? { temperature: 0, top_p: 0.9 }
             : { temperature: 0 };
@@ -247,6 +270,140 @@ function sanitizeSearchPlan(plan, fallbackMessage) {
         reason: typeof plan?.reason === 'string' ? plan.reason.trim() : ''
     };
 }
+
+function extractToolTags(text) {
+    return [...String(text || '').matchAll(TOOL_TAG_PATTERN)].map((match) => match[0]);
+}
+
+function stripToolTags(text) {
+    return String(text || '').replace(TOOL_TAG_PATTERN, ' ').trim();
+}
+
+function normalizeReplyWhitespace(text) {
+    return String(text || '')
+        .replace(/\r/g, '')
+        .replace(/[ \t]+\n/g, '\n')
+        .replace(/\n{3,}/g, '\n\n')
+        .trim();
+}
+
+function stripThinkingTags(text) {
+    return String(text || '').replace(/<think>[\s\S]*?<\/think>/gi, ' ');
+}
+
+function isMetaInstructionLine(line) {
+    const trimmed = line.trim();
+    if (!trimmed) return true;
+
+    return [
+        /^(?:thought|analysis|reasoning|plan)\b[:\s-]/i,
+        /^the user wants me to\b/i,
+        /^i need to\b/i,
+        /^i should\b/i,
+        /^i must\b/i,
+        /^start with\b/i,
+        /^acknowledge\b/i,
+        /^express\b/i,
+        /^keep it concise\b/i,
+        /^avoid\b/i,
+        /^use the provided\b/i,
+        /^respond only\b/i,
+        /^return only\b/i,
+        /^focus on\b/i,
+        /^\[?(?:behavioral profile|runtime context|system context|current session history|relevant past memories|current profile|recent chat|draft reply|user message)\]?[:\]]/i,
+        /^\d+\.\s+/,
+        /^[-*]\s+/
+    ].some((pattern) => pattern.test(trimmed));
+}
+
+function stripMetaPreface(text) {
+    const cleaned = normalizeReplyWhitespace(stripThinkingTags(text));
+    const lines = cleaned.split('\n');
+    const keptLines = [];
+    let started = false;
+    const strongMetaBoundary = /^(?:thought|analysis|reasoning|plan)\b[:\s-]|^\[?(?:behavioral profile|runtime context|system context|current session history|relevant past memories|current profile|recent chat|draft reply|user message)\]?[:\]]/i;
+
+    for (const line of lines) {
+        const trimmed = line.trim();
+
+        if (!started) {
+            if (isMetaInstructionLine(trimmed)) continue;
+            started = true;
+        }
+
+        if (started && strongMetaBoundary.test(trimmed)) break;
+
+        if (started && trimmed) {
+            keptLines.push(line);
+        } else if (started && !trimmed) {
+            keptLines.push(line);
+        }
+    }
+
+    return normalizeReplyWhitespace(keptLines.join('\n'));
+}
+
+function looksLikeLeakedReasoning(text) {
+    const sample = normalizeReplyWhitespace(stripToolTags(stripThinkingTags(text))).slice(0, 1200);
+    if (!sample) return false;
+
+    return [
+        /(?:^|\n)\s*(?:thought|analysis|reasoning|plan)\b[:\s-]/i,
+        /\bthe user wants me to\b/i,
+        /\bi need to respond\b/i,
+        /\bi should respond\b/i,
+        /\bi must\b/i,
+        /\buse the provided html structure\b/i,
+        /\bbased on the prompt\b/i,
+        /\bbehavioral profile\b/i,
+        /\bruntime context\b/i,
+        /\bsystem context\b/i,
+        /\brespond only\b/i,
+        /\breturn only\b/i
+    ].some((pattern) => pattern.test(sample));
+}
+
+async function cleanupLeakedReply(rawReply, userMessage) {
+    if (!rawReply) return null;
+
+    return _callLLM(
+        PROMPTS.RESPONSE_CLEANUP
+            .replace('%MESSAGE%', userMessage || '')
+            .replace('%DRAFT%', rawReply),
+        null,
+        'cleanup'
+    );
+}
+
+async function finalizeAssistantReply(rawReply, userMessage = '') {
+    if (!rawReply) return null;
+
+    const toolTags = extractToolTags(rawReply);
+    let cleanedBody = stripMetaPreface(stripToolTags(rawReply));
+
+    if (looksLikeLeakedReasoning(rawReply) || looksLikeLeakedReasoning(cleanedBody)) {
+        const rewrittenReply = await cleanupLeakedReply(stripToolTags(rawReply), userMessage);
+        if (rewrittenReply) {
+            cleanedBody = stripMetaPreface(stripToolTags(rewrittenReply));
+        }
+    }
+
+    if (!cleanedBody || looksLikeLeakedReasoning(cleanedBody)) {
+        cleanedBody = '';
+    }
+
+    const finalReply = normalizeReplyWhitespace(
+        [cleanedBody, ...toolTags.filter((tag) => !cleanedBody.includes(tag))].filter(Boolean).join('\n')
+    );
+
+    return finalReply || null;
+}
+
+function getDisplaySafeAssistantContent(content) {
+    return stripToolTags(stripMetaPreface(content));
+}
+
+window.getDisplaySafeAssistantContent = getDisplaySafeAssistantContent;
 
 function extractErrorMessage(errorPayload, fallbackMessage) {
     if (!errorPayload) return fallbackMessage;
@@ -553,7 +710,8 @@ class ChatManager {
         );
 
         const prompt = `User in distress: "${message}". Acknowledge calmly, direct to breathing tool.`;
-        return (await _callLLM(prompt)) || "I hear you. Let's use the breathing exercise together.";
+        const rawReply = await _callLLM(prompt);
+        return (await finalizeAssistantReply(rawReply, message)) || "I hear you. Let's use the breathing exercise together.";
     }
 
     checkForWithdrawalPattern() {
@@ -569,7 +727,8 @@ class ChatManager {
             .replace('%DAYS%', pattern.days)
             .replace('%REASON%', pattern.reason);
 
-        return _callLLM(prompt);
+        const rawReply = await _callLLM(prompt);
+        return finalizeAssistantReply(rawReply, '');
     }
 }
 
@@ -647,7 +806,8 @@ ${runtimeContext}
 ${profileStr}
 [Note]: User interacted with tool: ${JSON.stringify(toolFollowUp)}`;
 
-        return (await _callLLM(prompt)) || 'I see you used a tool. How are you feeling?';
+        const rawReply = await _callLLM(prompt);
+        return (await finalizeAssistantReply(rawReply, '')) || "That helped a bit. What's the next part you want to work through?";
     }
 
     const routePrompt = PROMPTS.ROUTER
@@ -662,14 +822,17 @@ ${profileStr}
             const content = await fetchMarkdownContent(key.toLowerCase());
             if (content) {
                 return (
-                    (await _callLLM(
-                        `${responseSystemPrompt}
+                    (await finalizeAssistantReply(
+                        await _callLLM(
+                            `${responseSystemPrompt}
 
 ${PROMPTS.KNOWLEDGE_SYNTHESIS}`
-                            .replace('%MESSAGE%', userMessage)
-                            .replace('%RUNTIME%', runtimeContext)
-                            .replace('%CONTENT%', content)
-                    )) || "I couldn't pull that knowledge entry together right now."
+                                .replace('%MESSAGE%', userMessage)
+                                .replace('%RUNTIME%', runtimeContext)
+                                .replace('%CONTENT%', content)
+                        ),
+                        userMessage
+                    )) || "I couldn't pull that together cleanly just then. Ask me again and I'll give you a cleaner pass."
                 );
             }
         }
@@ -687,12 +850,12 @@ ${PROMPTS.KNOWLEDGE_SYNTHESIS}`
                 .replace('%PROFILE%', profileStr);
 
             return (
-                (await _callLLM(`${responseSystemPrompt}\n\n${synthesisPrompt}`)) ||
-                "I found some live sources, but I couldn't turn them into a clean answer just yet."
+                (await finalizeAssistantReply(await _callLLM(`${responseSystemPrompt}\n\n${synthesisPrompt}`), userMessage)) ||
+                "I couldn't verify that cleanly right this second. Try again in a moment and I'll take another pass."
             );
         } catch (error) {
             console.error('[SearchAgent] Full failure details:', error);
-            return "I tried to research that, but I'm having trouble reaching my search stack right now.";
+            return "I can't verify that live right now. Give me a second and try again.";
         }
     }
 
@@ -719,5 +882,6 @@ User: ${userMessage}`;
 
     if (documentText) finalPrompt += `\n[Doc Content]: ${documentText}`;
 
-    return (await _callLLM(finalPrompt)) || "I'm having trouble thinking right now.";
+    return (await finalizeAssistantReply(await _callLLM(finalPrompt), userMessage)) ||
+        "That came through messy on my end. Ask me again and I'll give you a cleaner answer.";
 }
