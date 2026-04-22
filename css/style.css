@@ -604,6 +604,34 @@ body::before {
     color: #231721;
 }
 
+.source-link-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    max-width: min(76%, 900px);
+    margin-left: 2px;
+}
+
+.source-link-chip {
+    display: inline-flex;
+    align-items: center;
+    min-height: 32px;
+    padding: 0 11px;
+    border-radius: 999px;
+    border: 1px solid var(--surface-border-strong);
+    background: linear-gradient(135deg, var(--secondary-faint), var(--accent-faint));
+    color: var(--text-main);
+    font-size: 0.82rem;
+    font-weight: 600;
+    text-decoration: none;
+}
+
+.source-link-chip:hover {
+    background: linear-gradient(135deg, var(--secondary-soft), var(--accent-soft));
+    border-color: var(--secondary-strong);
+    color: var(--text-strong);
+}
+
 .message-action-row {
     margin-top: 12px;
 }

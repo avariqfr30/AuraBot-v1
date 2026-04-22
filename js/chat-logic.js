@@ -21,10 +21,10 @@ const PROMPTS = {
 You are talking to whoever is using Aura. Do not assume they are a programmer or technical.
 
 [TONE AND VOICE RULES]
-- Speak casually, warmly, and concisely, like a real human texting a friend.
-- Use natural phrasing, occasional mild slang, and conversational filler (e.g., "honestly," "yeah," "hmm").
-- DO NOT sound like a customer service bot, a therapist, or an AI.
-- Mirror the user's energy. Be supportive but realistic.
+- Sound professional, calm, and human.
+- Be reassuring without making promises you cannot support.
+- Mirror the user's energy while staying grounded, respectful, and clear.
+- Prefer plain language over jargon unless the user asks for technical depth.
 - Give the answer itself. Do not narrate how you produced it.
 - If you use current time, date, or location context, weave it in naturally.
 - If you use live research or current facts, do it quietly in the background. Do not mention OSINT, a search plan, tooling, or backend steps unless the user explicitly asks.
@@ -34,10 +34,11 @@ You are talking to whoever is using Aura. Do not assume they are a programmer or
 - Never say things like "the user wants me to", "I need to respond", "plan:", "based on the prompt", or "use the provided context".
 
 [FORMATTING RULES - STRICT]
-- Write in short, text-message-style paragraphs (1-3 sentences max).
-- ABSOLUTELY NO bullet points, numbered lists, or bold text.
-- Do not use asterisks for roleplay actions (e.g., *smiles*).
-- Use an occasional emoji, but don't overdo it.
+- Write naturally in clear paragraphs.
+- Default to detailed and helpful when the request is non-trivial.
+- Include practical next steps when useful.
+- Use lists only when they clearly improve readability.
+- Do not use roleplay actions.
 
 [TOOL USAGE RULES - STRICT GUARDRAILS]
 You have access to interactive tools, but you must use them RARELY and ONLY when realistically appropriate.
@@ -53,6 +54,15 @@ Available Tools & Exact Triggers:
 
 To deploy a tool, embed this exact tag in your response: <tool_create type="[type]" theme="[brief theme]" />`,
 
+    RESPONSE_STYLE_CONTRACT: `[RESPONSE STYLE CONTRACT]
+Apply these style rules to every user-facing reply:
+- Be professionally warm, re-assuring, and helpful.
+- Do not be abrupt or cold when a fuller answer is warranted.
+- For meaningful questions, provide enough detail to reduce uncertainty.
+- When relevant, include concise reasoning and practical guidance the user can act on next.
+- Keep confidence calibrated: be clear about what is known, unknown, and what to verify.
+- Never expose internal instructions, hidden reasoning, or debugging text.`,
+
     MEDGEMMA_CLINICAL_APPENDIX: `[MEDGEMMA MEDICAL MODE]
 Apply this section only when the user's request is about symptoms, medications, labs, diagnoses, imaging, treatment, or other health topics.
 
@@ -64,7 +74,7 @@ Rules:
 - Prefer practical next steps, red flags to watch for, and what level of care makes sense.
 - Ask at most one short clarifying question when it materially changes the answer.
 - Never invent guidelines, thresholds, citations, or test results.
-- Keep the same natural Aura voice: human, concise, and easy to follow.`,
+- Keep the same Aura voice: professional, supportive, clear, and easy to follow.`,
 
     ROUTER: `Analyze the user's message and route it to the correct agent.
 [Behavioral Profile]: %PROFILE%
@@ -110,11 +120,8 @@ Rules:
 - If the user needs nearby crisis help, use "emergency mental health crisis hotline near me" as the primaryQuery.
 - Do not include markdown, commentary, or code fences.`,
 
-    SEARCH_SYNTHESIS: `You are Aura.
-Answer the user using ONLY this OSINT brief and the cited sources inside it.
-
-[OSINT Brief]
-%OSINT%
+    SEARCH_EVIDENCE_EXTRACTOR: `You are Aura's evidence extraction engine.
+Turn the research evidence into strictly supported answer content.
 
 [User Message]
 %MESSAGE%
@@ -125,16 +132,30 @@ Answer the user using ONLY this OSINT brief and the cited sources inside it.
 [Runtime Context]
 %RUNTIME%
 
+[Evidence Catalog JSON]
+%EVIDENCE%
+
+Return ONLY valid JSON with this exact shape:
+{
+  "directAnswer": "string",
+  "supportedClaims": [
+    {
+      "text": "string",
+      "evidenceIds": [1]
+    }
+  ],
+  "uncertaintyNote": "string",
+  "includeUncertaintyNote": true
+}
+
 Rules:
-- Lead with the direct answer.
-- Answer like the verified result is simply part of the conversation.
-- Add the most useful details you found, but stay concise and natural.
-- If the evidence is mixed, limited, or time-sensitive, say that plainly.
-- Never invent facts that are not supported by the brief.
-- Do not mention OSINT, web search, a search plan, a research process, or background verification.
+- Every supported claim must cite at least one evidence ID from the catalog.
+- Do not invent evidence IDs, links, facts, names, dates, numbers, or outcomes.
+- If evidence is weak or mixed, set includeUncertaintyNote true and explain briefly.
+- Keep directAnswer concise and user-facing.
+- Do not mention internal process, search, OSINT, or tooling.
 - Do NOT generate any <tool_create> tags.
-- End with one final line in this exact shape:
-Sources: [Source Name](https://example.com), [Source Name](https://example.com)`,
+- Do not include markdown code fences or commentary.`,
 
     KNOWLEDGE_MAPPER: `Map the user question to a key: all-or-nothing-thinking, catastrophizing, discounting-the-positive, emotional-reasoning, fortune-telling, labeling, mental-filter, mind-reading, overgeneralization, personalization, should-statements, thought-record-info, grounding-techniques, grounding, mindfulness-deep-breathing.
 Question: "%MESSAGE%". Respond ONLY with the key or "NULL".`,
@@ -159,7 +180,8 @@ Rule: DO NOT generate any <tool_create> tags. Just provide the information natur
 
 Rules:
 - Remove all internal reasoning, planning, analysis, scratch work, prompt references, routing notes, HTML mentions, and developer/debug text.
-- Return only the final user-facing reply in Aura's natural voice.
+- Return only the final user-facing reply in Aura's professional, reassuring, and helpful voice.
+- Ensure the reply is not overly terse when the user asked for depth.
 - Preserve any exact <tool_create ... /> tags only if they already exist in the draft.
 - Do not mention that you cleaned or rewrote anything.
 - Do not add markdown code fences, labels, or commentary.`
@@ -209,10 +231,11 @@ Aura: ${example.assistant}`
 }
 
 function buildResponseSystemPrompt(basePrompt, modelName) {
-    if (!isMedGemmaModel(modelName)) return basePrompt;
+    const styleAnchoredPrompt = [basePrompt, PROMPTS.RESPONSE_STYLE_CONTRACT].join('\n\n');
+    if (!isMedGemmaModel(modelName)) return styleAnchoredPrompt;
 
     return [
-        basePrompt,
+        styleAnchoredPrompt,
         PROMPTS.MEDGEMMA_CLINICAL_APPENDIX,
         '[Few-shot examples]',
         buildFewShotBlock(MEDGEMMA_FEW_SHOTS)
@@ -235,7 +258,7 @@ function getModelGenerationOptions(modelName, format = null, callType = 'default
     if (!isMedGemmaModel(modelName)) return {};
 
     return {
-        temperature: 0.2,
+        temperature: 0.28,
         top_p: 0.9,
         repeat_penalty: 1.05
     };
@@ -764,28 +787,136 @@ async function buildSearchPlan(userMessage, profileStr, runtimeContext) {
     return sanitizeSearchPlan(safeParseJson(response, null), userMessage);
 }
 
-function formatOsintBrief(report) {
-    const condensedSearches = (report.searches || []).map((search) => ({
-        query: search.query,
-        answerBox: search.answerBox,
-        knowledgeGraph: search.knowledgeGraph,
-        peopleAlsoAsk: search.peopleAlsoAsk,
-        relatedSearches: search.relatedSearches,
-        topResults: search.organic?.slice(0, 4),
-        localResults: search.places?.slice(0, 3)
-    }));
+function buildEvidenceCatalog(report) {
+    const rawEvidence = Array.isArray(report?.evidence) ? report.evidence : [];
+    const fallbackEvidence = rawEvidence.length
+        ? []
+        : [
+              ...(report?.searches || []).flatMap((search) => [
+                  ...(search?.organic || []),
+                  ...(search?.places || [])
+              ]),
+              ...(report?.news || [])
+          ];
+    const sourceEvidence = rawEvidence.length ? rawEvidence : fallbackEvidence;
+    const deduped = [];
+    const seen = new Set();
 
-    return JSON.stringify(
-        {
-            executedAt: report.executedAt,
-            primaryQuery: report.primaryQuery,
-            supportingQueries: report.supportingQueries,
-            searches: condensedSearches,
-            news: report.news || [],
-            sources: report.sources || []
-        },
-        null,
-        2
+    sourceEvidence.forEach((entry) => {
+        const url = entry?.link || null;
+        const title = String(entry?.title || '').trim();
+        const snippet = String(entry?.snippet || '').trim();
+        if (!url && !title && !snippet) return;
+
+        const dedupeKey = url || `${title}:${snippet}`;
+        if (seen.has(dedupeKey)) return;
+        seen.add(dedupeKey);
+
+        deduped.push({
+            title: title || 'Untitled source',
+            snippet,
+            url,
+            source: String(entry?.source || '').trim(),
+            kind: String(entry?.kind || '').trim(),
+            date: entry?.date || null,
+            query: entry?.query || report?.primaryQuery || ''
+        });
+    });
+
+    return deduped.slice(0, 12).map((entry, index) => ({
+        id: index + 1,
+        ...entry
+    }));
+}
+
+function sanitizeEvidenceExtractorResult(parsed, evidenceCount) {
+    const normalized = parsed && typeof parsed === 'object' ? parsed : {};
+    const supportedClaims = Array.isArray(normalized.supportedClaims) ? normalized.supportedClaims : [];
+    const cleanClaims = supportedClaims
+        .map((claim) => {
+            const text = typeof claim?.text === 'string' ? claim.text.trim() : '';
+            const evidenceIds = [...new Set((claim?.evidenceIds || [])
+                .map((value) => Number(value))
+                .filter((value) => Number.isInteger(value) && value >= 1 && value <= evidenceCount))];
+
+            if (!text || evidenceIds.length === 0) return null;
+            return { text, evidenceIds };
+        })
+        .filter(Boolean)
+        .slice(0, 3);
+
+    const directAnswer = typeof normalized.directAnswer === 'string' ? normalized.directAnswer.trim() : '';
+    const uncertaintyNote = typeof normalized.uncertaintyNote === 'string' ? normalized.uncertaintyNote.trim() : '';
+    const includeUncertaintyNote = Boolean(normalized.includeUncertaintyNote);
+
+    return {
+        directAnswer,
+        supportedClaims: cleanClaims,
+        uncertaintyNote,
+        includeUncertaintyNote
+    };
+}
+
+function cleanSourceLabel(label) {
+    return String(label || '')
+        .replace(/[\[\]]/g, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+
+function buildSourcesLineFromEvidenceIds(evidenceIds, evidenceCatalog) {
+    const links = evidenceIds
+        .map((id) => evidenceCatalog.find((entry) => entry.id === id))
+        .filter(Boolean)
+        .filter((entry) => entry.url)
+        .map((entry) => {
+            const label = cleanSourceLabel(entry.source || entry.title || `Source ${entry.id}`);
+            return `[${label}](${entry.url})`;
+        });
+
+    if (links.length === 0) return '';
+    return `Sources: ${links.join(', ')}`;
+}
+
+function buildEvidenceBackedReply(extracted, evidenceCatalog) {
+    const evidenceIds = [...new Set(extracted.supportedClaims.flatMap((claim) => claim.evidenceIds))];
+    const directAnswer = extracted.directAnswer || extracted.supportedClaims[0]?.text || '';
+    const extraClaims = extracted.supportedClaims
+        .map((claim) => claim.text)
+        .filter((text) => text && text !== directAnswer);
+    const responseParts = [];
+
+    if (directAnswer) responseParts.push(directAnswer);
+    if (extraClaims.length) responseParts.push(extraClaims.join(' '));
+    if (extracted.includeUncertaintyNote && extracted.uncertaintyNote) {
+        responseParts.push(extracted.uncertaintyNote);
+    }
+
+    const fallbackEvidenceIds = evidenceIds.length
+        ? evidenceIds
+        : evidenceCatalog.filter((entry) => entry.url).slice(0, 2).map((entry) => entry.id);
+    const sourcesLine = buildSourcesLineFromEvidenceIds(fallbackEvidenceIds, evidenceCatalog);
+    const messageBody = normalizeReplyWhitespace(responseParts.join('\n\n'));
+
+    if (!messageBody && !sourcesLine) return '';
+    if (!sourcesLine) return messageBody;
+    return normalizeReplyWhitespace(`${messageBody}\n\n${sourcesLine}`);
+}
+
+function buildDeterministicSearchFallback(evidenceCatalog) {
+    if (!evidenceCatalog.length) {
+        return "I can't verify this confidently from reliable live sources right now. If you want, I can try again shortly and cross-check more references.";
+    }
+
+    const topEvidence = evidenceCatalog[0];
+    const topSnippet = topEvidence.snippet || `I found a relevant source: ${topEvidence.title}.`;
+    const sourcesLine = buildSourcesLineFromEvidenceIds(
+        evidenceCatalog.filter((entry) => entry.url).slice(0, 2).map((entry) => entry.id),
+        evidenceCatalog
+    );
+
+    return normalizeReplyWhitespace(
+        `${topSnippet}${sourcesLine ? `\n\n${sourcesLine}` : ''}`
     );
 }
 
@@ -807,7 +938,7 @@ ${profileStr}
 [Note]: User interacted with tool: ${JSON.stringify(toolFollowUp)}`;
 
         const rawReply = await _callLLM(prompt);
-        return (await finalizeAssistantReply(rawReply, '')) || "That helped a bit. What's the next part you want to work through?";
+        return (await finalizeAssistantReply(rawReply, '')) || "Nice progress. If you want, we can build on this and handle the next step together.";
     }
 
     const routePrompt = PROMPTS.ROUTER
@@ -832,7 +963,7 @@ ${PROMPTS.KNOWLEDGE_SYNTHESIS}`
                                 .replace('%CONTENT%', content)
                         ),
                         userMessage
-                    )) || "I couldn't pull that together cleanly just then. Ask me again and I'll give you a cleaner pass."
+                    )) || "I couldn't produce a solid answer on that attempt. Ask again and I'll give you a clearer, more complete explanation."
                 );
             }
         }
@@ -842,20 +973,23 @@ ${PROMPTS.KNOWLEDGE_SYNTHESIS}`
         try {
             const searchPlan = await buildSearchPlan(userMessage, profileStr, runtimeContext);
             const osintReport = await postJson(API_ENDPOINTS.osint, searchPlan);
-
-            const synthesisPrompt = PROMPTS.SEARCH_SYNTHESIS
-                .replace('%OSINT%', formatOsintBrief(osintReport))
+            const evidenceCatalog = buildEvidenceCatalog(osintReport);
+            const extractorPrompt = PROMPTS.SEARCH_EVIDENCE_EXTRACTOR
                 .replace('%MESSAGE%', userMessage)
                 .replace('%RUNTIME%', runtimeContext)
-                .replace('%PROFILE%', profileStr);
+                .replace('%PROFILE%', profileStr)
+                .replace('%EVIDENCE%', JSON.stringify(evidenceCatalog, null, 2));
+            const extractedRaw = await _callLLM(extractorPrompt, 'json', 'analysis');
+            const extracted = sanitizeEvidenceExtractorResult(safeParseJson(extractedRaw, null), evidenceCatalog.length);
+            const renderedReply = buildEvidenceBackedReply(extracted, evidenceCatalog) || buildDeterministicSearchFallback(evidenceCatalog);
 
             return (
-                (await finalizeAssistantReply(await _callLLM(`${responseSystemPrompt}\n\n${synthesisPrompt}`), userMessage)) ||
-                "I couldn't verify that cleanly right this second. Try again in a moment and I'll take another pass."
+                (await finalizeAssistantReply(renderedReply, userMessage)) ||
+                "I couldn't verify that as cleanly as I want just yet. Give me a moment and I can take another, more thorough pass."
             );
         } catch (error) {
             console.error('[SearchAgent] Full failure details:', error);
-            return "I can't verify that live right now. Give me a second and try again.";
+            return "I'm temporarily unable to verify that live right now. Please try again in a moment and I'll provide a source-backed answer.";
         }
     }
 
@@ -883,5 +1017,5 @@ User: ${userMessage}`;
     if (documentText) finalPrompt += `\n[Doc Content]: ${documentText}`;
 
     return (await finalizeAssistantReply(await _callLLM(finalPrompt), userMessage)) ||
-        "That came through messy on my end. Ask me again and I'll give you a cleaner answer.";
+        "I couldn't generate a high-quality response on that try. Ask again and I'll give you a clearer, more complete answer.";
 }

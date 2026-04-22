@@ -165,6 +165,25 @@ function addMessage(sender, content, options = {}) {
     messageDiv.className = isUser ? 'flex justify-end mb-4' : 'flex justify-start mb-4';
     const chatBubble = document.createElement('div');
     chatBubble.className = `chat-bubble max-w-[75%] p-4 rounded-xl shadow-md ${isUser ? 'user' : 'ai'}`;
+
+    const extractSourceLinksFromMessage = (messageText) => {
+        const raw = String(messageText || '');
+        const sourceLineMatch = raw.match(/(?:^|\n)\s*Sources:\s*(.+)$/i);
+        if (!sourceLineMatch) return { body: raw, links: [] };
+
+        const line = sourceLineMatch[1] || '';
+        const markdownLinkRegex = /\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/gi;
+        const links = [...line.matchAll(markdownLinkRegex)].map((match) => ({
+            label: (match[1] || '').trim(),
+            href: (match[2] || '').trim()
+        })).filter((link) => link.label && link.href);
+
+        if (links.length === 0) return { body: raw, links: [] };
+
+        const body = raw.slice(0, sourceLineMatch.index).trim();
+        return { body, links };
+    };
+
     if (isUser) {
         const p = document.createElement('p'); p.textContent = content; chatBubble.appendChild(p);
 
@@ -178,9 +197,33 @@ function addMessage(sender, content, options = {}) {
         const safeContent = typeof window.getDisplaySafeAssistantContent === 'function'
             ? window.getDisplaySafeAssistantContent(content)
             : String(content || '');
+        const { body, links } = extractSourceLinksFromMessage(safeContent);
         chatBubble.innerHTML = DOMPurify.sanitize(
-            marked.parse(safeContent || "That came through a little messy. Ask again and I'll clean it up.")
+            marked.parse(body || "That came through a little messy. Ask again and I'll clean it up.")
         );
+
+        if (links.length > 0) {
+            messageDiv.className = 'flex flex-col items-start mb-4 gap-2';
+            const sourceRow = document.createElement('div');
+            sourceRow.className = 'source-link-row';
+
+            links.forEach((link, index) => {
+                const sourceAnchor = document.createElement('a');
+                sourceAnchor.className = 'source-link-chip';
+                sourceAnchor.href = link.href;
+                sourceAnchor.target = '_blank';
+                sourceAnchor.rel = 'noopener noreferrer';
+                sourceAnchor.setAttribute('aria-label', `Open source ${index + 1}: ${link.label}`);
+                sourceAnchor.textContent = `${index + 1}. ${link.label}`;
+                sourceRow.appendChild(sourceAnchor);
+            });
+
+            messageDiv.appendChild(chatBubble);
+            messageDiv.appendChild(sourceRow);
+            chatMessages.appendChild(messageDiv);
+            chatMessages.scrollTo({ top: chatMessages.scrollHeight, behavior: 'smooth' });
+            return;
+        }
     }
     messageDiv.appendChild(chatBubble); chatMessages.appendChild(messageDiv);
     chatMessages.scrollTo({ top: chatMessages.scrollHeight, behavior: 'smooth' });
