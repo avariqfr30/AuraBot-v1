@@ -303,6 +303,7 @@ function openInsightsModal() {
     const modal = document.getElementById('insightsModal');
     const container = document.getElementById('insightsContent');
     const store = window.chatManager ? window.chatManager.state.localContentStore : {};
+    const prefs = store.responsePreferences || {};
 
     const renderList = (arr, emptyMsg) => {
         if (!arr || arr.length === 0) return `<p class="text-gray-500 italic">${emptyMsg}</p>`;
@@ -326,6 +327,15 @@ function openInsightsModal() {
             <div class="bg-gray-800 p-4 rounded-lg border border-red-900">
                 <h4 class="text-red-400 font-semibold mb-2">Potential Lapses to Watch</h4>
                 ${renderList(store.potentialLapses, "No immediate risks detected.")}
+            </div>
+            <div class="bg-gray-800 p-4 rounded-lg border border-blue-900">
+                <h4 class="text-blue-300 font-semibold mb-2">Adaptive Reply Profile</h4>
+                <p class="text-sm">Tone: ${prefs.likelyTone || 'neutral'}</p>
+                <p class="text-sm">Detail: ${prefs.detailLevel || 'balanced'}</p>
+                <p class="text-sm">Reassurance: ${prefs.reassuranceLevel || 'medium'}</p>
+                <p class="text-sm">Technical depth: ${prefs.technicalLevel || 'plain'}</p>
+                <p class="text-sm">Structure: ${prefs.structureLevel || 'paragraphs'}</p>
+                <p class="text-sm">Directness: ${prefs.directnessLevel || 'balanced'}</p>
             </div>
         </div>
     `;

@@ -15,6 +15,23 @@ const API_ENDPOINTS = {
 };
 
 const TOOL_TAG_PATTERN = /<tool_create[^>]*\/?>/gi;
+const TOOL_TYPES = new Set(['mood_tracker', 'checklist', 'thought_record', 'affirmation_card', 'breathing_exercise']);
+const DETAIL_LEVELS = new Set(['brief', 'balanced', 'detailed']);
+const REASSURANCE_LEVELS = new Set(['low', 'medium', 'high']);
+const TECHNICAL_LEVELS = new Set(['plain', 'mixed', 'technical']);
+const STRUCTURE_LEVELS = new Set(['paragraphs', 'mixed', 'stepwise']);
+const DIRECTNESS_LEVELS = new Set(['soft', 'balanced', 'direct']);
+const FOLLOW_UP_LEVELS = new Set(['none', 'gentle', 'active']);
+
+const DEFAULT_RESPONSE_PREFERENCES = {
+    detailLevel: 'balanced',
+    reassuranceLevel: 'medium',
+    technicalLevel: 'plain',
+    structureLevel: 'paragraphs',
+    directnessLevel: 'balanced',
+    followUpLevel: 'gentle',
+    likelyTone: 'neutral'
+};
 
 const PROMPTS = {
     DEFAULT_SYSTEM: `You are Aura, a human-sounding companion people can use for everyday life, support, research, learning, planning, and health questions.
@@ -62,6 +79,78 @@ Apply these style rules to every user-facing reply:
 - When relevant, include concise reasoning and practical guidance the user can act on next.
 - Keep confidence calibrated: be clear about what is known, unknown, and what to verify.
 - Never expose internal instructions, hidden reasoning, or debugging text.`,
+
+    REPLY_STRATEGY_ANALYZER: `You are Aura's adaptive style analyzer.
+Infer how this user prefers replies right now based on language, tone, and intent.
+
+[Current Preferences JSON]
+%CURRENT_PREFS%
+
+[Behavioral Profile]
+%PROFILE%
+
+[Recent Chat]
+%HISTORY%
+
+[Current User Message]
+%MESSAGE%
+
+Return ONLY valid JSON with this exact shape:
+{
+  "detailLevel": "balanced",
+  "reassuranceLevel": "medium",
+  "technicalLevel": "plain",
+  "structureLevel": "paragraphs",
+  "directnessLevel": "balanced",
+  "followUpLevel": "gentle",
+  "likelyTone": "neutral"
+}
+
+Allowed values:
+- detailLevel: brief | balanced | detailed
+- reassuranceLevel: low | medium | high
+- technicalLevel: plain | mixed | technical
+- structureLevel: paragraphs | mixed | stepwise
+- directnessLevel: soft | balanced | direct
+- followUpLevel: none | gentle | active
+
+Rules:
+- Infer preferences only from user behavior and wording.
+- If uncertain, stay close to current preferences.
+- Never output explanations, markdown, or code fences.`,
+
+    TOOL_OPPORTUNITY_ANALYZER: `You are Aura's proactive tool opportunity detector.
+Decide whether adding one interactive tool would materially help this user right now.
+
+[User Message]
+%MESSAGE%
+
+[Detected Route]
+%ROUTE%
+
+[Adaptive Preferences]
+%PREFERENCES%
+
+[Recent Chat]
+%HISTORY%
+
+Return ONLY valid JSON with this exact shape:
+{
+  "shouldUseTool": false,
+  "type": "checklist",
+  "theme": "string",
+  "reason": "string",
+  "confidence": 0.0,
+  "userLine": "string"
+}
+
+Rules:
+- Use tools proactively only when they create clear practical value in this moment.
+- Avoid tool spam; do not suggest a tool for generic factual Q&A or normal small talk.
+- Choose one type only: mood_tracker, checklist, thought_record, affirmation_card, breathing_exercise.
+- Keep confidence between 0 and 1.
+- userLine should be one natural sentence that introduces the tool helpfully.
+- Do not include markdown code fences or commentary.`,
 
     MEDGEMMA_CLINICAL_APPENDIX: `[MEDGEMMA MEDICAL MODE]
 Apply this section only when the user's request is about symptoms, medications, labs, diagnoses, imaging, treatment, or other health topics.
@@ -292,6 +381,293 @@ function sanitizeSearchPlan(plan, fallbackMessage) {
         includeNews: Boolean(plan?.includeNews),
         reason: typeof plan?.reason === 'string' ? plan.reason.trim() : ''
     };
+}
+
+function sanitizeToolTheme(theme, fallback = 'Quick support') {
+    const clean = String(theme || '')
+        .replace(/["<>]/g, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+    return clean || fallback;
+}
+
+function sanitizeToolOpportunity(candidate) {
+    const base = {
+        shouldUseTool: false,
+        type: 'checklist',
+        theme: 'Quick support',
+        reason: '',
+        confidence: 0,
+        userLine: ''
+    };
+
+    const safe = candidate && typeof candidate === 'object' ? candidate : {};
+    const type = TOOL_TYPES.has(safe.type) ? safe.type : base.type;
+    const rawConfidence = Number(safe.confidence);
+    const confidence = Number.isFinite(rawConfidence) ? Math.max(0, Math.min(1, rawConfidence)) : 0;
+
+    return {
+        shouldUseTool: Boolean(safe.shouldUseTool) && TOOL_TYPES.has(type),
+        type,
+        theme: sanitizeToolTheme(safe.theme, base.theme),
+        reason: typeof safe.reason === 'string' ? safe.reason.trim().slice(0, 240) : '',
+        confidence,
+        userLine: typeof safe.userLine === 'string' ? safe.userLine.trim().slice(0, 240) : ''
+    };
+}
+
+function containsToolTag(text) {
+    return /<tool_create[^>]*\/?>/i.test(String(text || ''));
+}
+
+function buildProactiveToolGuidance(recommendation) {
+    if (!recommendation) return '';
+
+    const tag = `<tool_create type="${recommendation.type}" theme="${recommendation.theme}" />`;
+    return [
+        `[Proactive Tool Guidance]`,
+        `A tool can materially help in this specific moment.`,
+        `Type: ${recommendation.type}`,
+        `Theme: ${recommendation.theme}`,
+        `Reason: ${recommendation.reason || 'High immediate utility.'}`,
+        `If it fits naturally, include exactly this tag once in your reply: ${tag}`
+    ].join('\n');
+}
+
+function attachProactiveToolTag(reply, recommendation) {
+    if (!recommendation) return reply;
+    if (!reply || containsToolTag(reply)) return reply;
+
+    const tag = `<tool_create type="${recommendation.type}" theme="${recommendation.theme}" />`;
+    const line = recommendation.userLine ||
+        'I can spin up a quick interactive tool to make this easier right now.';
+
+    return normalizeReplyWhitespace(`${reply}\n\n${line} ${tag}`);
+}
+
+function sanitizeResponsePreferences(candidate, fallback = DEFAULT_RESPONSE_PREFERENCES) {
+    const safe = candidate && typeof candidate === 'object' ? candidate : {};
+    const merged = {
+        ...fallback,
+        ...safe
+    };
+
+    return {
+        detailLevel: DETAIL_LEVELS.has(merged.detailLevel) ? merged.detailLevel : fallback.detailLevel,
+        reassuranceLevel: REASSURANCE_LEVELS.has(merged.reassuranceLevel) ? merged.reassuranceLevel : fallback.reassuranceLevel,
+        technicalLevel: TECHNICAL_LEVELS.has(merged.technicalLevel) ? merged.technicalLevel : fallback.technicalLevel,
+        structureLevel: STRUCTURE_LEVELS.has(merged.structureLevel) ? merged.structureLevel : fallback.structureLevel,
+        directnessLevel: DIRECTNESS_LEVELS.has(merged.directnessLevel) ? merged.directnessLevel : fallback.directnessLevel,
+        followUpLevel: FOLLOW_UP_LEVELS.has(merged.followUpLevel) ? merged.followUpLevel : fallback.followUpLevel,
+        likelyTone: typeof merged.likelyTone === 'string' && merged.likelyTone.trim()
+            ? merged.likelyTone.trim().slice(0, 48)
+            : fallback.likelyTone
+    };
+}
+
+function deriveHeuristicResponsePreferences(message, base = DEFAULT_RESPONSE_PREFERENCES) {
+    const text = String(message || '').toLowerCase();
+    const derived = { ...base };
+
+    if (/\b(short|brief|concise|tldr)\b/.test(text)) derived.detailLevel = 'brief';
+    if (/\b(detailed|detail|thorough|deep dive|in depth)\b/.test(text)) derived.detailLevel = 'detailed';
+
+    if (/\b(step by step|walk me through|how exactly|break it down)\b/.test(text)) derived.structureLevel = 'stepwise';
+    if (/\b(just tell me|straight answer)\b/.test(text)) derived.directnessLevel = 'direct';
+
+    if (/\b(anxious|worried|scared|panic|overwhelmed|stressed|unsure)\b/.test(text)) {
+        derived.reassuranceLevel = 'high';
+        derived.followUpLevel = 'active';
+        derived.directnessLevel = 'soft';
+    }
+
+    if (/\b(code|api|stack trace|schema|regex|typescript|javascript|python|sql|nginx|docker)\b/.test(text)) {
+        derived.technicalLevel = 'technical';
+        if (derived.detailLevel === 'balanced') derived.detailLevel = 'detailed';
+    }
+
+    if (/\b(explain like i'm five|simple terms|plain english)\b/.test(text)) {
+        derived.technicalLevel = 'plain';
+        derived.structureLevel = 'paragraphs';
+    }
+
+    if (/\?$/.test(text.trim())) {
+        derived.followUpLevel = derived.followUpLevel === 'active' ? 'active' : 'gentle';
+    } else {
+        derived.followUpLevel = derived.followUpLevel === 'active' ? 'active' : 'none';
+    }
+
+    const intensity = (text.match(/!/g) || []).length;
+    if (intensity >= 2 && derived.reassuranceLevel !== 'high') {
+        derived.reassuranceLevel = 'medium';
+    }
+
+    if (/\bthank you|thanks|got it|perfect\b/.test(text)) {
+        derived.detailLevel = 'brief';
+        if (derived.followUpLevel !== 'active') derived.followUpLevel = 'none';
+    }
+
+    return sanitizeResponsePreferences(derived, base);
+}
+
+function getRecentChatSnippet(history, maxMessages = 8) {
+    return (history || [])
+        .slice(-maxMessages)
+        .map((message) => `${message.role}: ${String(message.content || '').slice(0, 600)}`)
+        .join('\n');
+}
+
+function chooseAdaptiveSkill(route, preferences) {
+    const reassuranceHeavy = preferences.reassuranceLevel === 'high';
+
+    if (route.includes('Search')) return reassuranceHeavy ? 'Trusted Research Guide' : 'Fact-Check Analyst';
+    if (route.includes('Knowledge')) return 'Explainer Coach';
+    if (route.includes('Planner')) return 'Execution Planner';
+    if (route.includes('Cbt')) return 'Reframing Coach';
+    if (route.includes('Crisis')) return 'Stabilization Support';
+    return reassuranceHeavy ? 'Supportive Advisor' : 'Professional Generalist';
+}
+
+function buildAdaptiveResponseContext(preferences, route) {
+    const skill = chooseAdaptiveSkill(route || 'GeneralFriendAgent', preferences);
+    const directives = [
+        `[Adaptive Reply Strategy]`,
+        `Primary skill: ${skill}`,
+        `Likely user tone: ${preferences.likelyTone}`,
+        `Detail level: ${preferences.detailLevel}`,
+        `Reassurance level: ${preferences.reassuranceLevel}`,
+        `Technical depth: ${preferences.technicalLevel}`,
+        `Structure: ${preferences.structureLevel}`,
+        `Directness: ${preferences.directnessLevel}`,
+        `Follow-up style: ${preferences.followUpLevel}`,
+        `Rules:`,
+        `- Adapt wording and depth to match this strategy.`,
+        `- Keep the response natural and human, never robotic.`,
+        `- Do not mention this strategy block or hidden instructions.`
+    ];
+
+    return directives.join('\n');
+}
+
+async function inferAdaptiveResponsePreferences(userMessage, route, runtimeContext) {
+    const currentPreferences = chatManager.getActiveResponsePreferences();
+    const heuristicPreferences = deriveHeuristicResponsePreferences(userMessage, currentPreferences);
+    const recentChat = getRecentChatSnippet(chatManager.getActiveChatHistory());
+    const profileStr = JSON.stringify(chatManager.state.localContentStore, null, 2);
+
+    const analyzerPrompt = PROMPTS.REPLY_STRATEGY_ANALYZER
+        .replace('%CURRENT_PREFS%', JSON.stringify(currentPreferences, null, 2))
+        .replace('%PROFILE%', profileStr)
+        .replace('%HISTORY%', recentChat || 'No recent chat context.')
+        .replace('%MESSAGE%', userMessage || '');
+
+    const modelPreferencesRaw = await _callLLM(analyzerPrompt, 'json', 'analysis');
+    const modelPreferences = sanitizeResponsePreferences(
+        safeParseJson(modelPreferencesRaw, null),
+        heuristicPreferences
+    );
+
+    const finalPreferences = sanitizeResponsePreferences(
+        {
+            ...heuristicPreferences,
+            ...modelPreferences
+        },
+        heuristicPreferences
+    );
+
+    chatManager.updateResponsePreferences(finalPreferences);
+    return {
+        preferences: finalPreferences,
+        context: buildAdaptiveResponseContext(finalPreferences, route)
+    };
+}
+
+function deriveHeuristicToolOpportunity(userMessage, route) {
+    const text = String(userMessage || '').toLowerCase();
+
+    if (!text.trim()) return sanitizeToolOpportunity(null);
+    if (route.includes('Search') || route.includes('Knowledge')) return sanitizeToolOpportunity(null);
+
+    if (/\b(panic|panic attack|can't breathe|hyperventilat|heart racing right now)\b/.test(text)) {
+        return sanitizeToolOpportunity({
+            shouldUseTool: true,
+            type: 'breathing_exercise',
+            theme: 'Calming reset',
+            reason: 'Immediate physiological regulation can help.',
+            confidence: 0.9,
+            userLine: 'Let me open a short breathing reset you can use right now.'
+        });
+    }
+
+    if (/\b(overwhelmed|too much|can't keep up|i'm stuck|need a plan|organize)\b/.test(text)) {
+        return sanitizeToolOpportunity({
+            shouldUseTool: true,
+            type: 'checklist',
+            theme: 'One-step-at-a-time plan',
+            reason: 'Task decomposition reduces overload and improves execution.',
+            confidence: 0.85,
+            userLine: 'I can set up a quick checklist so this feels more manageable immediately.'
+        });
+    }
+
+    if (/\b(i'm worthless|i hate myself|i'm a failure|not good enough|can't do anything right)\b/.test(text)) {
+        return sanitizeToolOpportunity({
+            shouldUseTool: true,
+            type: 'affirmation_card',
+            theme: 'Self-worth reinforcement',
+            reason: 'Helpful for active self-critical loops.',
+            confidence: 0.8,
+            userLine: 'I can also create a short grounding affirmation card for this moment.'
+        });
+    }
+
+    if (/\b(always|never|everyone thinks|i know it will fail|i'm doomed)\b/.test(text)) {
+        return sanitizeToolOpportunity({
+            shouldUseTool: true,
+            type: 'thought_record',
+            theme: 'Reality-check reframing',
+            reason: 'Useful when cognitive distortion patterns are active.',
+            confidence: 0.75,
+            userLine: 'I can open a quick thought-record to help unpack this pattern step by step.'
+        });
+    }
+
+    if (/\b(feel terrible|really low|sad all day|angry all day|my mood)\b/.test(text)) {
+        return sanitizeToolOpportunity({
+            shouldUseTool: true,
+            type: 'mood_tracker',
+            theme: 'Mood trend check-in',
+            reason: 'Tracking can clarify patterns and triggers.',
+            confidence: 0.7,
+            userLine: 'If helpful, I can open a quick mood tracker so we can spot patterns.'
+        });
+    }
+
+    return sanitizeToolOpportunity(null);
+}
+
+async function inferProactiveToolOpportunity(userMessage, route, adaptivePreferences) {
+    const heuristic = deriveHeuristicToolOpportunity(userMessage, route);
+    const recentChat = getRecentChatSnippet(chatManager.getActiveChatHistory());
+
+    const analyzerPrompt = PROMPTS.TOOL_OPPORTUNITY_ANALYZER
+        .replace('%MESSAGE%', userMessage || '')
+        .replace('%ROUTE%', route || 'GeneralFriendAgent')
+        .replace('%PREFERENCES%', JSON.stringify(adaptivePreferences || DEFAULT_RESPONSE_PREFERENCES, null, 2))
+        .replace('%HISTORY%', recentChat || 'No recent chat context.');
+
+    const modelSuggestionRaw = await _callLLM(analyzerPrompt, 'json', 'analysis');
+    const modelSuggestion = sanitizeToolOpportunity(safeParseJson(modelSuggestionRaw, null));
+
+    const candidate = modelSuggestion.shouldUseTool && modelSuggestion.confidence >= heuristic.confidence
+        ? modelSuggestion
+        : heuristic;
+
+    if (!candidate.shouldUseTool) return null;
+    if (candidate.confidence < 0.65) return null;
+    if (!chatManager.canUseProactiveTool(candidate.type)) return null;
+
+    return candidate;
 }
 
 function extractToolTags(text) {
@@ -530,7 +906,7 @@ async function fetchMarkdownContent(slug) {
 
 class ChatManager {
     constructor() {
-        this.state = this.loadState() || this.getInitialState();
+        this.state = this.ensureStateShape(this.loadState() || this.getInitialState());
         if (!this.state.activeChatId) this.createNewChat();
     }
 
@@ -542,9 +918,45 @@ class ChatManager {
                 communicationStyle: 'Not yet established.',
                 moodPatterns: [],
                 potentialLapses: [],
-                behavioralFacts: []
+                behavioralFacts: [],
+                responsePreferences: { ...DEFAULT_RESPONSE_PREFERENCES }
             }
         };
+    }
+
+    ensureStateShape(state) {
+        const safeState = state && typeof state === 'object' ? state : this.getInitialState();
+        safeState.chats = safeState.chats && typeof safeState.chats === 'object' ? safeState.chats : {};
+        safeState.localContentStore = safeState.localContentStore && typeof safeState.localContentStore === 'object'
+            ? safeState.localContentStore
+            : this.getInitialState().localContentStore;
+        Object.values(safeState.chats).forEach((chat) => {
+            if (!chat || typeof chat !== 'object') return;
+            chat.history = Array.isArray(chat.history) ? chat.history : [];
+            chat.tools = chat.tools && typeof chat.tools === 'object' ? chat.tools : {};
+            chat.completed_tasks = Array.isArray(chat.completed_tasks) ? chat.completed_tasks : [];
+            chat.isHeightenedAwareness = Boolean(chat.isHeightenedAwareness);
+            chat.lastUserMessageTimestamp = Number(chat.lastUserMessageTimestamp) || Date.now();
+            chat.lastProactiveToolAt = Number(chat.lastProactiveToolAt) || 0;
+            chat.lastProactiveToolType = typeof chat.lastProactiveToolType === 'string' ? chat.lastProactiveToolType : '';
+        });
+
+        safeState.localContentStore.communicationStyle = safeState.localContentStore.communicationStyle || 'Not yet established.';
+        safeState.localContentStore.moodPatterns = Array.isArray(safeState.localContentStore.moodPatterns)
+            ? safeState.localContentStore.moodPatterns
+            : [];
+        safeState.localContentStore.potentialLapses = Array.isArray(safeState.localContentStore.potentialLapses)
+            ? safeState.localContentStore.potentialLapses
+            : [];
+        safeState.localContentStore.behavioralFacts = Array.isArray(safeState.localContentStore.behavioralFacts)
+            ? safeState.localContentStore.behavioralFacts
+            : [];
+        safeState.localContentStore.responsePreferences = sanitizeResponsePreferences(
+            safeState.localContentStore.responsePreferences,
+            DEFAULT_RESPONSE_PREFERENCES
+        );
+
+        return safeState;
     }
 
     loadState() {
@@ -569,7 +981,9 @@ class ChatManager {
             tools: {},
             completed_tasks: [],
             isHeightenedAwareness: false,
-            lastUserMessageTimestamp: Date.now()
+            lastUserMessageTimestamp: Date.now(),
+            lastProactiveToolAt: 0,
+            lastProactiveToolType: ''
         };
         this.state.activeChatId = id;
         this.saveState();
@@ -652,9 +1066,51 @@ class ChatManager {
         const parsed = safeParseJson(response, null);
 
         if (parsed && typeof parsed === 'object') {
+            const previousPreferences = this.getActiveResponsePreferences();
             this.state.localContentStore = parsed;
+            this.state.localContentStore.responsePreferences = sanitizeResponsePreferences(
+                parsed.responsePreferences,
+                previousPreferences
+            );
             this.saveState();
         }
+    }
+
+    getActiveResponsePreferences() {
+        return sanitizeResponsePreferences(
+            this.state.localContentStore.responsePreferences,
+            DEFAULT_RESPONSE_PREFERENCES
+        );
+    }
+
+    updateResponsePreferences(nextPreferences) {
+        this.state.localContentStore.responsePreferences = sanitizeResponsePreferences(
+            nextPreferences,
+            this.getActiveResponsePreferences()
+        );
+        this.saveState();
+    }
+
+    canUseProactiveTool(type, minCooldownMs = 3 * 60 * 1000) {
+        if (!TOOL_TYPES.has(type)) return false;
+        const chat = this.state.chats[this.state.activeChatId];
+        if (!chat) return false;
+
+        const now = Date.now();
+        if (chat.lastProactiveToolAt && (now - chat.lastProactiveToolAt) < minCooldownMs) return false;
+
+        const currentCount = Array.isArray(chat.tools?.[type]) ? chat.tools[type].length : 0;
+        const maxPerType = type === 'checklist' ? 2 : 1;
+        return currentCount < maxPerType;
+    }
+
+    markProactiveToolUsed(type) {
+        const chat = this.state.chats[this.state.activeChatId];
+        if (!chat) return;
+
+        chat.lastProactiveToolAt = Date.now();
+        chat.lastProactiveToolType = type;
+        this.saveState();
     }
 
     addOrUpdateToolInActiveChat(toolName, toolData) {
@@ -878,18 +1334,34 @@ function buildSourcesLineFromEvidenceIds(evidenceIds, evidenceCatalog) {
     return `Sources: ${links.join(', ')}`;
 }
 
-function buildEvidenceBackedReply(extracted, evidenceCatalog) {
+function buildEvidenceBackedReply(extracted, evidenceCatalog, preferences = DEFAULT_RESPONSE_PREFERENCES) {
     const evidenceIds = [...new Set(extracted.supportedClaims.flatMap((claim) => claim.evidenceIds))];
     const directAnswer = extracted.directAnswer || extracted.supportedClaims[0]?.text || '';
-    const extraClaims = extracted.supportedClaims
+    const orderedClaims = extracted.supportedClaims
         .map((claim) => claim.text)
         .filter((text) => text && text !== directAnswer);
+    const extraClaims = preferences.detailLevel === 'brief'
+        ? orderedClaims.slice(0, 1)
+        : orderedClaims;
     const responseParts = [];
 
+    if (preferences.reassuranceLevel === 'high') {
+        responseParts.push("Here's the most reliable answer I can confirm right now.");
+    }
+
     if (directAnswer) responseParts.push(directAnswer);
-    if (extraClaims.length) responseParts.push(extraClaims.join(' '));
+    if (extraClaims.length) {
+        const claimText = preferences.structureLevel === 'stepwise'
+            ? extraClaims.map((claim, index) => `${index + 1}. ${claim}`).join('\n')
+            : extraClaims.join(' ');
+        responseParts.push(claimText);
+    }
     if (extracted.includeUncertaintyNote && extracted.uncertaintyNote) {
         responseParts.push(extracted.uncertaintyNote);
+    }
+
+    if (preferences.followUpLevel === 'active') {
+        responseParts.push('If you want, I can help apply this to your exact situation next.');
     }
 
     const fallbackEvidenceIds = evidenceIds.length
@@ -903,9 +1375,14 @@ function buildEvidenceBackedReply(extracted, evidenceCatalog) {
     return normalizeReplyWhitespace(`${messageBody}\n\n${sourcesLine}`);
 }
 
-function buildDeterministicSearchFallback(evidenceCatalog) {
+function buildDeterministicSearchFallback(evidenceCatalog, preferences = DEFAULT_RESPONSE_PREFERENCES) {
     if (!evidenceCatalog.length) {
-        return "I can't verify this confidently from reliable live sources right now. If you want, I can try again shortly and cross-check more references.";
+        const lead = preferences.reassuranceLevel === 'high'
+            ? "I know this is important, and I want to be accurate."
+            : '';
+        const core = "I can't verify this confidently from reliable live sources right now.";
+        const next = "If you want, I can try again shortly and cross-check more references.";
+        return normalizeReplyWhitespace([lead, core, next].filter(Boolean).join(' '));
     }
 
     const topEvidence = evidenceCatalog[0];
@@ -920,6 +1397,19 @@ function buildDeterministicSearchFallback(evidenceCatalog) {
     );
 }
 
+async function finalizeReplyWithProactiveTool(rawReply, userMessage, recommendation = null) {
+    const cleanReply = await finalizeAssistantReply(rawReply, userMessage);
+    if (!cleanReply) return null;
+    if (!recommendation) return cleanReply;
+
+    const augmented = attachProactiveToolTag(cleanReply, recommendation);
+    if (!containsToolTag(cleanReply) && containsToolTag(augmented)) {
+        chatManager.markProactiveToolUsed(recommendation.type);
+    }
+
+    return augmented;
+}
+
 async function getOllamaResponse(userMessage, toolFollowUp = null, documentText = null) {
     const activeModel = getSelectedModelName();
     const responseSystemPrompt = buildResponseSystemPrompt(
@@ -930,7 +1420,11 @@ async function getOllamaResponse(userMessage, toolFollowUp = null, documentText 
     const runtimeContext = getRuntimeContextString();
 
     if (toolFollowUp) {
+        const toolPreferences = chatManager.getActiveResponsePreferences();
+        const adaptiveContext = buildAdaptiveResponseContext(toolPreferences, 'GeneralFriendAgent');
         const prompt = `${responseSystemPrompt}
+[Adaptive Strategy]:
+${adaptiveContext}
 [System Context]:
 ${runtimeContext}
 [Profile]:
@@ -938,7 +1432,8 @@ ${profileStr}
 [Note]: User interacted with tool: ${JSON.stringify(toolFollowUp)}`;
 
         const rawReply = await _callLLM(prompt);
-        return (await finalizeAssistantReply(rawReply, '')) || "Nice progress. If you want, we can build on this and handle the next step together.";
+        return (await finalizeReplyWithProactiveTool(rawReply, '', null)) ||
+            "Nice progress. If you want, we can build on this and handle the next step together.";
     }
 
     const routePrompt = PROMPTS.ROUTER
@@ -946,6 +1441,13 @@ ${profileStr}
         .replace('%RUNTIME%', runtimeContext)
         .replace('%USER_MESSAGE%', userMessage);
     const route = (await _callLLM(routePrompt, null, 'analysis')) || 'GeneralFriendAgent';
+    const { preferences: adaptivePreferences, context: adaptiveContext } = await inferAdaptiveResponsePreferences(
+        userMessage,
+        route,
+        runtimeContext
+    );
+    const proactiveRecommendation = await inferProactiveToolOpportunity(userMessage, route, adaptivePreferences);
+    const proactiveToolGuidance = buildProactiveToolGuidance(proactiveRecommendation);
 
     if (route.includes('Knowledge')) {
         const key = await _callLLM(PROMPTS.KNOWLEDGE_MAPPER.replace('%MESSAGE%', userMessage), null, 'analysis');
@@ -953,16 +1455,20 @@ ${profileStr}
             const content = await fetchMarkdownContent(key.toLowerCase());
             if (content) {
                 return (
-                    (await finalizeAssistantReply(
+                    (await finalizeReplyWithProactiveTool(
                         await _callLLM(
                             `${responseSystemPrompt}
+[Adaptive Strategy]:
+${adaptiveContext}
+${proactiveToolGuidance ? `\n${proactiveToolGuidance}` : ''}
 
 ${PROMPTS.KNOWLEDGE_SYNTHESIS}`
                                 .replace('%MESSAGE%', userMessage)
                                 .replace('%RUNTIME%', runtimeContext)
                                 .replace('%CONTENT%', content)
                         ),
-                        userMessage
+                        userMessage,
+                        proactiveRecommendation
                     )) || "I couldn't produce a solid answer on that attempt. Ask again and I'll give you a clearer, more complete explanation."
                 );
             }
@@ -981,10 +1487,11 @@ ${PROMPTS.KNOWLEDGE_SYNTHESIS}`
                 .replace('%EVIDENCE%', JSON.stringify(evidenceCatalog, null, 2));
             const extractedRaw = await _callLLM(extractorPrompt, 'json', 'analysis');
             const extracted = sanitizeEvidenceExtractorResult(safeParseJson(extractedRaw, null), evidenceCatalog.length);
-            const renderedReply = buildEvidenceBackedReply(extracted, evidenceCatalog) || buildDeterministicSearchFallback(evidenceCatalog);
+            const renderedReply = buildEvidenceBackedReply(extracted, evidenceCatalog, adaptivePreferences) ||
+                buildDeterministicSearchFallback(evidenceCatalog, adaptivePreferences);
 
             return (
-                (await finalizeAssistantReply(renderedReply, userMessage)) ||
+                (await finalizeReplyWithProactiveTool(renderedReply, userMessage, proactiveRecommendation)) ||
                 "I couldn't verify that as cleanly as I want just yet. Give me a moment and I can take another, more thorough pass."
             );
         } catch (error) {
@@ -1000,6 +1507,9 @@ ${PROMPTS.KNOWLEDGE_SYNTHESIS}`
         .join('\n');
 
     let finalPrompt = `${responseSystemPrompt}
+[Adaptive Strategy]:
+${adaptiveContext}
+${proactiveToolGuidance ? `\n${proactiveToolGuidance}` : ''}
 
 [System Context]:
 ${runtimeContext}
@@ -1016,6 +1526,6 @@ User: ${userMessage}`;
 
     if (documentText) finalPrompt += `\n[Doc Content]: ${documentText}`;
 
-    return (await finalizeAssistantReply(await _callLLM(finalPrompt), userMessage)) ||
+    return (await finalizeReplyWithProactiveTool(await _callLLM(finalPrompt), userMessage, proactiveRecommendation)) ||
         "I couldn't generate a high-quality response on that try. Ask again and I'll give you a clearer, more complete answer.";
 }
