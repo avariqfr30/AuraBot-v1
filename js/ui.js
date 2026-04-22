@@ -12,6 +12,15 @@ function clearChatMessages() {
     chatMessages.classList.remove('is-empty');
 }
 
+function escapeHTML(value) {
+    return String(value || '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+}
+
 function renderEmptyState() {
     chatMessages.classList.add('is-empty');
     chatMessages.innerHTML = `
@@ -35,6 +44,7 @@ function renderEmptyState() {
                 <button type="button" class="prompt-chip" data-prompt-suggestion="Walk me through what details matter before I panic.">Help me sort out what matters</button>
                 <button type="button" class="prompt-chip" data-prompt-suggestion="Research this medical topic and give me source-backed takeaways.">Research a medical topic</button>
                 <button type="button" class="prompt-chip" data-prompt-suggestion="Give me a calm, practical next step for what I am dealing with.">Give me a calm next step</button>
+                <button type="button" class="prompt-chip" data-prompt-suggestion="Help me build a personal safety plan I can follow if I spiral.">Build a personal safety plan</button>
             </div>
         </section>`;
 }
@@ -106,11 +116,110 @@ function renderMoodTrackerInModal(tracker, container) {
     container.appendChild(section);
 }
 
+function renderSafetyPlanInModal(plan, container) {
+    const section = document.createElement('div');
+    section.className = 'safety-plan-card tool-card';
+    const renderList = (items, emptyText) => {
+        if (!Array.isArray(items) || items.length === 0) return `<p class="text-sm text-gray-500">${escapeHTML(emptyText)}</p>`;
+        return `<ul class="list-disc list-inside space-y-1 text-sm">${items.map((item) => `<li>${escapeHTML(item)}</li>`).join('')}</ul>`;
+    };
+    const contacts = Array.isArray(plan.peopleToContact)
+        ? plan.peopleToContact
+            .map((entry) => {
+                const name = escapeHTML(entry?.name || 'Contact');
+                const contact = escapeHTML(entry?.contact || 'Add details');
+                return `<li>${name}: ${contact}</li>`;
+            })
+            .join('')
+        : '';
+
+    section.innerHTML = `
+        <h4 class="text-xl font-bold mb-3 text-gray-200">${escapeHTML(plan.title || 'Personal Safety Plan')}</h4>
+        <div class="space-y-3">
+            <div><h5 class="font-semibold text-sm mb-1">Warning Signs</h5>${renderList(plan.warningSigns, 'Add personal warning signs.')}</div>
+            <div><h5 class="font-semibold text-sm mb-1">Grounding Steps</h5>${renderList(plan.groundingSteps, 'Add grounding steps that work for you.')}</div>
+            <div><h5 class="font-semibold text-sm mb-1">People To Contact</h5>${contacts ? `<ul class="list-disc list-inside space-y-1 text-sm">${contacts}</ul>` : '<p class="text-sm text-gray-500">Add trusted contacts.</p>'}</div>
+            <div><h5 class="font-semibold text-sm mb-1">Safer Environment</h5>${renderList(plan.saferEnvironment, 'Add actions that increase immediate safety.')}</div>
+            <div><h5 class="font-semibold text-sm mb-1">Professional Support</h5>${renderList(plan.professionalSupport, 'Add clinician or support resources.')}</div>
+            <div><h5 class="font-semibold text-sm mb-1">Reasons To Stay</h5>${renderList(plan.reasonsToStay, 'Add personal anchors worth protecting.')}</div>
+        </div>`;
+    container.appendChild(section);
+}
+
+function renderMedicationChecklistInModal(checklist, container) {
+    const section = document.createElement('div');
+    section.className = 'medication-checklist-card tool-card';
+    const checks = Array.isArray(checklist.checks) ? checklist.checks : [];
+    let checksHTML = '<ul class="checklist-columns space-y-3">';
+    checks.forEach((item, index) => {
+        checksHTML += `
+            <li class="flex items-center">
+                <input type="checkbox" id="modal-${escapeHTML(checklist.id)}-med-${index}"
+                       class="h-5 w-5 rounded border-gray-500 bg-gray-800 text-pink-600 focus:ring-pink-500 mr-4 shrink-0"
+                       data-tool-type="medication_checklist" data-tool-id="${escapeHTML(checklist.id)}" data-item-index="${index}" ${item.done ? 'checked' : ''}>
+                <label for="modal-${escapeHTML(checklist.id)}-med-${index}" class="transition-colors duration-200 text-base ${item.done ? 'line-through text-gray-500' : 'text-gray-200'}">
+                    ${escapeHTML(item.text)}
+                </label>
+            </li>`;
+    });
+    checksHTML += '</ul>';
+
+    section.innerHTML = `
+        <h4 class="text-xl font-bold mb-2 text-gray-200">${escapeHTML(checklist.title || 'Medication Safety Checklist')}</h4>
+        <p class="text-sm text-gray-400 mb-3">${escapeHTML(checklist.medicationName || 'Medication')}</p>
+        ${checksHTML}
+        ${checklist.notes ? `<p class="text-xs text-gray-500 mt-3">${escapeHTML(checklist.notes)}</p>` : ''}`;
+    container.appendChild(section);
+}
+
+function renderAppointmentPrepInModal(prep, container) {
+    const section = document.createElement('div');
+    section.className = 'appointment-prep-card tool-card';
+    const renderList = (items) => {
+        if (!Array.isArray(items) || items.length === 0) return '<p class="text-sm text-gray-500">No items yet.</p>';
+        return `<ul class="list-disc list-inside space-y-1 text-sm">${items.map((item) => `<li>${escapeHTML(item)}</li>`).join('')}</ul>`;
+    };
+
+    section.innerHTML = `
+        <h4 class="text-xl font-bold mb-2 text-gray-200">${escapeHTML(prep.title || 'Appointment Prep')}</h4>
+        <p class="text-sm text-gray-400 mb-3">${escapeHTML(prep.summary || '')}</p>
+        <div class="space-y-3">
+            <div><h5 class="font-semibold text-sm mb-1">Symptom Timeline</h5>${renderList(prep.symptomTimeline)}</div>
+            <div><h5 class="font-semibold text-sm mb-1">Questions To Ask</h5>${renderList(prep.questions)}</div>
+            <div><h5 class="font-semibold text-sm mb-1">Medications To Mention</h5>${renderList(prep.medsToMention)}</div>
+        </div>`;
+    container.appendChild(section);
+}
+
+function renderFollowUpPlanInModal(plan, container) {
+    const section = document.createElement('div');
+    section.className = 'follow-up-plan-card tool-card';
+    const checkpoints = Array.isArray(plan.checkpoints) ? plan.checkpoints : [];
+    let html = '<ul class="checklist-columns space-y-3">';
+    checkpoints.forEach((item, index) => {
+        const label = `${escapeHTML(item.when || 'Soon')}: ${escapeHTML(item.action || 'Action step')}`;
+        html += `
+            <li class="flex items-center">
+                <input type="checkbox" id="modal-${escapeHTML(plan.id)}-follow-${index}"
+                       class="h-5 w-5 rounded border-gray-500 bg-gray-800 text-pink-600 focus:ring-pink-500 mr-4 shrink-0"
+                       data-tool-type="follow_up_plan" data-tool-id="${escapeHTML(plan.id)}" data-item-index="${index}" ${item.done ? 'checked' : ''}>
+                <label for="modal-${escapeHTML(plan.id)}-follow-${index}" class="transition-colors duration-200 text-base ${item.done ? 'line-through text-gray-500' : 'text-gray-200'}">
+                    ${label}
+                </label>
+            </li>`;
+    });
+    html += '</ul>';
+
+    section.innerHTML = `
+        <h4 class="text-xl font-bold mb-3 text-gray-200">${escapeHTML(plan.title || 'Follow-up Plan')}</h4>
+        ${html}`;
+    container.appendChild(section);
+}
+
 function renderThoughtRecordInModal(record, container) {
     const section = document.createElement('div');
     section.className = 'thought-record-card tool-card'; section.dataset.toolId = record.id;
-    const escapeHTML = (str) => str?.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#039;') || '';
-    
+
     const createTextarea = (idSuffix, label, value) => `
         <div class="mb-3">
             <label for="${record.id}-${idSuffix}" class="block text-sm font-medium text-gray-300 mb-1">${label}</label>
@@ -138,7 +247,17 @@ function renderThoughtRecordInModal(record, container) {
 function renderToolsInModal(tools) {
     toolsModalContent.innerHTML = '';
     let hasTools = false;
-    const renderOrder = ['mood_tracker', 'checklist', 'thought_record', 'breathing_exercise', 'affirmation_card'];
+    const renderOrder = [
+        'mood_tracker',
+        'checklist',
+        'safety_plan',
+        'medication_checklist',
+        'appointment_prep',
+        'follow_up_plan',
+        'thought_record',
+        'breathing_exercise',
+        'affirmation_card'
+    ];
     renderOrder.forEach(toolName => {
         if (tools[toolName]?.length > 0) {
             hasTools = true;
@@ -146,6 +265,10 @@ function renderToolsInModal(tools) {
                 switch (toolName) {
                     case 'mood_tracker': renderMoodTrackerInModal(toolInstance, toolsModalContent); break;
                     case 'checklist': renderChecklistInModal(toolInstance, toolsModalContent); break;
+                    case 'safety_plan': renderSafetyPlanInModal(toolInstance, toolsModalContent); break;
+                    case 'medication_checklist': renderMedicationChecklistInModal(toolInstance, toolsModalContent); break;
+                    case 'appointment_prep': renderAppointmentPrepInModal(toolInstance, toolsModalContent); break;
+                    case 'follow_up_plan': renderFollowUpPlanInModal(toolInstance, toolsModalContent); break;
                     case 'thought_record': renderThoughtRecordInModal(toolInstance, toolsModalContent); break;
                     case 'breathing_exercise': renderBreathingExerciseInModal(toolInstance, toolsModalContent); break;
                     case 'affirmation_card': renderAffirmationCardInModal(toolInstance, toolsModalContent); break;

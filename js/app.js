@@ -235,6 +235,16 @@ document.addEventListener('DOMContentLoaded', () => {
         document.getElementById('cancelEditResendButton').onclick = clearResendDraft;
     }
 
+    function getToolChecklistConfig(toolType) {
+        const configs = {
+            checklist: { itemKey: 'items', followUpType: 'checklist_item_completed' },
+            medication_checklist: { itemKey: 'checks', followUpType: 'medication_step_completed' },
+            follow_up_plan: { itemKey: 'checkpoints', followUpType: 'follow_up_step_completed' }
+        };
+
+        return configs[toolType] || null;
+    }
+
     function resetAttachment() {
         attachedFile = null;
         fileInput.value = '';
@@ -570,15 +580,21 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     toolsModalContent.addEventListener('change', async (event) => {
-        if (event.target.type === 'checkbox' && event.target.dataset.toolType === 'checklist') {
+        if (event.target.type === 'checkbox') {
+            const toolType = event.target.dataset.toolType;
+            const config = getToolChecklistConfig(toolType);
+            if (!config) return;
+
             const itemText = chatManager.completeAndRemoveChecklistItem(
                 event.target.dataset.toolId,
-                parseInt(event.target.dataset.itemIndex, 10)
+                parseInt(event.target.dataset.itemIndex, 10),
+                toolType,
+                config.itemKey
             );
 
             if (itemText) {
                 closeToolsModal();
-                await triggerAIFollowUp({ type: 'checklist_item_completed', text: itemText });
+                await triggerAIFollowUp({ type: config.followUpType, toolType, text: itemText });
             }
         }
     });

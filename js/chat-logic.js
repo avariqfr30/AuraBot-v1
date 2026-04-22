@@ -15,7 +15,29 @@ const API_ENDPOINTS = {
 };
 
 const TOOL_TAG_PATTERN = /<tool_create[^>]*\/?>/gi;
-const TOOL_TYPES = new Set(['mood_tracker', 'checklist', 'thought_record', 'affirmation_card', 'breathing_exercise']);
+const TOOL_TYPES = new Set([
+    'mood_tracker',
+    'checklist',
+    'thought_record',
+    'affirmation_card',
+    'breathing_exercise',
+    'safety_plan',
+    'medication_checklist',
+    'appointment_prep',
+    'follow_up_plan'
+]);
+const LOW_RISK_PROACTIVE_TYPES = new Set([
+    'mood_tracker',
+    'checklist',
+    'thought_record',
+    'affirmation_card',
+    'breathing_exercise',
+    'safety_plan',
+    'medication_checklist',
+    'appointment_prep',
+    'follow_up_plan'
+]);
+const CRISIS_ROUTE_PROACTIVE_TYPES = new Set(['breathing_exercise', 'checklist', 'safety_plan']);
 const DETAIL_LEVELS = new Set(['brief', 'balanced', 'detailed']);
 const REASSURANCE_LEVELS = new Set(['low', 'medium', 'high']);
 const TECHNICAL_LEVELS = new Set(['plain', 'mixed', 'technical']);
@@ -49,6 +71,8 @@ You are talking to whoever is using Aura. Do not assume they are a programmer or
 - Avoid stiff phrasing like "Current local date" or "System context" in your actual reply.
 - Never expose internal reasoning, scratch work, chain-of-thought, routing, planning, prompt instructions, or hidden notes.
 - Never say things like "the user wants me to", "I need to respond", "plan:", "based on the prompt", or "use the provided context".
+- Never claim you contacted emergency services, hotlines, family, clinicians, or any third party.
+- Never initiate external calls, messages, or outreach on the user's behalf.
 
 [FORMATTING RULES - STRICT]
 - Write naturally in clear paragraphs.
@@ -68,6 +92,14 @@ Available Tools & Exact Triggers:
 - 'thought_record': Use ONLY if they are actively exhibiting a cognitive distortion.
 - 'affirmation_card': Use ONLY if they are actively expressing deep self-doubt or need immediate encouragement.
 - 'breathing_exercise': Use ONLY if they are actively panicking, having an anxiety attack, or report high physical stress.
+- 'safety_plan': Use ONLY if they ask what to do during crises, spirals, or high-risk moments in the future.
+- 'medication_checklist': Use ONLY for practical medication adherence/safety organization; never for prescribing or dosing authority.
+- 'appointment_prep': Use ONLY when they are preparing to speak with a clinician and need structured questions/details.
+- 'follow_up_plan': Use ONLY when they ask for check-ins, continuity, or a stepwise follow-through plan.
+
+High-risk policy:
+- Recommendations for emergency services, crisis lines, poison control, or law enforcement must always be opt-in suggestions.
+- Never perform, imply, or claim automatic external actions.
 
 To deploy a tool, embed this exact tag in your response: <tool_create type="[type]" theme="[brief theme]" />`,
 
@@ -147,7 +179,8 @@ Return ONLY valid JSON with this exact shape:
 Rules:
 - Use tools proactively only when they create clear practical value in this moment.
 - Avoid tool spam; do not suggest a tool for generic factual Q&A or normal small talk.
-- Choose one type only: mood_tracker, checklist, thought_record, affirmation_card, breathing_exercise.
+- Choose one type only: mood_tracker, checklist, thought_record, affirmation_card, breathing_exercise, safety_plan, medication_checklist, appointment_prep, follow_up_plan.
+- Do not suggest or imply external actions like calling hotlines, emergency services, or notifying third parties.
 - Keep confidence between 0 and 1.
 - userLine should be one natural sentence that introduces the tool helpfully.
 - Do not include markdown code fences or commentary.`,
@@ -193,6 +226,7 @@ Turn the user message into a compact JSON search plan.
 [Behavioral Profile]: %PROFILE%
 [Runtime Context]: %RUNTIME%
 [User Message]: "%MESSAGE%"
+[Crisis Resource Policy]: %CRISIS_LOOKUP_POLICY%
 
 Return ONLY valid JSON with this exact shape:
 {
@@ -206,7 +240,7 @@ Rules:
 - Keep the primary query concise and specific.
 - supportingQueries must contain 0 to 2 distinct strings that add missing context or verification angles.
 - Set includeNews to true when freshness matters.
-- If the user needs nearby crisis help, use "emergency mental health crisis hotline near me" as the primaryQuery.
+- Never default to crisis-hotline lookups unless the Crisis Resource Policy explicitly allows it.
 - Do not include markdown, commentary, or code fences.`,
 
     SEARCH_EVIDENCE_EXTRACTOR: `You are Aura's evidence extraction engine.
@@ -256,6 +290,17 @@ Question: "%MESSAGE%"
 Rule: DO NOT generate any <tool_create> tags. Just provide the information naturally.`,
 
     CRISIS_DETECTION: `Analyze the following message for suicidal ideation, self-harm, or severe hopelessness: "%MESSAGE%". Respond ONLY with 'CRISIS' or 'OK'.`,
+
+    CRISIS_SUPPORT_REPLY: `You are Aura supporting someone in active distress.
+User message: "%MESSAGE%"
+
+Rules:
+- Keep a calm, human tone.
+- Acknowledge distress and offer one immediate grounding step.
+- If there may be immediate danger, clearly advise contacting local emergency services right now.
+- Do not claim that you contacted anyone.
+- Do not initiate or imply automatic hotline calls.
+- Offer resource lookup only as opt-in, e.g. ask if they want nearby crisis resources.`,
 
     RE_ENGAGEMENT: `The user hasn't chatted in %DAYS% days (%REASON%). Be supportive. Create a <tool_create type="checklist" theme="One small, easy step for today" />.`,
 
@@ -383,6 +428,56 @@ function sanitizeSearchPlan(plan, fallbackMessage) {
     };
 }
 
+function didUserRequestLocalCrisisResources(message) {
+    const text = String(message || '').toLowerCase();
+    if (!text.trim()) return false;
+
+    const directResourceTerms = /\b(988|911|hotline|crisis line|helpline|support line|suicide prevention)\b/;
+    const locationTerms = /\b(near me|nearby|local|in my area)\b/;
+    const crisisTerms = /\b(crisis|emergency|suicid|self[- ]harm|mental health help)\b/;
+    const lookupTerms = /\b(find|lookup|search|get|show|where|number|contact)\b/;
+
+    return directResourceTerms.test(text) || ((locationTerms.test(text) || lookupTerms.test(text)) && crisisTerms.test(text));
+}
+
+function inferHighRiskSafetyRecommendations(message) {
+    const text = String(message || '').toLowerCase();
+    if (!text.trim()) return [];
+    const hasPersonalContext = /\b(i|my|me|i'm|im|right now|currently)\b/.test(text);
+
+    const recommendations = [];
+    const addRecommendation = (id, pattern, line) => {
+        if (!pattern.test(text)) return;
+        if (recommendations.some((entry) => entry.id === id)) return;
+        recommendations.push({ id, line });
+    };
+
+    addRecommendation(
+        'imminent_self_harm',
+        /\b(suicid|kill myself|end my life|hurt myself|self[- ]harm|can't stay safe|cannot stay safe|want to die)\b/,
+        "If you might hurt yourself or feel you can't stay safe right now, contact your local emergency number immediately. If you want, I can help find crisis resources near you."
+    );
+    addRecommendation(
+        'acute_medical_emergency',
+        /\b(chest pain|pressure in (my )?chest|shortness of breath|face droop|slurred speech|one-sided weakness|unconscious|not waking|severe bleeding|seizure)\b/,
+        'These symptoms can be an emergency. Please contact your local emergency number right now. If you want, I can help you find the nearest urgent resources.'
+    );
+    addRecommendation(
+        'poison_or_overdose',
+        /\b(overdose|took too much|too many pills|poison|poisoned|swallowed cleaner|chemical exposure)\b/,
+        'Possible poisoning or overdose can escalate quickly. Contact emergency services now, and if you want, I can help locate poison support resources for your area.'
+    );
+    addRecommendation(
+        'immediate_personal_safety',
+        /\b(domestic violence|abuse|partner hit|unsafe at home|threatened at home|being stalked|violent partner)\b/,
+        "If you're in immediate danger, contact local emergency services now. If you want, I can help you find a confidential support hotline in your area."
+    );
+
+    const personalOnlyIds = new Set(['acute_medical_emergency', 'poison_or_overdose', 'immediate_personal_safety']);
+    const filtered = recommendations.filter((entry) => !personalOnlyIds.has(entry.id) || hasPersonalContext);
+    return filtered.slice(0, 2);
+}
+
 function sanitizeToolTheme(theme, fallback = 'Quick support') {
     const clean = String(theme || '')
         .replace(/["<>]/g, '')
@@ -407,7 +502,7 @@ function sanitizeToolOpportunity(candidate) {
     const confidence = Number.isFinite(rawConfidence) ? Math.max(0, Math.min(1, rawConfidence)) : 0;
 
     return {
-        shouldUseTool: Boolean(safe.shouldUseTool) && TOOL_TYPES.has(type),
+        shouldUseTool: Boolean(safe.shouldUseTool) && TOOL_TYPES.has(type) && LOW_RISK_PROACTIVE_TYPES.has(type),
         type,
         theme: sanitizeToolTheme(safe.theme, base.theme),
         reason: typeof safe.reason === 'string' ? safe.reason.trim().slice(0, 240) : '',
@@ -443,6 +538,27 @@ function attachProactiveToolTag(reply, recommendation) {
         'I can spin up a quick interactive tool to make this easier right now.';
 
     return normalizeReplyWhitespace(`${reply}\n\n${line} ${tag}`);
+}
+
+function attachHighRiskSafetyRecommendations(reply, recommendations = []) {
+    const baseReply = String(reply || '').trim();
+    if (!baseReply) return baseReply;
+    if (!Array.isArray(recommendations) || recommendations.length === 0) return baseReply;
+
+    const dedupePatterns = {
+        imminent_self_harm: /\b(cannot stay safe|can't stay safe|crisis resources|emergency number)\b/i,
+        acute_medical_emergency: /\b(these symptoms can be an emergency|call emergency|local emergency number)\b/i,
+        poison_or_overdose: /\b(poison|overdose|poison support)\b/i,
+        immediate_personal_safety: /\b(immediate danger|confidential support hotline|unsafe at home)\b/i
+    };
+
+    const missingLines = recommendations
+        .filter((entry) => !dedupePatterns[entry.id] || !dedupePatterns[entry.id].test(baseReply))
+        .map((entry) => entry.line)
+        .filter(Boolean);
+
+    if (!missingLines.length) return baseReply;
+    return normalizeReplyWhitespace(`${baseReply}\n\n${missingLines.join('\n\n')}`);
 }
 
 function sanitizeResponsePreferences(candidate, fallback = DEFAULT_RESPONSE_PREFERENCES) {
@@ -586,7 +702,6 @@ function deriveHeuristicToolOpportunity(userMessage, route) {
     const text = String(userMessage || '').toLowerCase();
 
     if (!text.trim()) return sanitizeToolOpportunity(null);
-    if (route.includes('Search') || route.includes('Knowledge')) return sanitizeToolOpportunity(null);
 
     if (/\b(panic|panic attack|can't breathe|hyperventilat|heart racing right now)\b/.test(text)) {
         return sanitizeToolOpportunity({
@@ -596,6 +711,50 @@ function deriveHeuristicToolOpportunity(userMessage, route) {
             reason: 'Immediate physiological regulation can help.',
             confidence: 0.9,
             userLine: 'Let me open a short breathing reset you can use right now.'
+        });
+    }
+
+    if (/\b(safety plan|what should i do if i spiral|plan for crisis|if i get worse|in case i panic again)\b/.test(text)) {
+        return sanitizeToolOpportunity({
+            shouldUseTool: true,
+            type: 'safety_plan',
+            theme: 'Personal safety plan',
+            reason: 'A written safety plan improves follow-through under stress.',
+            confidence: 0.86,
+            userLine: 'I can create a personal safety plan card so the next steps are clear if things spike.'
+        });
+    }
+
+    if (/\b(medication|meds|pill|prescription|dose|missed dose|side effect|interaction)\b/.test(text) && /\b(i|my|me)\b/.test(text)) {
+        return sanitizeToolOpportunity({
+            shouldUseTool: true,
+            type: 'medication_checklist',
+            theme: 'Medication safety organization',
+            reason: 'A practical checklist reduces avoidable medication errors.',
+            confidence: 0.8,
+            userLine: 'I can open a medication safety checklist so we can organize this clearly.'
+        });
+    }
+
+    if (/\b(doctor|clinician|appointment|visit|follow-up visit|specialist)\b/.test(text) && /\b(prepare|prep|questions|what should i ask|before)\b/.test(text)) {
+        return sanitizeToolOpportunity({
+            shouldUseTool: true,
+            type: 'appointment_prep',
+            theme: 'Clinician appointment prep',
+            reason: 'Structured prep leads to better clinical visits.',
+            confidence: 0.78,
+            userLine: 'I can set up an appointment prep card so you have the key questions and details ready.'
+        });
+    }
+
+    if (/\b(check in|check-in|follow up|follow-up|keep me on track|remind me to)\b/.test(text)) {
+        return sanitizeToolOpportunity({
+            shouldUseTool: true,
+            type: 'follow_up_plan',
+            theme: 'Follow-up plan',
+            reason: 'A lightweight follow-up structure improves continuity.',
+            confidence: 0.77,
+            userLine: 'I can create a follow-up plan card so we keep momentum without overwhelm.'
         });
     }
 
@@ -643,6 +802,8 @@ function deriveHeuristicToolOpportunity(userMessage, route) {
         });
     }
 
+    if (route.includes('Search') || route.includes('Knowledge')) return sanitizeToolOpportunity(null);
+
     return sanitizeToolOpportunity(null);
 }
 
@@ -664,6 +825,8 @@ async function inferProactiveToolOpportunity(userMessage, route, adaptivePrefere
         : heuristic;
 
     if (!candidate.shouldUseTool) return null;
+    if (!LOW_RISK_PROACTIVE_TYPES.has(candidate.type)) return null;
+    if (route.includes('Crisis') && !CRISIS_ROUTE_PROACTIVE_TYPES.has(candidate.type)) return null;
     if (candidate.confidence < 0.65) return null;
     if (!chatManager.canUseProactiveTool(candidate.type)) return null;
 
@@ -1100,7 +1263,7 @@ class ChatManager {
         if (chat.lastProactiveToolAt && (now - chat.lastProactiveToolAt) < minCooldownMs) return false;
 
         const currentCount = Array.isArray(chat.tools?.[type]) ? chat.tools[type].length : 0;
-        const maxPerType = type === 'checklist' ? 2 : 1;
+        const maxPerType = (type === 'checklist' || type === 'follow_up_plan') ? 2 : 1;
         return currentCount < maxPerType;
     }
 
@@ -1132,22 +1295,27 @@ class ChatManager {
         this.saveState();
     }
 
-    completeAndRemoveChecklistItem(toolId, itemIndex) {
+    completeAndRemoveChecklistItem(toolId, itemIndex, toolType = 'checklist', itemKey = 'items') {
         const chat = this.state.chats[this.state.activeChatId];
-        if (!chat?.tools?.checklist) return null;
+        if (!chat?.tools?.[toolType]) return null;
 
-        const checklistIndex = chat.tools.checklist.findIndex((list) => list.id === toolId);
-        if (checklistIndex === -1) return null;
+        const toolIndex = chat.tools[toolType].findIndex((entry) => entry.id === toolId);
+        if (toolIndex === -1) return null;
+        const list = chat.tools[toolType][toolIndex][itemKey];
+        if (!Array.isArray(list)) return null;
 
-        const [item] = chat.tools.checklist[checklistIndex].items.splice(itemIndex, 1);
-        if (chat.tools.checklist[checklistIndex].items.length === 0) {
-            chat.tools.checklist.splice(checklistIndex, 1);
+        const [item] = list.splice(itemIndex, 1);
+        if (!item) return null;
+
+        if (list.length === 0) {
+            chat.tools[toolType].splice(toolIndex, 1);
         }
 
         chat.completed_tasks = chat.completed_tasks || [];
-        chat.completed_tasks.push(item.text);
+        const completedLabel = item.text || item.action || item.when || 'Completed step';
+        chat.completed_tasks.push(completedLabel);
         this.saveState();
-        return item.text;
+        return completedLabel;
     }
 
     updateThoughtRecord(toolId, data) {
@@ -1188,9 +1356,18 @@ class ChatManager {
             await createToolByType('breathing_exercise')
         );
 
-        const prompt = `User in distress: "${message}". Acknowledge calmly, direct to breathing tool.`;
+        const activeModel = getSelectedModelName();
+        const responseSystemPrompt = buildResponseSystemPrompt(
+            localStorage.getItem(STORAGE_KEYS.PROMPT) || PROMPTS.DEFAULT_SYSTEM,
+            activeModel
+        );
+        const prompt = `${responseSystemPrompt}
+${PROMPTS.CRISIS_SUPPORT_REPLY.replace('%MESSAGE%', message)}`;
         const rawReply = await _callLLM(prompt);
-        return (await finalizeAssistantReply(rawReply, message)) || "I hear you. Let's use the breathing exercise together.";
+        const recommendations = inferHighRiskSafetyRecommendations(message);
+        const finalized = (await finalizeAssistantReply(rawReply, message)) ||
+            "I hear you. Let's do a short breathing reset now. If you want, I can also look up nearby crisis resources.";
+        return attachHighRiskSafetyRecommendations(finalized, recommendations);
     }
 
     checkForWithdrawalPattern() {
@@ -1214,28 +1391,38 @@ class ChatManager {
 window.chatManager = new ChatManager();
 
 async function createToolByType(type, theme = '') {
+    const safeTheme = sanitizeToolTheme(theme, 'Quick support');
     const templates = {
         mood_tracker: `{ "type": "mood_tracker", "id": "m-${Date.now()}", "title": "Mood Tracker", "options": ["Happy", "Okay", "Neutral", "Sad", "Angry"] }`,
-        checklist: `{ "type": "checklist", "id": "c-${Date.now()}", "title": "${theme || 'Tasks'}", "items": [{"text": "First step", "done": false}] }`,
-        thought_record: `{ "type": "thought_record", "id": "tr-${Date.now()}", "title": "Thought Record", "situation": "${theme}" }`,
+        checklist: `{ "type": "checklist", "id": "c-${Date.now()}", "title": "${safeTheme || 'Tasks'}", "items": [{"text": "First step", "done": false}] }`,
+        thought_record: `{ "type": "thought_record", "id": "tr-${Date.now()}", "title": "Thought Record", "situation": "${safeTheme}" }`,
         affirmation_card: `{ "type": "affirmation_card", "id": "a-${Date.now()}", "title": "Affirmation", "text": ["You got this."] }`,
-        breathing_exercise: `{ "type": "breathing_exercise", "id": "b-${Date.now()}", "title": "Breathe", "cycle": {"inhale":4, "hold":4, "exhale":6} }`
+        breathing_exercise: `{ "type": "breathing_exercise", "id": "b-${Date.now()}", "title": "Breathe", "cycle": {"inhale":4, "hold":4, "exhale":6} }`,
+        safety_plan: `{ "type": "safety_plan", "id": "sp-${Date.now()}", "title": "Personal Safety Plan", "warningSigns": ["When I stop sleeping", "When thoughts spiral"], "groundingSteps": ["Drink water", "5-minute breathing reset"], "peopleToContact": [{"name":"Trusted person","contact":"Add contact"}], "saferEnvironment": ["Move away from triggering objects", "Stay in a brighter shared space"], "professionalSupport": ["Therapist or clinician", "Local crisis support"], "reasonsToStay": ["One person I care about", "One future event I want to reach"] }`,
+        medication_checklist: `{ "type": "medication_checklist", "id": "mc-${Date.now()}", "title": "Medication Safety Checklist", "medicationName": "${safeTheme || 'Medication'}", "checks": [{"text":"Confirm label instructions", "done": false}, {"text":"Do not double-dose unless instructed", "done": false}, {"text":"Check interaction warnings", "done": false}], "notes": "Use this as organization support, then confirm medical decisions with a clinician or pharmacist." }`,
+        appointment_prep: `{ "type": "appointment_prep", "id": "ap-${Date.now()}", "title": "Appointment Prep", "summary": "${safeTheme || 'What I need help with'}", "symptomTimeline": ["When it started", "What changed"], "questions": ["What is most likely happening?", "What red flags should prompt urgent care?", "What should I monitor at home?"], "medsToMention": ["Current medications", "Recent dose changes"] }`,
+        follow_up_plan: `{ "type": "follow_up_plan", "id": "fu-${Date.now()}", "title": "Follow-up Plan", "checkpoints": [{"when":"Today", "action":"Take one small step", "done": false}, {"when":"Tomorrow", "action":"Quick check-in on progress", "done": false}] }`
     };
 
     if (!templates[type]) return null;
 
-    const prompt = `Output ONLY this exact JSON object structure, filling in realistic data for the theme "${theme}": ${templates[type]}`;
+    const prompt = `Output ONLY this exact JSON object structure, filling in realistic data for the theme "${safeTheme}": ${templates[type]}`;
     const response = await _callLLM(prompt, 'json');
     const parsed = safeParseJson(response, null);
+    const fallback = safeParseJson(templates[type], null);
 
-    return parsed && typeof parsed === 'object' ? parsed : null;
+    return parsed && typeof parsed === 'object' ? parsed : fallback;
 }
 
 async function buildSearchPlan(userMessage, profileStr, runtimeContext) {
+    const crisisLookupPolicy = didUserRequestLocalCrisisResources(userMessage)
+        ? 'Allowed: the user explicitly asked for crisis resources. If relevant, use a local crisis resource query.'
+        : 'Not allowed: do not switch to crisis-hotline/resource lookup unless the user explicitly asks.';
     const response = await _callLLM(
         PROMPTS.SEARCH_PLAN
             .replace('%PROFILE%', profileStr)
             .replace('%RUNTIME%', runtimeContext)
+            .replace('%CRISIS_LOOKUP_POLICY%', crisisLookupPolicy)
             .replace('%MESSAGE%', userMessage),
         'json'
     );
@@ -1410,6 +1597,12 @@ async function finalizeReplyWithProactiveTool(rawReply, userMessage, recommendat
     return augmented;
 }
 
+async function finalizeAgenticReply(rawReply, userMessage, proactiveRecommendation = null, highRiskRecommendations = []) {
+    const cleanReply = await finalizeReplyWithProactiveTool(rawReply, userMessage, proactiveRecommendation);
+    if (!cleanReply) return null;
+    return attachHighRiskSafetyRecommendations(cleanReply, highRiskRecommendations);
+}
+
 async function getOllamaResponse(userMessage, toolFollowUp = null, documentText = null) {
     const activeModel = getSelectedModelName();
     const responseSystemPrompt = buildResponseSystemPrompt(
@@ -1446,6 +1639,7 @@ ${profileStr}
         route,
         runtimeContext
     );
+    const highRiskRecommendations = inferHighRiskSafetyRecommendations(userMessage);
     const proactiveRecommendation = await inferProactiveToolOpportunity(userMessage, route, adaptivePreferences);
     const proactiveToolGuidance = buildProactiveToolGuidance(proactiveRecommendation);
 
@@ -1455,7 +1649,7 @@ ${profileStr}
             const content = await fetchMarkdownContent(key.toLowerCase());
             if (content) {
                 return (
-                    (await finalizeReplyWithProactiveTool(
+                    (await finalizeAgenticReply(
                         await _callLLM(
                             `${responseSystemPrompt}
 [Adaptive Strategy]:
@@ -1468,8 +1662,12 @@ ${PROMPTS.KNOWLEDGE_SYNTHESIS}`
                                 .replace('%CONTENT%', content)
                         ),
                         userMessage,
-                        proactiveRecommendation
-                    )) || "I couldn't produce a solid answer on that attempt. Ask again and I'll give you a clearer, more complete explanation."
+                        proactiveRecommendation,
+                        highRiskRecommendations
+                    )) || attachHighRiskSafetyRecommendations(
+                        "I couldn't produce a solid answer on that attempt. Ask again and I'll give you a clearer, more complete explanation.",
+                        highRiskRecommendations
+                    )
                 );
             }
         }
@@ -1491,12 +1689,18 @@ ${PROMPTS.KNOWLEDGE_SYNTHESIS}`
                 buildDeterministicSearchFallback(evidenceCatalog, adaptivePreferences);
 
             return (
-                (await finalizeReplyWithProactiveTool(renderedReply, userMessage, proactiveRecommendation)) ||
-                "I couldn't verify that as cleanly as I want just yet. Give me a moment and I can take another, more thorough pass."
+                (await finalizeAgenticReply(renderedReply, userMessage, proactiveRecommendation, highRiskRecommendations)) ||
+                attachHighRiskSafetyRecommendations(
+                    "I couldn't verify that as cleanly as I want just yet. Give me a moment and I can take another, more thorough pass.",
+                    highRiskRecommendations
+                )
             );
         } catch (error) {
             console.error('[SearchAgent] Full failure details:', error);
-            return "I'm temporarily unable to verify that live right now. Please try again in a moment and I'll provide a source-backed answer.";
+            return attachHighRiskSafetyRecommendations(
+                "I'm temporarily unable to verify that live right now. Please try again in a moment and I'll provide a source-backed answer.",
+                highRiskRecommendations
+            );
         }
     }
 
@@ -1526,6 +1730,13 @@ User: ${userMessage}`;
 
     if (documentText) finalPrompt += `\n[Doc Content]: ${documentText}`;
 
-    return (await finalizeReplyWithProactiveTool(await _callLLM(finalPrompt), userMessage, proactiveRecommendation)) ||
-        "I couldn't generate a high-quality response on that try. Ask again and I'll give you a clearer, more complete answer.";
+    return (await finalizeAgenticReply(
+        await _callLLM(finalPrompt),
+        userMessage,
+        proactiveRecommendation,
+        highRiskRecommendations
+    )) || attachHighRiskSafetyRecommendations(
+        "I couldn't generate a high-quality response on that try. Ask again and I'll give you a clearer, more complete answer.",
+        highRiskRecommendations
+    );
 }
