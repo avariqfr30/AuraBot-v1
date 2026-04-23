@@ -423,6 +423,7 @@ Rules:
 - Avoid fragmentary snippet text, trailing ellipses, or unfinished clauses.
 - If evidence is weak or mixed, set includeUncertaintyNote true and explain briefly.
 - directAnswer should be user-facing, clear, and usually 2 to 4 sentences for non-trivial questions.
+- If the user asks multiple sub-questions, directAnswer must explicitly answer each part, not just one of them.
 - Do not mention internal process, search, OSINT, or tooling.
 - Do NOT generate any <tool_create> tags.
 - Do not include markdown code fences or commentary.`,
@@ -467,6 +468,41 @@ Rules:
 - Keep 2 to 5 takeaways when possible.
 - Do not mention internal process or tooling.
 - No markdown/code fences/commentary.`,
+
+    SEARCH_FALLBACK_SYNTHESIZER: `You are Aura's fallback evidence synthesizer.
+Answer the user's question naturally using only the evidence catalog below.
+
+[User Message]
+%MESSAGE%
+
+[Behavioral Profile]
+%PROFILE%
+
+[Runtime Context]
+%RUNTIME%
+
+[Evidence Catalog JSON]
+%EVIDENCE%
+
+Return ONLY valid JSON with this exact shape:
+{
+  "answer": "string",
+  "evidenceIds": [1],
+  "uncertainty": "string",
+  "includeUncertainty": false
+}
+
+Rules:
+- Use only facts supported by the evidence catalog.
+- Write like a thoughtful professional talking to a real person.
+- Do not echo source titles or snippets verbatim.
+- Do not say "a supporting source says" or similar template language.
+- Do not say the answer is "based on publicly available online resources" or similar source-provenance filler.
+- If the user asks multiple sub-questions, answer each part explicitly.
+- answer should directly answer the user in complete natural sentences.
+- evidenceIds must reference 1 to 4 evidence items actually used.
+- If the evidence is incomplete or mixed, set includeUncertainty=true and explain briefly.
+- No markdown, commentary, or code fences.`,
 
     KNOWLEDGE_MAPPER: `Map the user question to a key: all-or-nothing-thinking, catastrophizing, discounting-the-positive, emotional-reasoning, fortune-telling, labeling, mental-filter, mind-reading, overgeneralization, personalization, should-statements, thought-record-info, grounding-techniques, grounding, mindfulness-deep-breathing.
 Question: "%MESSAGE%". Respond ONLY with the key or "NULL".`,
@@ -561,6 +597,8 @@ Return ONLY valid JSON with this exact shape:
 
 Rules:
 - Rewrite if the reply is incomplete, repetitive, too cold, too generic, clearly off-target, or fails to directly answer the user.
+- Rewrite if the user asked multiple sub-questions and the draft only answers part of them.
+- Rewrite if the draft uses robotic source-provenance filler like "based on publicly available online resources."
 - Do not require rewrites for minor style preferences.
 - issues should be short machine-readable labels.
 - rewriteGoal should be one short sentence.
@@ -589,6 +627,8 @@ Rules:
 - Keep the meaning, cautions, and factual boundaries intact.
 - Remove repetition, abruptness, and obvious drift.
 - Ensure the user's actual question is answered directly.
+- If the user asked multiple sub-questions, answer every part clearly.
+- Remove robotic source-provenance filler unless the user explicitly asked about the sources themselves.
 - Preserve any exact line that starts with "Sources:".
 - Preserve any exact <tool_create ... /> tag.
 - Do not mention the rewrite process.
@@ -1468,9 +1508,43 @@ function buildQualityReviewArtifacts(reply) {
     };
 }
 
+function detectQuestionFacetRequirements(userMessage) {
+    const text = String(userMessage || '').toLowerCase();
+    return {
+        asksDefinition: /\b(what is|what are|tell me about|what can you tell me about|explain)\b/.test(text),
+        asksCount: /\b(how many|number of)\b/.test(text),
+        asksClassification: /\b(types?|classes?|kinds?|categories?)\b/.test(text),
+        asksComparison: /\b(compare|difference|versus|vs\.?)\b/.test(text)
+    };
+}
+
+function answerMentionsCount(replyText) {
+    const text = String(replyText || '').toLowerCase();
+    return [
+        /\b\d+\b/,
+        /\bone\b/, /\btwo\b/, /\bthree\b/, /\bfour\b/, /\bfive\b/,
+        /\bsix\b/, /\bseven\b/, /\beight\b/, /\bnine\b/, /\bten\b/,
+        /\beleven\b/, /\btwelve\b/,
+        /\bi\b/, /\bii\b/, /\biii\b/, /\biv\b/
+    ].some((pattern) => pattern.test(text));
+}
+
+function answerMentionsClassification(replyText) {
+    const text = String(replyText || '').toLowerCase();
+    return /\b(type|types|class|classes|kind|kinds|category|categories)\b/.test(text) ||
+        /\bbipolar\s+i\b/.test(text) ||
+        /\bbipolar\s+ii\b/.test(text) ||
+        /\bcyclothymi/.test(text);
+}
+
+function replyHasRoboticProvenanceFiller(replyText) {
+    return /\bbased on publicly available online resources\b/i.test(String(replyText || ''));
+}
+
 async function applyReplyQualityGate(reply, userMessage, route, turnSupport, preferences = DEFAULT_RESPONSE_PREFERENCES) {
     const artifacts = buildQualityReviewArtifacts(reply);
     if (!artifacts.body) return reply;
+    const requirements = detectQuestionFacetRequirements(userMessage);
 
     const prompt = PROMPTS.RESPONSE_QUALITY_REVIEWER
         .replace('%MESSAGE%', userMessage || '')
@@ -1484,6 +1558,12 @@ async function applyReplyQualityGate(reply, userMessage, route, turnSupport, pre
 
     const obviouslyNeedsRewrite =
         isLikelyIncompleteReply(artifacts.body) ||
+        replyHasRoboticProvenanceFiller(artifacts.body) ||
+        (requirements.asksCount && !answerMentionsCount(artifacts.body)) ||
+        (requirements.asksClassification && !answerMentionsClassification(artifacts.body)) ||
+        ((route.includes('Search') || route.includes('Knowledge')) &&
+            String(userMessage || '').trim().length > 20 &&
+            artifacts.body.split(/\s+/).filter(Boolean).length < 55) ||
         (String(userMessage || '').trim().length > 12 && artifacts.body.split(/\s+/).filter(Boolean).length < 28) ||
         issues.some((issue) => ['incomplete', 'off_target', 'repetitive', 'too_cold', 'did_not_answer'].includes(issue));
 
@@ -1834,6 +1914,7 @@ function stripPlanningScaffold(text) {
         if (!trimmed) return true;
 
         return ![
+            /^\[[^\]]*(?:thought|analysis|reasoning|plan|思考|分析|推理|计划|計劃)[^\]]*\]\s*/i,
             /^identify (?:the )?(?:core )?request\b[:\s-]/i,
             /^identify (?:the )?(?:core )?question\b[:\s-]/i,
             /^structure (?:the )?response\b[:\s-]/i,
@@ -1856,7 +1937,13 @@ function stripPlanningScaffold(text) {
             /^avoid overly technical\b[:\s-]/i,
             /^steps?\b[:\s-]/i,
             /^approach\b[:\s-]/i,
-            /^core request\b[:\s-]/i
+            /^core request\b[:\s-]/i,
+            /^the user is asking\b[:\s-]/i,
+            /^the original draft\b[:\s-]/i,
+            /^the goal is to\b[:\s-]/i,
+            /^drafting(?:\s*-\s*iteration\s*\d+)?\b[:\s-]/i,
+            /^iteration\s*\d+\b[:\s-]/i,
+            /^responding to the user\b[:\s-]/i
         ].some((pattern) => pattern.test(trimmed));
     });
 
@@ -1899,8 +1986,11 @@ function isMetaInstructionLine(line) {
     if (!trimmed) return true;
 
     return [
+        /^\[[^\]]*(?:thought|analysis|reasoning|plan|思考|分析|推理|计划|計劃)[^\]]*\]\s*/i,
         /^(?:thought|analysis|reasoning|plan)\b[:\s-]/i,
+        /^(?:思考|分析|推理|计划|計劃)\b[:\s-]/i,
         /^the user wants me to\b/i,
+        /^the user is asking\b/i,
         /^i need to\b/i,
         /^i should\b/i,
         /^i must\b/i,
@@ -1931,6 +2021,9 @@ function isMetaInstructionLine(line) {
         /^check against rules\b/i,
         /^final check\b/i,
         /^draft(?:ing)? (?:the )?response\b/i,
+        /^drafting(?:\s*-\s*iteration\s*\d+)?\b/i,
+        /^the original draft\b/i,
+        /^the goal is to\b/i,
         /^core request\b[:\s-]/i,
         /^\[?(?:behavioral profile|runtime context|system context|current session history|relevant past memories|current profile|recent chat|draft reply|user message)\]?[:\]]/i,
         /^\d+\.\s+/,
@@ -1943,7 +2036,7 @@ function stripMetaPreface(text) {
     const lines = cleaned.split('\n');
     const keptLines = [];
     let started = false;
-    const strongMetaBoundary = /^(?:thought|analysis|reasoning|plan)\b[:\s-]|^\[?(?:behavioral profile|runtime context|system context|current session history|relevant past memories|current profile|recent chat|draft reply|user message)\]?[:\]]/i;
+    const strongMetaBoundary = /^(?:thought|analysis|reasoning|plan|思考|分析|推理|计划|計劃)\b[:\s-]|^\[[^\]]*(?:thought|analysis|reasoning|plan|思考|分析|推理|计划|計劃)[^\]]*\]\s*|^(?:the user is asking|the original draft|the goal is to|drafting(?:\s*-\s*iteration\s*\d+)?)\b[:\s-]?|^\[?(?:behavioral profile|runtime context|system context|current session history|relevant past memories|current profile|recent chat|draft reply|user message)\]?[:\]]/i;
 
     for (const line of lines) {
         const trimmed = line.trim();
@@ -1970,8 +2063,11 @@ function looksLikeLeakedReasoning(text) {
     if (!sample) return false;
 
     return [
+        /(?:^|\n)\s*\[[^\]]*(?:thought|analysis|reasoning|plan|思考|分析|推理|计划|計劃)[^\]]*\]/i,
         /(?:^|\n)\s*(?:thought|analysis|reasoning|plan)\b[:\s-]/i,
+        /(?:^|\n)\s*(?:思考|分析|推理|计划|計劃)\b[:\s-]/i,
         /\bthe user wants me to\b/i,
+        /\bthe user is asking\b/i,
         /\bi need to respond\b/i,
         /\bi should respond\b/i,
         /\bi must\b/i,
@@ -1994,6 +2090,9 @@ function looksLikeLeakedReasoning(text) {
         /\bcheck against rules\b/i,
         /\bfinal check\b/i,
         /\bdrafting (?:the )?response\b/i,
+        /\bdrafting(?:\s*-\s*iteration\s*\d+)?\b/i,
+        /\bthe original draft\b/i,
+        /\bthe goal is to\b/i,
         /\bbehavioral profile\b/i,
         /\bruntime context\b/i,
         /\bsystem context\b/i,
@@ -2912,19 +3011,57 @@ function buildSourcesLineFromEvidenceIds(evidenceIds, evidenceCatalog) {
     return `Sources: ${links.join(', ')}`;
 }
 
-function buildCatalogFallbackTakeaways(evidenceCatalog, maxItems = 3) {
-    return evidenceCatalog
-        .filter((entry) => entry && (entry.title || entry.source))
-        .slice(0, maxItems)
-        .map((entry) => {
-            const sourceLabel = cleanSourceLabel(entry.source || entry.title || 'Source');
-            const text = String(entry.title || 'A relevant source')
-                .replace(/\s+/g, ' ')
-                .trim()
-                .replace(/[.]{3,}|…/g, '');
-            return `A supporting source from ${sourceLabel} covers: ${text}.`;
-        })
-        .filter(Boolean);
+function hasUsableEvidenceExtraction(extracted) {
+    if (!extracted || typeof extracted !== 'object') return false;
+    if (String(extracted.directAnswer || '').trim().length >= 80) return true;
+    return Array.isArray(extracted.supportedClaims) && extracted.supportedClaims.length > 0;
+}
+
+function sanitizeFallbackSynthesisResult(parsed, evidenceCount) {
+    const normalized = parsed && typeof parsed === 'object' ? parsed : {};
+    const evidenceIds = [...new Set((normalized.evidenceIds || [])
+        .map((value) => Number(value))
+        .filter((value) => Number.isInteger(value) && value >= 1 && value <= evidenceCount))]
+        .slice(0, 4);
+
+    return {
+        answer: stripInlineSourceLine(typeof normalized.answer === 'string' ? normalized.answer.trim() : ''),
+        evidenceIds,
+        uncertainty: stripInlineSourceLine(typeof normalized.uncertainty === 'string' ? normalized.uncertainty.trim() : ''),
+        includeUncertainty: Boolean(normalized.includeUncertainty)
+    };
+}
+
+async function buildFallbackEvidenceReply(userMessage, evidenceCatalog, profileStr, runtimeContext) {
+    if (!Array.isArray(evidenceCatalog) || evidenceCatalog.length === 0) return '';
+
+    const fallbackRaw = await _callLLM(
+        PROMPTS.SEARCH_FALLBACK_SYNTHESIZER
+            .replace('%MESSAGE%', userMessage || '')
+            .replace('%PROFILE%', profileStr || '{}')
+            .replace('%RUNTIME%', runtimeContext || '')
+            .replace('%EVIDENCE%', JSON.stringify(evidenceCatalog, null, 2)),
+        'json',
+        'analysis'
+    );
+    const fallback = sanitizeFallbackSynthesisResult(safeParseJson(fallbackRaw, null), evidenceCatalog.length);
+    if (!fallback.answer) return '';
+
+    const parts = [fallback.answer];
+    if (fallback.includeUncertainty && fallback.uncertainty) {
+        parts.push(fallback.uncertainty);
+    }
+
+    const sourcesLine = buildSourcesLineFromEvidenceIds(
+        fallback.evidenceIds.length
+            ? fallback.evidenceIds
+            : evidenceCatalog.filter((entry) => entry.url).slice(0, 4).map((entry) => entry.id),
+        evidenceCatalog
+    );
+
+    return normalizeReplyWhitespace(
+        `${parts.filter(Boolean).join('\n\n')}${sourcesLine ? `\n\n${sourcesLine}` : ''}`
+    );
 }
 
 async function rewriteEvidenceClaimsForNarrative(userMessage, extracted, evidenceCatalog) {
@@ -2986,11 +3123,8 @@ function buildEvidenceBackedReply(
     const responseParts = [];
 
     const mergedTakeaways = [directAnswer, ...extraClaims].filter(Boolean);
-    const fallbackTakeaways = mergedTakeaways.length < 2
-        ? buildCatalogFallbackTakeaways(evidenceCatalog, preferences.detailLevel === 'brief' ? 1 : 2)
-        : [];
     const finalTakeaways = dedupeClaimTexts(
-        [...mergedTakeaways, ...fallbackTakeaways]
+        [...mergedTakeaways]
         .filter(Boolean)
         .map((claim) => claim.trim())
         .filter(Boolean)
@@ -3043,14 +3177,17 @@ function buildDeterministicSearchFallback(evidenceCatalog, preferences = DEFAULT
     }
 
     const topEvidence = evidenceCatalog[0];
-    const topSnippet = topEvidence.snippet || `I found a relevant source: ${topEvidence.title}.`;
+    const topSnippet = String(topEvidence.snippet || '').trim();
+    const naturalFallback = topSnippet && !claimLooksSnippetLike(topSnippet, evidenceCatalog, [topEvidence.id])
+        ? topSnippet
+        : "I found relevant sources on this, but I don't want to overstate what I can verify cleanly from that evidence alone.";
     const sourcesLine = buildSourcesLineFromEvidenceIds(
         evidenceCatalog.filter((entry) => entry.url).slice(0, 4).map((entry) => entry.id),
         evidenceCatalog
     );
 
     return normalizeReplyWhitespace(
-        `${topSnippet}${sourcesLine ? `\n\n${sourcesLine}` : ''}`
+        `${naturalFallback}${sourcesLine ? `\n\n${sourcesLine}` : ''}`
     );
 }
 
@@ -3228,14 +3365,32 @@ ${PROMPTS.KNOWLEDGE_SYNTHESIS}`
                 extracted,
                 evidenceCatalog
             );
-            const renderedReply = buildEvidenceBackedReply(
-                extracted,
-                evidenceCatalog,
-                adaptivePreferences,
-                contextualUserMessage,
-                rewrittenNarrative
-            ) ||
-                buildDeterministicSearchFallback(evidenceCatalog, adaptivePreferences);
+            const renderedReply = hasUsableEvidenceExtraction(extracted)
+                ? (
+                    buildEvidenceBackedReply(
+                        extracted,
+                        evidenceCatalog,
+                        adaptivePreferences,
+                        contextualUserMessage,
+                        rewrittenNarrative
+                    ) ||
+                    await buildFallbackEvidenceReply(
+                        contextualUserMessage,
+                        evidenceCatalog,
+                        profileStr,
+                        runtimeContext
+                    ) ||
+                    buildDeterministicSearchFallback(evidenceCatalog, adaptivePreferences)
+                )
+                : (
+                    await buildFallbackEvidenceReply(
+                        contextualUserMessage,
+                        evidenceCatalog,
+                        profileStr,
+                        runtimeContext
+                    ) ||
+                    buildDeterministicSearchFallback(evidenceCatalog, adaptivePreferences)
+                );
 
             return (
                 (await finalizeAgenticReply(
