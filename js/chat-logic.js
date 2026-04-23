@@ -4,7 +4,8 @@ const STORAGE_KEYS = {
     MODEL: 'aura_model_name',
     THEME: 'aura_theme',
     LOCATION_ENABLED: 'aura_location_enabled',
-    LOCATION_CONTEXT: 'aura_location_context'
+    LOCATION_CONTEXT: 'aura_location_context',
+    USER_MEMORY_ENABLED: 'aura_user_memory_enabled'
 };
 
 const API_ENDPOINTS = {
@@ -52,6 +53,13 @@ const ROUTE_NAMES = new Set([
     'SearchAgent',
     'GeneralFriendAgent'
 ]);
+const SESSION_CACHE_TTL_MS = 10 * 60 * 1000;
+const analysisCaches = {
+    sourceNeed: new Map(),
+    searchPlan: new Map(),
+    evidenceRewrite: new Map(),
+    turnSupport: new Map()
+};
 
 const DEFAULT_RESPONSE_PREFERENCES = {
     detailLevel: 'balanced',
@@ -117,7 +125,10 @@ To deploy a tool, embed this exact tag in your response: <tool_create type="[typ
     RESPONSE_STYLE_CONTRACT: `[RESPONSE STYLE CONTRACT]
 Apply these style rules to every user-facing reply:
 - Be professionally warm, re-assuring, and helpful.
-- Sound like a skilled professional who is also genuinely easy to talk to.
+- Sound like a skilled clinician-quality listener who is also genuinely easy to talk to.
+- Keep a steady bedside manner across all topics, not just mental-health ones.
+- The tone should feel like a thoughtful psychiatrist or doctor with excellent people skills: calm, welcoming, attentive, and natural.
+- Use clear language that works for teens, adults, and older users without sounding childish or overly clinical.
 - Do not be abrupt or cold when a fuller answer is warranted.
 - For meaningful questions, provide enough detail to reduce uncertainty.
 - For factual/explanatory questions, cover: what it is, why it matters, and practical implications.
@@ -192,6 +203,7 @@ Return ONLY valid JSON with this exact shape:
 Rules:
 - Use tools proactively only when they create clear practical value in this moment.
 - Avoid tool spam; do not suggest a tool for generic factual Q&A or normal small talk.
+- Do not suggest tools for definitions, explanations, psychoeducation, research summaries, or source-backed factual answers unless the user explicitly asks for a plan, exercise, tracker, checklist, or follow-up structure.
 - Choose one type only: mood_tracker, checklist, thought_record, affirmation_card, breathing_exercise, safety_plan, medication_checklist, appointment_prep, follow_up_plan.
 - Do not suggest or imply external actions like calling hotlines, emergency services, or notifying third parties.
 - Keep confidence between 0 and 1.
@@ -257,6 +269,100 @@ Focus on updating: communicationStyle, moodPatterns, potentialLapses, and behavi
 [Current Profile]: %STORE%
 [Recent Chat]: %HISTORY%
 Respond ONLY with the updated JSON object matching the input structure.`,
+
+    USER_MEMORY_ANALYZER: `You are Aura's durable user-memory agent.
+Update the user's cross-chat memory using only information that is stable and useful across conversations.
+
+[Current Durable User Memory]
+%STORE%
+
+[Active Chat Profile]
+%CHAT_PROFILE%
+
+[Recent Chat]
+%HISTORY%
+
+Return ONLY the JSON object with this exact shape:
+{
+  "communicationStyle": "string",
+  "moodPatterns": ["string"],
+  "potentialLapses": ["string"],
+  "behavioralFacts": ["string"],
+  "responsePreferences": {
+    "detailLevel": "balanced",
+    "reassuranceLevel": "medium",
+    "technicalLevel": "plain",
+    "structureLevel": "paragraphs",
+    "directnessLevel": "balanced",
+    "followUpLevel": "gentle",
+    "likelyTone": "neutral"
+  }
+}
+
+Rules:
+- Store only durable preferences, recurring patterns, and stable support needs.
+- Do not store one-off topics unless they are clearly recurring or personally important.
+- Do not invent facts.
+- No markdown, no commentary, no code fences.`,
+
+    CONVERSATION_SUMMARIZER: `You are Aura's conversation memory summarizer.
+Summarize the older part of this one chat so Aura can continue the conversation without losing context.
+
+[Older Chat History]
+%HISTORY%
+
+Return ONLY valid JSON with this exact shape:
+{
+  "summary": "string",
+  "activeTopics": ["string"],
+  "openLoops": ["string"],
+  "durableUserContext": ["string"]
+}
+
+Rules:
+- Keep it specific to this chat only.
+- Focus on durable context, not every detail.
+- Include unresolved questions or threads that still matter.
+- Do not invent facts.
+- No markdown, no commentary, no code fences.`,
+
+    TURN_SUPPORT_ANALYZER: `You are Aura's turn-level support analyzer.
+Analyze this user turn and decide what kind of response would help most.
+
+[Combined Profile]
+%PROFILE%
+
+[Recent Chat]
+%HISTORY%
+
+[User Message]
+%MESSAGE%
+
+Return ONLY valid JSON with this exact shape:
+{
+  "primaryMode": "clarify",
+  "secondaryMode": "none",
+  "followUpIntent": "new_topic",
+  "topicShift": false,
+  "distressLevel": "low",
+  "reassuranceNeed": "medium",
+  "structureNeed": "low",
+  "directnessTolerance": "balanced",
+  "responseGoals": ["string"]
+}
+
+Allowed values:
+- primaryMode / secondaryMode: clarify | soothe | coach | reflect | research | none
+- followUpIntent: new_topic | deepen | clarify | challenge | correct | continue
+- distressLevel / reassuranceNeed / structureNeed: low | medium | high
+- directnessTolerance: soft | balanced | direct
+
+Rules:
+- Choose the mode that best helps the person, not just the topic.
+- topicShift=true only when the user is clearly moving away from the prior thread.
+- Use followUpIntent to capture whether they are deepening, correcting, challenging, or continuing.
+- responseGoals should be 1 to 4 short strings.
+- No markdown, commentary, or code fences.`,
 
     SEARCH_PLAN: `You are Aura's OSINT planning agent.
 Turn the user message into a compact JSON search plan.
@@ -401,6 +507,92 @@ Rules:
 - Preserve any exact <tool_create ... /> tags only if they already exist in the draft.
 - Do not mention that you cleaned or rewrote anything.
 - Do not add markdown code fences, labels, or commentary.`
+,
+
+    BEDSIDE_MANNER_POLISH: `You are Aura's bedside-manner layer.
+
+[User Message]
+%MESSAGE%
+
+[Route]
+%ROUTE%
+
+[Adaptive Preferences]
+%PREFERENCES%
+
+[Draft Reply]
+%DRAFT%
+
+Rewrite the draft so it sounds like a calm, professional, welcoming expert with excellent bedside manner.
+
+Rules:
+- Keep the meaning, facts, cautions, nuance, and practical guidance intact.
+- Make the reply sound more natural, attentive, and human.
+- Avoid canned phrasing, analyst tone, robotic transitions, and generic template language.
+- Do not become overly chatty, cute, or fluffy.
+- Use plain language that feels comfortable for users of any age group.
+- Preserve any exact line that starts with "Sources:".
+- Preserve any exact <tool_create ... /> tag.
+- Do not mention style, rewriting, prompts, or internal instructions.
+- Return only the final user-facing reply.`
+,
+
+    RESPONSE_QUALITY_REVIEWER: `You are Aura's final reply reviewer.
+Decide whether this draft reply needs one more rewrite before the user sees it.
+
+[User Message]
+%MESSAGE%
+
+[Route]
+%ROUTE%
+
+[Turn Support JSON]
+%TURN_SUPPORT%
+
+[Draft Reply]
+%DRAFT%
+
+Return ONLY valid JSON with this exact shape:
+{
+  "shouldRewrite": false,
+  "issues": ["string"],
+  "rewriteGoal": "string"
+}
+
+Rules:
+- Rewrite if the reply is incomplete, repetitive, too cold, too generic, clearly off-target, or fails to directly answer the user.
+- Do not require rewrites for minor style preferences.
+- issues should be short machine-readable labels.
+- rewriteGoal should be one short sentence.
+- No markdown, commentary, or code fences.`,
+
+    RESPONSE_QUALITY_REWRITE: `You are Aura's final quality rewrite layer.
+
+[User Message]
+%MESSAGE%
+
+[Route]
+%ROUTE%
+
+[Turn Support JSON]
+%TURN_SUPPORT%
+
+[Rewrite Goal]
+%GOAL%
+
+[Draft Reply]
+%DRAFT%
+
+Rewrite the draft so it fully answers the user and feels natural, warm, and reliable.
+
+Rules:
+- Keep the meaning, cautions, and factual boundaries intact.
+- Remove repetition, abruptness, and obvious drift.
+- Ensure the user's actual question is answered directly.
+- Preserve any exact line that starts with "Sources:".
+- Preserve any exact <tool_create ... /> tag.
+- Do not mention the rewrite process.
+- Return only the final user-facing reply.`
 };
 
 const MEDGEMMA_FEW_SHOTS = [
@@ -426,6 +618,31 @@ function safeParseJson(value, fallback = null) {
     } catch (_error) {
         return fallback;
     }
+}
+
+function getSessionCacheEntry(cache, key) {
+    const entry = cache.get(key);
+    if (!entry) return null;
+    if ((Date.now() - entry.createdAt) > SESSION_CACHE_TTL_MS) {
+        cache.delete(key);
+        return null;
+    }
+    return entry.value;
+}
+
+function setSessionCacheEntry(cache, key, value) {
+    cache.set(key, {
+        createdAt: Date.now(),
+        value
+    });
+    return value;
+}
+
+function buildSessionCacheKey(parts = []) {
+    return parts
+        .map((part) => String(part || '').trim())
+        .join('::')
+        .slice(0, 4000);
 }
 
 function getSelectedModelName() {
@@ -458,26 +675,66 @@ function buildResponseSystemPrompt(basePrompt, modelName) {
     ].join('\n\n');
 }
 
+function getConfiguredOllamaOptions(format = null, callType = 'default') {
+    const configured = window.AURA_CONFIG?.ollamaOptions || {};
+    if (format === 'json') return configured.json || {};
+    if (callType === 'analysis') return configured.analysis || {};
+    if (callType === 'cleanup') return configured.cleanup || {};
+    return configured.default || {};
+}
+
 function getModelGenerationOptions(modelName, format = null, callType = 'default') {
+    const configuredOptions = getConfiguredOllamaOptions(format, callType);
+
     if (format === 'json') {
-        return isMedGemmaModel(modelName)
-            ? { temperature: 0, top_p: 0.9 }
-            : { temperature: 0 };
+        return {
+            ...configuredOptions,
+            ...(isMedGemmaModel(modelName)
+                ? { temperature: 0, top_p: 0.9 }
+                : { temperature: 0 })
+        };
     }
 
     if (callType === 'analysis' || callType === 'cleanup') {
-        return isMedGemmaModel(modelName)
-            ? { temperature: 0, top_p: 0.9 }
-            : { temperature: 0 };
+        return {
+            ...configuredOptions,
+            ...(isMedGemmaModel(modelName)
+                ? { temperature: 0, top_p: 0.9 }
+                : { temperature: 0 })
+        };
     }
 
-    if (!isMedGemmaModel(modelName)) return {};
+    if (!isMedGemmaModel(modelName)) return configuredOptions;
 
     return {
+        ...configuredOptions,
         temperature: 0.28,
         top_p: 0.9,
         repeat_penalty: 1.05
     };
+}
+
+function isLikelyIncompleteReply(text) {
+    const value = normalizeReplyWhitespace(text);
+    if (!value) return false;
+    if (value.length < 60) return false;
+    if (/[.!?]"?$/.test(value)) return false;
+    if (/[,:;]\s*$/.test(value)) return true;
+    if (/\b(and|or|but|because|while|which|that|with|including|such as|like)\s*$/i.test(value)) return true;
+    if (/\.\.\.|…/.test(value)) return true;
+    return true;
+}
+
+function buildContinuationPrompt(prompt, partialReply) {
+    return `${prompt}
+
+[Previous reply was cut off. Continue from exactly where it stopped.]
+- Do not restart from the beginning.
+- Do not repeat earlier sentences.
+- Continue naturally with the same tone and topic.
+
+[Partial reply]
+${partialReply}`;
 }
 
 function buildChatTitle(content) {
@@ -618,6 +875,15 @@ function deriveHeuristicSourceNeed(userMessage, route) {
 }
 
 async function inferSourceNeedDecision(userMessage, route, adaptivePreferences) {
+    const cacheKey = buildSessionCacheKey([
+        'sourceNeed',
+        userMessage,
+        route,
+        JSON.stringify(sanitizeResponsePreferences(adaptivePreferences, DEFAULT_RESPONSE_PREFERENCES))
+    ]);
+    const cached = getSessionCacheEntry(analysisCaches.sourceNeed, cacheKey);
+    if (cached) return cached;
+
     const heuristic = sanitizeSourceNeedDecision(
         deriveHeuristicSourceNeed(userMessage, route),
         { needsSources: false, confidence: 0, reason: '' }
@@ -630,15 +896,15 @@ async function inferSourceNeedDecision(userMessage, route, adaptivePreferences) 
     const modelDecisionRaw = await _callLLM(analyzerPrompt, 'json', 'analysis');
     const modelDecision = sanitizeSourceNeedDecision(safeParseJson(modelDecisionRaw, null), heuristic);
 
+    let resolvedDecision = modelDecision.confidence >= heuristic.confidence ? modelDecision : heuristic;
+
     if (modelDecision.needsSources && modelDecision.confidence >= Math.max(0.55, heuristic.confidence - 0.05)) {
-        return modelDecision;
+        resolvedDecision = modelDecision;
+    } else if (heuristic.needsSources && heuristic.confidence >= 0.75) {
+        resolvedDecision = heuristic;
     }
 
-    if (heuristic.needsSources && heuristic.confidence >= 0.75) {
-        return heuristic;
-    }
-
-    return modelDecision.confidence >= heuristic.confidence ? modelDecision : heuristic;
+    return setSessionCacheEntry(analysisCaches.sourceNeed, cacheKey, resolvedDecision);
 }
 
 function shouldUseSearchEvidence(route, sourceDecision) {
@@ -899,6 +1165,215 @@ function buildModelSafeHistoryString(history, maxMessages = 16) {
         .join('\n');
 }
 
+function buildChatScopedProfile() {
+    return {
+        communicationStyle: 'Not yet established.',
+        moodPatterns: [],
+        potentialLapses: [],
+        behavioralFacts: [],
+        responsePreferences: { ...DEFAULT_RESPONSE_PREFERENCES }
+    };
+}
+
+function sanitizeChatScopedProfile(profile, fallback = buildChatScopedProfile()) {
+    const safe = profile && typeof profile === 'object' ? profile : fallback;
+    return {
+        communicationStyle: safe.communicationStyle || fallback.communicationStyle,
+        moodPatterns: Array.isArray(safe.moodPatterns) ? safe.moodPatterns : fallback.moodPatterns,
+        potentialLapses: Array.isArray(safe.potentialLapses) ? safe.potentialLapses : fallback.potentialLapses,
+        behavioralFacts: Array.isArray(safe.behavioralFacts) ? safe.behavioralFacts : fallback.behavioralFacts,
+        responsePreferences: sanitizeResponsePreferences(
+            safe.responsePreferences,
+            fallback.responsePreferences
+        )
+    };
+}
+
+function buildConversationSummaryContext(summaryData) {
+    if (!summaryData || typeof summaryData !== 'object') return '';
+
+    const lines = [];
+    if (summaryData.summary) lines.push(`Summary: ${summaryData.summary}`);
+    if (Array.isArray(summaryData.activeTopics) && summaryData.activeTopics.length) {
+        lines.push(`Active topics: ${summaryData.activeTopics.join(' | ')}`);
+    }
+    if (Array.isArray(summaryData.openLoops) && summaryData.openLoops.length) {
+        lines.push(`Open loops: ${summaryData.openLoops.join(' | ')}`);
+    }
+    if (Array.isArray(summaryData.durableUserContext) && summaryData.durableUserContext.length) {
+        lines.push(`Durable user context: ${summaryData.durableUserContext.join(' | ')}`);
+    }
+
+    return lines.join('\n');
+}
+
+function isUserMemoryEnabled() {
+    return localStorage.getItem(STORAGE_KEYS.USER_MEMORY_ENABLED) === 'true';
+}
+
+function mergeUniqueStrings(...lists) {
+    const seen = new Set();
+    const merged = [];
+
+    lists.flat().forEach((item) => {
+        const value = String(item || '').trim();
+        const key = value.toLowerCase();
+        if (!value || seen.has(key)) return;
+        seen.add(key);
+        merged.push(value);
+    });
+
+    return merged;
+}
+
+function buildCombinedProfileStore(chatStore, userStore, includeUserMemory = false) {
+    const safeChat = sanitizeChatScopedProfile(chatStore, buildChatScopedProfile());
+    const safeUser = sanitizeChatScopedProfile(userStore, buildChatScopedProfile());
+    if (!includeUserMemory) return safeChat;
+
+    return {
+        communicationStyle: safeChat.communicationStyle !== 'Not yet established.'
+            ? safeChat.communicationStyle
+            : safeUser.communicationStyle,
+        moodPatterns: mergeUniqueStrings(safeChat.moodPatterns, safeUser.moodPatterns).slice(0, 8),
+        potentialLapses: mergeUniqueStrings(safeChat.potentialLapses, safeUser.potentialLapses).slice(0, 8),
+        behavioralFacts: mergeUniqueStrings(safeChat.behavioralFacts, safeUser.behavioralFacts).slice(0, 10),
+        responsePreferences: sanitizeResponsePreferences(
+            {
+                ...safeUser.responsePreferences,
+                ...safeChat.responsePreferences
+            },
+            DEFAULT_RESPONSE_PREFERENCES
+        )
+    };
+}
+
+function sanitizeTurnSupportDecision(candidate, fallback = null) {
+    const base = fallback && typeof fallback === 'object'
+        ? fallback
+        : {
+              primaryMode: 'clarify',
+              secondaryMode: 'none',
+              followUpIntent: 'new_topic',
+              topicShift: false,
+              distressLevel: 'low',
+              reassuranceNeed: 'medium',
+              structureNeed: 'low',
+              directnessTolerance: 'balanced',
+              responseGoals: []
+          };
+    const safe = candidate && typeof candidate === 'object' ? candidate : {};
+    const modeValues = new Set(['clarify', 'soothe', 'coach', 'reflect', 'research', 'none']);
+    const followValues = new Set(['new_topic', 'deepen', 'clarify', 'challenge', 'correct', 'continue']);
+    const levelValues = new Set(['low', 'medium', 'high']);
+    const directValues = new Set(['soft', 'balanced', 'direct']);
+
+    return {
+        primaryMode: modeValues.has(safe.primaryMode) ? safe.primaryMode : base.primaryMode,
+        secondaryMode: modeValues.has(safe.secondaryMode) ? safe.secondaryMode : base.secondaryMode,
+        followUpIntent: followValues.has(safe.followUpIntent) ? safe.followUpIntent : base.followUpIntent,
+        topicShift: typeof safe.topicShift === 'boolean' ? safe.topicShift : base.topicShift,
+        distressLevel: levelValues.has(safe.distressLevel) ? safe.distressLevel : base.distressLevel,
+        reassuranceNeed: levelValues.has(safe.reassuranceNeed) ? safe.reassuranceNeed : base.reassuranceNeed,
+        structureNeed: levelValues.has(safe.structureNeed) ? safe.structureNeed : base.structureNeed,
+        directnessTolerance: directValues.has(safe.directnessTolerance) ? safe.directnessTolerance : base.directnessTolerance,
+        responseGoals: Array.isArray(safe.responseGoals)
+            ? safe.responseGoals.map((goal) => String(goal || '').trim()).filter(Boolean).slice(0, 4)
+            : base.responseGoals
+    };
+}
+
+function deriveHeuristicTurnSupport(userMessage, route, history = []) {
+    const text = String(userMessage || '').toLowerCase().trim();
+    const previousAi = [...(history || [])]
+        .reverse()
+        .find((message) => message.role === 'ai' && String(message.content || '').trim());
+    const followUpSignal = text.split(/\s+/).filter(Boolean).length <= 20 ||
+        /^(what about|and what|but what|so what|why|how|can you|what if|then what)\b/i.test(text);
+
+    let primaryMode = route.includes('Search') ? 'research' : 'clarify';
+    let secondaryMode = 'none';
+    let followUpIntent = 'new_topic';
+    let topicShift = false;
+    let distressLevel = 'low';
+    let reassuranceNeed = 'medium';
+    let structureNeed = 'low';
+    let directnessTolerance = 'balanced';
+
+    if (/\b(anxious|panic|scared|overwhelmed|spiral|hopeless|stressed)\b/.test(text)) {
+        distressLevel = 'high';
+        reassuranceNeed = 'high';
+        primaryMode = 'soothe';
+        secondaryMode = route.includes('Search') ? 'research' : 'clarify';
+        directnessTolerance = 'soft';
+    } else if (/\b(feel|feeling|emotion|lonely|sad|hurt)\b/.test(text)) {
+        primaryMode = 'reflect';
+        secondaryMode = 'clarify';
+        reassuranceNeed = 'high';
+        distressLevel = 'medium';
+        directnessTolerance = 'soft';
+    } else if (/\b(plan|steps|what should i do|how do i|help me do)\b/.test(text)) {
+        primaryMode = 'coach';
+        secondaryMode = 'clarify';
+        structureNeed = 'high';
+    }
+
+    if (route.includes('Search')) primaryMode = primaryMode === 'soothe' ? primaryMode : 'research';
+    if (route.includes('Knowledge') && primaryMode === 'clarify') secondaryMode = 'none';
+
+    if (/\b(exactly|more|deeper|elaborate|expand|go on)\b/.test(text)) followUpIntent = 'deepen';
+    if (/\b(i mean|to be clear|clarify|what i meant)\b/.test(text)) followUpIntent = 'clarify';
+    if (/\b(no|not quite|that's wrong|incorrect|i meant)\b/.test(text)) followUpIntent = 'correct';
+    if (/\b(are you sure|really|but isn't|that seems wrong|why would)\b/.test(text)) followUpIntent = 'challenge';
+    if (followUpSignal && followUpIntent === 'new_topic' && previousAi) followUpIntent = 'continue';
+
+    if (/\b(new topic|something else|different question|unrelated)\b/.test(text)) topicShift = true;
+    if (!topicShift && /^\b(also|and|what about|how about|why|how)\b/i.test(text) && previousAi) {
+        topicShift = false;
+    }
+
+    const responseGoals = [];
+    if (primaryMode === 'research') responseGoals.push('Answer with evidence-backed clarity');
+    if (primaryMode === 'clarify') responseGoals.push('Explain directly in plain language');
+    if (primaryMode === 'soothe') responseGoals.push('Regulate distress before expanding');
+    if (primaryMode === 'reflect') responseGoals.push('Show understanding before guidance');
+    if (primaryMode === 'coach') responseGoals.push('Turn the answer into usable next steps');
+    if (followUpIntent !== 'new_topic') responseGoals.push('Honor the ongoing thread without repetition');
+    if (structureNeed === 'high') responseGoals.push('Make the structure easy to follow');
+
+    return sanitizeTurnSupportDecision({
+        primaryMode,
+        secondaryMode,
+        followUpIntent,
+        topicShift,
+        distressLevel,
+        reassuranceNeed,
+        structureNeed,
+        directnessTolerance,
+        responseGoals
+    });
+}
+
+function buildTurnSupportContext(turnSupport) {
+    const safe = sanitizeTurnSupportDecision(turnSupport);
+    return [
+        '[Turn Support Guidance]',
+        `Primary mode: ${safe.primaryMode}`,
+        `Secondary mode: ${safe.secondaryMode}`,
+        `Follow-up intent: ${safe.followUpIntent}`,
+        `Topic shift: ${safe.topicShift ? 'yes' : 'no'}`,
+        `Distress level: ${safe.distressLevel}`,
+        `Reassurance need: ${safe.reassuranceNeed}`,
+        `Structure need: ${safe.structureNeed}`,
+        `Directness tolerance: ${safe.directnessTolerance}`,
+        `Goals: ${safe.responseGoals.join(' | ') || 'Answer clearly and naturally.'}`,
+        'Rules:',
+        '- Use this to shape how you answer, not to narrate your process.',
+        '- Stay aligned with the current question before broadening out.',
+        '- Avoid repeating prior explanations unless the user is clearly asking for that.'
+    ].join('\n');
+}
+
 function isAmbiguousFollowUpMessage(message) {
     const text = String(message || '').trim();
     if (!text) return false;
@@ -907,18 +1382,33 @@ function isAmbiguousFollowUpMessage(message) {
     return tokenCount <= 18 && ambiguousPronouns.test(text);
 }
 
-function buildContextualUserMessage(userMessage, history) {
+function buildContextualUserMessage(userMessage, history, turnSupport = null) {
     const cleanMessage = String(userMessage || '').trim();
     if (!cleanMessage) return '';
-    if (!isAmbiguousFollowUpMessage(cleanMessage)) return cleanMessage;
+    const shouldUseFollowUpContext =
+        !turnSupport?.topicShift &&
+        (
+            isAmbiguousFollowUpMessage(cleanMessage) ||
+            ['deepen', 'clarify', 'challenge', 'correct', 'continue'].includes(turnSupport?.followUpIntent)
+        );
+    if (!shouldUseFollowUpContext) return cleanMessage;
 
-    const priorUserMessages = (history || [])
+    const scopedHistory = [...(history || [])];
+    const latestMessage = scopedHistory[scopedHistory.length - 1];
+    if (
+        latestMessage?.role === 'user' &&
+        sanitizeContentForModelContext(latestMessage.content) === sanitizeContentForModelContext(cleanMessage)
+    ) {
+        scopedHistory.pop();
+    }
+
+    const priorUserMessages = scopedHistory
         .filter((message) => message.role === 'user' && String(message.content || '').trim())
         .map((message) => sanitizeContentForModelContext(message.content))
         .filter(Boolean);
     const latestPriorUser = priorUserMessages.length ? priorUserMessages[priorUserMessages.length - 1] : '';
 
-    const priorAiMessages = (history || [])
+    const priorAiMessages = scopedHistory
         .filter((message) => message.role === 'ai' && String(message.content || '').trim())
         .map((message) => sanitizeContentForModelContext(message.content))
         .filter(Boolean);
@@ -934,12 +1424,100 @@ function buildContextualUserMessage(userMessage, history) {
     return [
         cleanMessage,
         '[Follow-up context]',
+        turnSupport ? `Follow-up intent: ${turnSupport.followUpIntent}` : '',
         ...references
-    ].join('\n');
+    ].filter(Boolean).join('\n');
 }
 
-function chooseAdaptiveSkill(route, preferences) {
+async function inferTurnSupportDecision(userMessage, route, profileStr, history) {
+    const recentChat = getRecentChatSnippet(history, 10);
+    const heuristic = deriveHeuristicTurnSupport(userMessage, route, history);
+    const cacheKey = buildSessionCacheKey([
+        'turnSupport',
+        userMessage,
+        route,
+        recentChat
+    ]);
+    const cached = getSessionCacheEntry(analysisCaches.turnSupport, cacheKey);
+    if (cached) return cached;
+
+    const prompt = PROMPTS.TURN_SUPPORT_ANALYZER
+        .replace('%PROFILE%', profileStr || '{}')
+        .replace('%HISTORY%', recentChat || 'No recent chat context.')
+        .replace('%MESSAGE%', userMessage || '');
+
+    const modeled = sanitizeTurnSupportDecision(
+        safeParseJson(await _callLLM(prompt, 'json', 'analysis'), null),
+        heuristic
+    );
+
+    const resolved = sanitizeTurnSupportDecision({
+        ...heuristic,
+        ...modeled
+    }, heuristic);
+
+    return setSessionCacheEntry(analysisCaches.turnSupport, cacheKey, resolved);
+}
+
+function buildQualityReviewArtifacts(reply) {
+    const artifacts = splitReplyArtifacts(reply);
+    return {
+        body: artifacts.body,
+        sourceLines: artifacts.sourceLines,
+        toolTags: artifacts.toolTags
+    };
+}
+
+async function applyReplyQualityGate(reply, userMessage, route, turnSupport, preferences = DEFAULT_RESPONSE_PREFERENCES) {
+    const artifacts = buildQualityReviewArtifacts(reply);
+    if (!artifacts.body) return reply;
+
+    const prompt = PROMPTS.RESPONSE_QUALITY_REVIEWER
+        .replace('%MESSAGE%', userMessage || '')
+        .replace('%ROUTE%', route || 'GeneralFriendAgent')
+        .replace('%TURN_SUPPORT%', JSON.stringify(sanitizeTurnSupportDecision(turnSupport), null, 2))
+        .replace('%DRAFT%', artifacts.body);
+    const reviewed = safeParseJson(await _callLLM(prompt, 'json', 'analysis'), null);
+    const shouldRewrite = Boolean(reviewed?.shouldRewrite);
+    const issues = Array.isArray(reviewed?.issues) ? reviewed.issues.map((value) => String(value || '').trim()).filter(Boolean) : [];
+    const rewriteGoal = typeof reviewed?.rewriteGoal === 'string' ? reviewed.rewriteGoal.trim() : '';
+
+    const obviouslyNeedsRewrite =
+        isLikelyIncompleteReply(artifacts.body) ||
+        (String(userMessage || '').trim().length > 12 && artifacts.body.split(/\s+/).filter(Boolean).length < 28) ||
+        issues.some((issue) => ['incomplete', 'off_target', 'repetitive', 'too_cold', 'did_not_answer'].includes(issue));
+
+    if (!shouldRewrite && !obviouslyNeedsRewrite) return reply;
+
+    const rewrittenRaw = await _callLLM(
+        PROMPTS.RESPONSE_QUALITY_REWRITE
+            .replace('%MESSAGE%', userMessage || '')
+            .replace('%ROUTE%', route || 'GeneralFriendAgent')
+            .replace('%TURN_SUPPORT%', JSON.stringify(sanitizeTurnSupportDecision(turnSupport), null, 2))
+            .replace('%GOAL%', rewriteGoal || 'Answer the user directly, naturally, and without repetition.')
+            .replace('%DRAFT%', artifacts.body),
+        null,
+        'cleanup'
+    );
+
+    const rewrittenBody = normalizeReplyWhitespace(stripInlineSourceLine(stripToolTags(rewrittenRaw || '')));
+    if (!rewrittenBody || looksLikeLeakedReasoning(rewrittenBody)) return reply;
+
+    return reassembleReplyArtifacts({
+        body: rewrittenBody,
+        sourceLines: artifacts.sourceLines,
+        toolTags: artifacts.toolTags
+    });
+}
+
+function chooseAdaptiveSkill(route, preferences, turnSupport = null) {
     const reassuranceHeavy = preferences.reassuranceLevel === 'high';
+    const primaryMode = turnSupport?.primaryMode || 'clarify';
+
+    if (primaryMode === 'research') return reassuranceHeavy ? 'Trusted Research Guide' : 'Fact-Check Analyst';
+    if (primaryMode === 'soothe') return 'Stabilizing Clinician';
+    if (primaryMode === 'reflect') return 'Reflective Companion';
+    if (primaryMode === 'coach') return 'Action Coach';
 
     if (route.includes('Search')) return reassuranceHeavy ? 'Trusted Research Guide' : 'Fact-Check Analyst';
     if (route.includes('Knowledge')) return 'Explainer Coach';
@@ -949,11 +1527,12 @@ function chooseAdaptiveSkill(route, preferences) {
     return reassuranceHeavy ? 'Supportive Advisor' : 'Professional Generalist';
 }
 
-function buildAdaptiveResponseContext(preferences, route) {
-    const skill = chooseAdaptiveSkill(route || 'GeneralFriendAgent', preferences);
+function buildAdaptiveResponseContext(preferences, route, turnSupport = null) {
+    const skill = chooseAdaptiveSkill(route || 'GeneralFriendAgent', preferences, turnSupport);
     const directives = [
         `[Adaptive Reply Strategy]`,
         `Primary skill: ${skill}`,
+        `Global voice anchor: professional, warm, calm bedside manner that feels natural to everyday users.`,
         `Likely user tone: ${preferences.likelyTone}`,
         `Detail level: ${preferences.detailLevel}`,
         `Reassurance level: ${preferences.reassuranceLevel}`,
@@ -961,6 +1540,12 @@ function buildAdaptiveResponseContext(preferences, route) {
         `Structure: ${preferences.structureLevel}`,
         `Directness: ${preferences.directnessLevel}`,
         `Follow-up style: ${preferences.followUpLevel}`,
+        ...(turnSupport ? [
+            `Turn mode: ${turnSupport.primaryMode}${turnSupport.secondaryMode !== 'none' ? ` + ${turnSupport.secondaryMode}` : ''}`,
+            `Turn follow-up intent: ${turnSupport.followUpIntent}`,
+            `Turn distress level: ${turnSupport.distressLevel}`,
+            `Turn structure need: ${turnSupport.structureNeed}`
+        ] : []),
         `Rules:`,
         `- Adapt wording and depth to match this strategy.`,
         `- Keep the response natural and human, never robotic.`,
@@ -974,7 +1559,7 @@ async function inferAdaptiveResponsePreferences(userMessage, route, runtimeConte
     const currentPreferences = chatManager.getActiveResponsePreferences();
     const heuristicPreferences = deriveHeuristicResponsePreferences(userMessage, currentPreferences);
     const recentChat = getRecentChatSnippet(chatManager.getActiveChatHistory());
-    const profileStr = JSON.stringify(chatManager.state.localContentStore, null, 2);
+    const profileStr = JSON.stringify(chatManager.getCombinedContentStore(), null, 2);
 
     const analyzerPrompt = PROMPTS.REPLY_STRATEGY_ANALYZER
         .replace('%CURRENT_PREFS%', JSON.stringify(currentPreferences, null, 2))
@@ -1112,7 +1697,61 @@ function deriveHeuristicToolOpportunity(userMessage, route) {
     return sanitizeToolOpportunity(null);
 }
 
+function isInformationalExplanationRequest(userMessage) {
+    const text = String(userMessage || '').toLowerCase().trim();
+    if (!text) return false;
+
+    return [
+        /\bwhat is\b/,
+        /\bwhat are\b/,
+        /\bexplain\b/,
+        /\bdefine\b/,
+        /\btell me about\b/,
+        /\bhelp me understand\b/,
+        /\bresearch\b/,
+        /\bsource-backed\b/,
+        /\bwith sources\b/,
+        /\bsummarize\b/,
+        /\bsummary\b/,
+        /\bcompare\b/,
+        /\bdifference\b/,
+        /\bcauses?\b/,
+        /\bsymptoms?\b/
+    ].some((pattern) => pattern.test(text));
+}
+
+function hasActivePersonalNeedSignal(userMessage) {
+    const text = String(userMessage || '').toLowerCase();
+    if (!text.trim()) return false;
+
+    return [
+        /\bi feel\b/,
+        /\bi'm\b/,
+        /\bi am\b/,
+        /\bmy\b/,
+        /\bme\b/,
+        /\bright now\b/,
+        /\bcurrently\b/,
+        /\bpanic\b/,
+        /\boverwhelmed\b/,
+        /\bneed help\b/,
+        /\bhelp me cope\b/,
+        /\bhelp me through\b/,
+        /\bwhat should i do\b/,
+        /\bmake me a\b/,
+        /\bgive me a plan\b/
+    ].some((pattern) => pattern.test(text));
+}
+
+function shouldSuppressProactiveToolOpportunity(userMessage, route) {
+    if (route.includes('Search') || route.includes('Knowledge')) return true;
+    if (isInformationalExplanationRequest(userMessage) && !hasActivePersonalNeedSignal(userMessage)) return true;
+    return false;
+}
+
 async function inferProactiveToolOpportunity(userMessage, route, adaptivePreferences) {
+    if (shouldSuppressProactiveToolOpportunity(userMessage, route)) return null;
+
     const heuristic = deriveHeuristicToolOpportunity(userMessage, route);
     const recentChat = getRecentChatSnippet(chatManager.getActiveChatHistory());
 
@@ -1130,6 +1769,7 @@ async function inferProactiveToolOpportunity(userMessage, route, adaptivePrefere
         : heuristic;
 
     if (!candidate.shouldUseTool) return null;
+    if (shouldSuppressProactiveToolOpportunity(userMessage, route)) return null;
     if (!LOW_RISK_PROACTIVE_TYPES.has(candidate.type)) return null;
     if (route.includes('Crisis') && !CRISIS_ROUTE_PROACTIVE_TYPES.has(candidate.type)) return null;
     if (candidate.confidence < 0.65) return null;
@@ -1152,6 +1792,32 @@ function normalizeReplyWhitespace(text) {
         .replace(/[ \t]+\n/g, '\n')
         .replace(/\n{3,}/g, '\n\n')
         .trim();
+}
+
+function splitReplyArtifacts(text) {
+    const raw = String(text || '');
+    const toolTags = extractToolTags(raw);
+    const sourceLines = raw
+        .split('\n')
+        .map((line) => line.trim())
+        .filter((line) => /^\s*Sources:\s*/i.test(line));
+    const body = normalizeReplyWhitespace(stripInlineSourceLine(stripToolTags(raw)));
+
+    return {
+        body,
+        toolTags,
+        sourceLines
+    };
+}
+
+function reassembleReplyArtifacts({ body = '', toolTags = [], sourceLines = [] } = {}) {
+    return normalizeReplyWhitespace(
+        [
+            normalizeReplyWhitespace(body),
+            ...sourceLines.filter(Boolean),
+            ...toolTags.filter(Boolean)
+        ].filter(Boolean).join('\n\n')
+    );
 }
 
 function stripThinkingTags(text) {
@@ -1348,6 +2014,54 @@ async function cleanupLeakedReply(rawReply, userMessage) {
     );
 }
 
+function replyNeedsBedsideMannerPolish(replyBody, userMessage, route, preferences = DEFAULT_RESPONSE_PREFERENCES) {
+    const text = normalizeReplyWhitespace(replyBody);
+    if (!text) return false;
+
+    const userText = String(userMessage || '').trim();
+    const userLooksNonTrivial = userText.split(/\s+/).filter(Boolean).length >= 5 || /\?/.test(userText);
+    const wordCount = text.split(/\s+/).filter(Boolean).length;
+
+    const dryPatterns = [
+        /\bsource-backed takeaways\b/i,
+        /\bresearch indicates\b/i,
+        /\bstudies show\b/i,
+        /\bthe sources point to\b/i,
+        /\bhere are the\b/i,
+        /\bwell-documented\b/i,
+        /\bthis highlights the importance\b/i
+    ];
+
+    if (dryPatterns.some((pattern) => pattern.test(text))) return true;
+    if ((route.includes('Search') || route.includes('Knowledge')) && userLooksNonTrivial && wordCount < 130) return true;
+    if (preferences.reassuranceLevel !== 'low' && userLooksNonTrivial && wordCount < 55) return true;
+    return false;
+}
+
+async function applyBedsideMannerPolish(reply, userMessage, route, preferences = DEFAULT_RESPONSE_PREFERENCES) {
+    const artifacts = splitReplyArtifacts(reply);
+    if (!artifacts.body) return reply;
+    if (!replyNeedsBedsideMannerPolish(artifacts.body, userMessage, route || '', preferences)) return reply;
+
+    const polishedRaw = await _callLLM(
+        PROMPTS.BEDSIDE_MANNER_POLISH
+            .replace('%MESSAGE%', userMessage || '')
+            .replace('%ROUTE%', route || 'GeneralFriendAgent')
+            .replace('%PREFERENCES%', JSON.stringify(sanitizeResponsePreferences(preferences, DEFAULT_RESPONSE_PREFERENCES), null, 2))
+            .replace('%DRAFT%', artifacts.body),
+        null,
+        'cleanup'
+    );
+    const polishedBody = normalizeReplyWhitespace(stripInlineSourceLine(stripToolTags(polishedRaw || '')));
+    if (!polishedBody || looksLikeLeakedReasoning(polishedBody)) return reply;
+
+    return reassembleReplyArtifacts({
+        body: polishedBody,
+        toolTags: artifacts.toolTags,
+        sourceLines: artifacts.sourceLines
+    });
+}
+
 async function finalizeAssistantReply(rawReply, userMessage = '') {
     if (!rawReply) return null;
 
@@ -1467,7 +2181,24 @@ async function _callLLM(prompt, format = null, callType = 'default') {
             ...(format ? { format } : {})
         });
 
-        return data.response?.trim() || null;
+        let reply = data.response?.trim() || null;
+        const doneReason = String(data.done_reason || data.doneReason || '').toLowerCase();
+        const allowContinuation = !format && callType === 'default';
+
+        if (allowContinuation && reply && (doneReason === 'length' || isLikelyIncompleteReply(reply))) {
+            const continuationData = await postJson(API_ENDPOINTS.ollamaGenerate, {
+                model,
+                prompt: buildContinuationPrompt(prompt, reply),
+                stream: false,
+                ...(Object.keys(options).length ? { options } : {})
+            });
+            const continuation = continuationData.response?.trim() || '';
+            if (continuation) {
+                reply = normalizeReplyWhitespace(`${reply} ${continuation}`);
+            }
+        }
+
+        return reply;
     } catch (error) {
         console.error('LLM Call Failed:', error);
         return null;
@@ -1502,22 +2233,17 @@ class ChatManager {
         return {
             chats: {},
             activeChatId: null,
-            localContentStore: {
-                communicationStyle: 'Not yet established.',
-                moodPatterns: [],
-                potentialLapses: [],
-                behavioralFacts: [],
-                responsePreferences: { ...DEFAULT_RESPONSE_PREFERENCES }
-            }
+            localContentStore: buildChatScopedProfile()
         };
     }
 
     ensureStateShape(state) {
         const safeState = state && typeof state === 'object' ? state : this.getInitialState();
         safeState.chats = safeState.chats && typeof safeState.chats === 'object' ? safeState.chats : {};
-        safeState.localContentStore = safeState.localContentStore && typeof safeState.localContentStore === 'object'
-            ? safeState.localContentStore
-            : this.getInitialState().localContentStore;
+        const globalFallbackStore = sanitizeChatScopedProfile(
+            safeState.localContentStore,
+            this.getInitialState().localContentStore
+        );
         Object.values(safeState.chats).forEach((chat) => {
             if (!chat || typeof chat !== 'object') return;
             chat.history = Array.isArray(chat.history) ? chat.history : [];
@@ -1527,22 +2253,11 @@ class ChatManager {
             chat.lastUserMessageTimestamp = Number(chat.lastUserMessageTimestamp) || Date.now();
             chat.lastProactiveToolAt = Number(chat.lastProactiveToolAt) || 0;
             chat.lastProactiveToolType = typeof chat.lastProactiveToolType === 'string' ? chat.lastProactiveToolType : '';
+            chat.localContentStore = sanitizeChatScopedProfile(chat.localContentStore, globalFallbackStore);
+            chat.contextSummary = chat.contextSummary && typeof chat.contextSummary === 'object' ? chat.contextSummary : null;
+            chat.contextSummaryAnchor = typeof chat.contextSummaryAnchor === 'string' ? chat.contextSummaryAnchor : '';
         });
-
-        safeState.localContentStore.communicationStyle = safeState.localContentStore.communicationStyle || 'Not yet established.';
-        safeState.localContentStore.moodPatterns = Array.isArray(safeState.localContentStore.moodPatterns)
-            ? safeState.localContentStore.moodPatterns
-            : [];
-        safeState.localContentStore.potentialLapses = Array.isArray(safeState.localContentStore.potentialLapses)
-            ? safeState.localContentStore.potentialLapses
-            : [];
-        safeState.localContentStore.behavioralFacts = Array.isArray(safeState.localContentStore.behavioralFacts)
-            ? safeState.localContentStore.behavioralFacts
-            : [];
-        safeState.localContentStore.responsePreferences = sanitizeResponsePreferences(
-            safeState.localContentStore.responsePreferences,
-            DEFAULT_RESPONSE_PREFERENCES
-        );
+        safeState.localContentStore = globalFallbackStore;
 
         return safeState;
     }
@@ -1571,7 +2286,10 @@ class ChatManager {
             isHeightenedAwareness: false,
             lastUserMessageTimestamp: Date.now(),
             lastProactiveToolAt: 0,
-            lastProactiveToolType: ''
+            lastProactiveToolType: '',
+            localContentStore: buildChatScopedProfile(),
+            contextSummary: null,
+            contextSummaryAnchor: ''
         };
         this.state.activeChatId = id;
         this.saveState();
@@ -1606,7 +2324,11 @@ class ChatManager {
         if (role === 'user') {
             const timestamp = Date.now();
             chat.lastUserMessageTimestamp = timestamp;
-            this.vectorizeData(content, { role: 'user', timestamp });
+            this.vectorizeData(content, {
+                role: 'user',
+                timestamp,
+                chatId: chat.id
+            });
 
             if (chat.history.length % 4 === 0) {
                 this.runBehaviorAnalyzer();
@@ -1630,7 +2352,10 @@ class ChatManager {
         if (!query) return '';
 
         try {
-            const data = await postJson(API_ENDPOINTS.searchMemory, { query });
+            const data = await postJson(API_ENDPOINTS.searchMemory, {
+                query,
+                chatId: this.getActiveChatId()
+            });
             return data.results?.documents?.[0]?.join('\n\n') || '';
         } catch (_error) {
             return '';
@@ -1647,7 +2372,7 @@ class ChatManager {
             .join('\n');
 
         const prompt = PROMPTS.BEHAVIOR_ANALYZER
-            .replace('%STORE%', JSON.stringify(this.state.localContentStore))
+            .replace('%STORE%', JSON.stringify(this.getActiveContentStore()))
             .replace('%HISTORY%', historyStr);
 
         const response = await _callLLM(prompt, 'json');
@@ -1655,28 +2380,113 @@ class ChatManager {
 
         if (parsed && typeof parsed === 'object') {
             const previousPreferences = this.getActiveResponsePreferences();
-            this.state.localContentStore = parsed;
-            this.state.localContentStore.responsePreferences = sanitizeResponsePreferences(
+            const nextStore = sanitizeChatScopedProfile(parsed, this.getActiveContentStore());
+            nextStore.responsePreferences = sanitizeResponsePreferences(
                 parsed.responsePreferences,
                 previousPreferences
             );
+            chat.localContentStore = nextStore;
+
+            if (isUserMemoryEnabled()) {
+                const durableResponse = await _callLLM(
+                    PROMPTS.USER_MEMORY_ANALYZER
+                        .replace('%STORE%', JSON.stringify(this.getUserMemoryStore(), null, 2))
+                        .replace('%CHAT_PROFILE%', JSON.stringify(nextStore, null, 2))
+                        .replace('%HISTORY%', historyStr),
+                    'json',
+                    'analysis'
+                );
+                const durableParsed = safeParseJson(durableResponse, null);
+                if (durableParsed && typeof durableParsed === 'object') {
+                    this.state.localContentStore = sanitizeChatScopedProfile(
+                        durableParsed,
+                        this.getUserMemoryStore()
+                    );
+                }
+            }
             this.saveState();
         }
     }
 
+    getActiveChat() {
+        return this.state.chats[this.state.activeChatId] || null;
+    }
+
+    getActiveContentStore() {
+        const chat = this.getActiveChat();
+        return sanitizeChatScopedProfile(chat?.localContentStore, this.state.localContentStore);
+    }
+
+    getUserMemoryStore() {
+        return sanitizeChatScopedProfile(this.state.localContentStore, buildChatScopedProfile());
+    }
+
+    getCombinedContentStore() {
+        return buildCombinedProfileStore(
+            this.getActiveContentStore(),
+            this.getUserMemoryStore(),
+            isUserMemoryEnabled()
+        );
+    }
+
+    clearUserMemoryStore() {
+        this.state.localContentStore = buildChatScopedProfile();
+        this.saveState();
+    }
+
     getActiveResponsePreferences() {
         return sanitizeResponsePreferences(
-            this.state.localContentStore.responsePreferences,
+            this.getActiveContentStore().responsePreferences,
             DEFAULT_RESPONSE_PREFERENCES
         );
     }
 
     updateResponsePreferences(nextPreferences) {
-        this.state.localContentStore.responsePreferences = sanitizeResponsePreferences(
+        const chat = this.getActiveChat();
+        if (!chat) return;
+        chat.localContentStore = {
+            ...this.getActiveContentStore(),
+            responsePreferences: sanitizeResponsePreferences(
             nextPreferences,
             this.getActiveResponsePreferences()
-        );
+            )
+        };
         this.saveState();
+    }
+
+    async getConversationSummary() {
+        const chat = this.getActiveChat();
+        if (!chat) return '';
+        if (chat.history.length <= 10) return '';
+
+        const olderHistory = chat.history.slice(0, -8);
+        const anchor = olderHistory.map((message) => `${message.role}:${message.timestamp || 0}`).join('|');
+        if (chat.contextSummary && chat.contextSummaryAnchor === anchor) {
+            return buildConversationSummaryContext(chat.contextSummary);
+        }
+
+        const historyStr = olderHistory
+            .map((message) => `${message.role}: ${sanitizeContentForModelContext(message.content).slice(0, 500)}`)
+            .join('\n');
+        if (!historyStr.trim()) return '';
+
+        const response = await _callLLM(
+            PROMPTS.CONVERSATION_SUMMARIZER.replace('%HISTORY%', historyStr),
+            'json',
+            'analysis'
+        );
+        const parsed = safeParseJson(response, null);
+        if (!parsed || typeof parsed !== 'object') return '';
+
+        chat.contextSummary = {
+            summary: typeof parsed.summary === 'string' ? parsed.summary.trim().slice(0, 1200) : '',
+            activeTopics: Array.isArray(parsed.activeTopics) ? parsed.activeTopics.filter(Boolean).slice(0, 6) : [],
+            openLoops: Array.isArray(parsed.openLoops) ? parsed.openLoops.filter(Boolean).slice(0, 6) : [],
+            durableUserContext: Array.isArray(parsed.durableUserContext) ? parsed.durableUserContext.filter(Boolean).slice(0, 6) : []
+        };
+        chat.contextSummaryAnchor = anchor;
+        this.saveState();
+        return buildConversationSummaryContext(chat.contextSummary);
     }
 
     canUseProactiveTool(type, minCooldownMs = 3 * 60 * 1000) {
@@ -1790,7 +2600,12 @@ class ChatManager {
 ${PROMPTS.CRISIS_SUPPORT_REPLY.replace('%MESSAGE%', message)}`;
         const rawReply = await _callLLM(prompt);
         const recommendations = inferHighRiskSafetyRecommendations(message);
-        const finalized = (await finalizeAssistantReply(rawReply, message)) ||
+        const finalized = (await applyBedsideMannerPolish(
+            await finalizeAssistantReply(rawReply, message),
+            message,
+            'CrisisAgent',
+            chatManager.getActiveResponsePreferences()
+        )) ||
             "I hear you. Let's do a short breathing reset now. If you want, I can also look up nearby crisis resources.";
         return attachHighRiskSafetyRecommendations(finalized, recommendations);
     }
@@ -1809,7 +2624,13 @@ ${PROMPTS.CRISIS_SUPPORT_REPLY.replace('%MESSAGE%', message)}`;
             .replace('%REASON%', pattern.reason);
 
         const rawReply = await _callLLM(prompt);
-        return finalizeAssistantReply(rawReply, '');
+        const cleaned = await finalizeAssistantReply(rawReply, '');
+        return applyBedsideMannerPolish(
+            cleaned,
+            '',
+            'GeneralFriendAgent',
+            chatManager.getActiveResponsePreferences()
+        );
     }
 }
 
@@ -1843,6 +2664,15 @@ async function buildSearchPlan(userMessage, profileStr, runtimeContext) {
     const crisisLookupPolicy = didUserRequestLocalCrisisResources(userMessage)
         ? 'Allowed: the user explicitly asked for crisis resources. If relevant, use a local crisis resource query.'
         : 'Not allowed: do not switch to crisis-hotline/resource lookup unless the user explicitly asks.';
+    const cacheKey = buildSessionCacheKey([
+        'searchPlan',
+        userMessage,
+        crisisLookupPolicy,
+        profileStr.slice(0, 1000)
+    ]);
+    const cached = getSessionCacheEntry(analysisCaches.searchPlan, cacheKey);
+    if (cached) return cached;
+
     const response = await _callLLM(
         PROMPTS.SEARCH_PLAN
             .replace('%PROFILE%', profileStr)
@@ -1852,7 +2682,11 @@ async function buildSearchPlan(userMessage, profileStr, runtimeContext) {
         'json'
     );
 
-    return sanitizeSearchPlan(safeParseJson(response, null), userMessage);
+    return setSessionCacheEntry(
+        analysisCaches.searchPlan,
+        cacheKey,
+        sanitizeSearchPlan(safeParseJson(response, null), userMessage)
+    );
 }
 
 function buildEvidenceCatalog(report) {
@@ -1902,7 +2736,7 @@ function sanitizeEvidenceExtractorResult(parsed, evidenceCount) {
     const supportedClaims = Array.isArray(normalized.supportedClaims) ? normalized.supportedClaims : [];
     const cleanClaims = supportedClaims
         .map((claim) => {
-            const text = typeof claim?.text === 'string' ? claim.text.trim() : '';
+            const text = stripInlineSourceLine(typeof claim?.text === 'string' ? claim.text.trim() : '');
             const evidenceIds = [...new Set((claim?.evidenceIds || [])
                 .map((value) => Number(value))
                 .filter((value) => Number.isInteger(value) && value >= 1 && value <= evidenceCount))];
@@ -1913,8 +2747,8 @@ function sanitizeEvidenceExtractorResult(parsed, evidenceCount) {
         .filter(Boolean)
         .slice(0, 5);
 
-    const directAnswer = typeof normalized.directAnswer === 'string' ? normalized.directAnswer.trim() : '';
-    const uncertaintyNote = typeof normalized.uncertaintyNote === 'string' ? normalized.uncertaintyNote.trim() : '';
+    const directAnswer = stripInlineSourceLine(typeof normalized.directAnswer === 'string' ? normalized.directAnswer.trim() : '');
+    const uncertaintyNote = stripInlineSourceLine(typeof normalized.uncertaintyNote === 'string' ? normalized.uncertaintyNote.trim() : '');
     const includeUncertaintyNote = Boolean(normalized.includeUncertaintyNote);
 
     return {
@@ -1923,6 +2757,15 @@ function sanitizeEvidenceExtractorResult(parsed, evidenceCount) {
         uncertaintyNote,
         includeUncertaintyNote
     };
+}
+
+function stripInlineSourceLine(text) {
+    return normalizeReplyWhitespace(
+        String(text || '')
+            .split('\n')
+            .filter((line) => !/^\s*Sources:\s*/i.test(line))
+            .join('\n')
+    );
 }
 
 function normalizeComparisonText(value) {
@@ -1958,51 +2801,34 @@ function dedupeClaimTexts(claims = []) {
     });
 }
 
-function humanizeLeadForSearch(userMessage, preferences) {
+function didUserExplicitlyRequestListStyle(userMessage) {
     const text = String(userMessage || '').toLowerCase();
-    if (/\b(adhd|anxiety|panic|mental health|therapy|trauma|depression)\b/.test(text)) {
-        return preferences.reassuranceLevel === 'high'
-            ? "There is a real connection here, and the sources paint a clearer picture than that one-line answer suggests."
-            : "There is a real connection here, and the sources point to a more nuanced answer than a simple yes-or-no.";
-    }
+    if (!text.trim()) return false;
 
-    if (/\b(compare|difference|versus|vs\.?)\b/.test(text)) {
-        return "Once you line the sources up side by side, the main differences become a lot clearer.";
-    }
-
-    if (/\b(cause|why|how)\b/.test(text)) {
-        return "The short version is that the sources point to a few main drivers rather than one single cause.";
-    }
-
-    return preferences.reassuranceLevel === 'high'
-        ? "I pulled the strongest available sources and translated them into the plain-English version."
-        : "I pulled the strongest available sources and translated them into the plain-English version.";
+    return /\b(list|bullet|bullets|takeaways|key points|summary|summarize|recap)\b/.test(text);
 }
 
 function shouldRenderSearchAsList(userMessage, preferences) {
-    const text = String(userMessage || '').toLowerCase();
-    if (/\b(list|bullet|bullets|takeaways|key points|summary|summarize)\b/.test(text)) return true;
-    return preferences.structureLevel === 'stepwise';
+    return didUserExplicitlyRequestListStyle(userMessage);
 }
 
-function buildWarmSearchParagraphs(directAnswer, claims, userMessage) {
+function buildNaturalEvidenceParagraphs(primaryText, claims) {
     const paragraphs = [];
-    const cleanedClaims = dedupeClaimTexts(claims).slice(0, 4);
+    const normalizedPrimary = normalizeReplyWhitespace(primaryText);
+    const cleanedClaims = dedupeClaimTexts(claims)
+        .map((claim) => normalizeReplyWhitespace(claim))
+        .filter(Boolean)
+        .slice(0, 4);
 
-    if (directAnswer) paragraphs.push(directAnswer);
-    if (!cleanedClaims.length) return paragraphs;
+    if (normalizedPrimary) paragraphs.push(normalizedPrimary);
 
-    const text = String(userMessage || '').toLowerCase();
-    if (/\b(adhd|anxiety|panic|mental health|therapy|trauma|depression)\b/.test(text)) {
-        const [first, second, third, fourth] = cleanedClaims;
-        if (first) paragraphs.push(`In plain English, ${first.charAt(0).toLowerCase()}${first.slice(1)}`);
-        if (second) paragraphs.push(`What that tends to look like in real life is this: ${second.charAt(0).toLowerCase()}${second.slice(1)}`);
-        if (third || fourth) paragraphs.push([third, fourth].filter(Boolean).join(' '));
-        return paragraphs;
-    }
+    cleanedClaims.forEach((claim) => {
+        if (!normalizedPrimary || normalizeClaimMeaning(claim) !== normalizeClaimMeaning(normalizedPrimary)) {
+            paragraphs.push(claim);
+        }
+    });
 
-    cleanedClaims.forEach((claim) => paragraphs.push(claim));
-    return paragraphs;
+    return paragraphs.slice(0, 4);
 }
 
 function claimLooksSnippetLike(text, evidenceCatalog, evidenceIds = []) {
@@ -2046,7 +2872,7 @@ function sanitizeClaimRewriteResult(parsed, evidenceCount, evidenceCatalog) {
     const takeaways = Array.isArray(normalized.takeaways) ? normalized.takeaways : [];
     const cleanTakeaways = takeaways
         .map((item) => {
-            const text = typeof item?.text === 'string' ? item.text.trim() : '';
+            const text = stripInlineSourceLine(typeof item?.text === 'string' ? item.text.trim() : '');
             const evidenceIds = [...new Set((item?.evidenceIds || [])
                 .map((value) => Number(value))
                 .filter((value) => Number.isInteger(value) && value >= 1 && value <= evidenceCount))];
@@ -2058,9 +2884,9 @@ function sanitizeClaimRewriteResult(parsed, evidenceCount, evidenceCatalog) {
         .slice(0, 5);
 
     return {
-        lead: typeof normalized.lead === 'string' ? normalized.lead.trim() : '',
+        lead: stripInlineSourceLine(typeof normalized.lead === 'string' ? normalized.lead.trim() : ''),
         takeaways: cleanTakeaways,
-        closing: typeof normalized.closing === 'string' ? normalized.closing.trim() : '',
+        closing: stripInlineSourceLine(typeof normalized.closing === 'string' ? normalized.closing.trim() : ''),
         includeClosing: Boolean(normalized.includeClosing)
     };
 }
@@ -2103,6 +2929,23 @@ function buildCatalogFallbackTakeaways(evidenceCatalog, maxItems = 3) {
 
 async function rewriteEvidenceClaimsForNarrative(userMessage, extracted, evidenceCatalog) {
     if (!extracted?.supportedClaims?.length) return null;
+    const cacheKey = buildSessionCacheKey([
+        'evidenceRewrite',
+        userMessage,
+        extracted.directAnswer,
+        JSON.stringify(extracted.supportedClaims),
+        JSON.stringify(
+            evidenceCatalog.map((entry) => ({
+                id: entry.id,
+                title: entry.title,
+                url: entry.url,
+                source: entry.source,
+                date: entry.date
+            }))
+        )
+    ]);
+    const cached = getSessionCacheEntry(analysisCaches.evidenceRewrite, cacheKey);
+    if (cached) return cached;
 
     const rewritePrompt = PROMPTS.SEARCH_CLAIM_REWRITER
         .replace('%MESSAGE%', userMessage || '')
@@ -2117,7 +2960,7 @@ async function rewriteEvidenceClaimsForNarrative(userMessage, extracted, evidenc
     );
 
     if (!rewritten.takeaways.length) return null;
-    return rewritten;
+    return setSessionCacheEntry(analysisCaches.evidenceRewrite, cacheKey, rewritten);
 }
 
 function buildEvidenceBackedReply(
@@ -2136,18 +2979,14 @@ function buildEvidenceBackedReply(
         .map((claim) => claim.text)
         .filter((text) => text && text !== directAnswer);
     const userText = String(userMessage || '').toLowerCase();
-    const asksForTakeaways = /\btakeaways?|key points?|summary|summarize\b/.test(userText);
-    const asksForEvidenceDepth = requiresSourceBackedRouting(userMessage);
-    const shouldPreferTakeawayFormat = asksForTakeaways || asksForEvidenceDepth || preferences.detailLevel === 'detailed';
     const renderAsList = shouldRenderSearchAsList(userMessage, preferences);
     const extraClaims = preferences.detailLevel === 'brief'
         ? orderedClaims.slice(0, 1)
         : orderedClaims.slice(0, 4);
     const responseParts = [];
-    responseParts.push(humanizeLeadForSearch(userMessage, preferences));
 
     const mergedTakeaways = [directAnswer, ...extraClaims].filter(Boolean);
-    const fallbackTakeaways = shouldPreferTakeawayFormat && mergedTakeaways.length < 2
+    const fallbackTakeaways = mergedTakeaways.length < 2
         ? buildCatalogFallbackTakeaways(evidenceCatalog, preferences.detailLevel === 'brief' ? 1 : 2)
         : [];
     const finalTakeaways = dedupeClaimTexts(
@@ -2159,11 +2998,16 @@ function buildEvidenceBackedReply(
     )
         .slice(0, preferences.detailLevel === 'brief' ? 2 : 5);
 
-    if (shouldPreferTakeawayFormat && finalTakeaways.length && renderAsList) {
-        responseParts.push("Here are the source-backed takeaways:");
+    if (renderAsList && finalTakeaways.length) {
+        if (directAnswer && directAnswer !== finalTakeaways[0]) {
+            responseParts.push(directAnswer);
+        }
         responseParts.push(finalTakeaways.map((claim, index) => `${index + 1}. ${claim}`).join('\n'));
     } else {
-        const paragraphs = buildWarmSearchParagraphs(directAnswer, finalTakeaways.filter((claim) => claim !== directAnswer), userMessage);
+        const paragraphs = buildNaturalEvidenceParagraphs(
+            directAnswer,
+            finalTakeaways.filter((claim) => claim !== directAnswer)
+        );
         responseParts.push(...paragraphs);
     }
     if (extracted.includeUncertaintyNote && extracted.uncertaintyNote) {
@@ -2210,21 +3054,51 @@ function buildDeterministicSearchFallback(evidenceCatalog, preferences = DEFAULT
     );
 }
 
-async function finalizeReplyWithProactiveTool(rawReply, userMessage, recommendation = null) {
+async function finalizeReplyWithProactiveTool(
+    rawReply,
+    userMessage,
+    recommendation = null,
+    route = 'GeneralFriendAgent',
+    preferences = DEFAULT_RESPONSE_PREFERENCES,
+    turnSupport = null
+) {
     const cleanReply = await finalizeAssistantReply(rawReply, userMessage);
     if (!cleanReply) return null;
-    if (!recommendation) return cleanReply;
+    const polishedReply = await applyBedsideMannerPolish(cleanReply, userMessage, route, preferences);
+    const qualityCheckedReply = await applyReplyQualityGate(
+        polishedReply,
+        userMessage,
+        route,
+        turnSupport,
+        preferences
+    );
+    if (!recommendation) return qualityCheckedReply;
 
-    const augmented = attachProactiveToolTag(cleanReply, recommendation);
-    if (!containsToolTag(cleanReply) && containsToolTag(augmented)) {
+    const augmented = attachProactiveToolTag(qualityCheckedReply, recommendation);
+    if (!containsToolTag(qualityCheckedReply) && containsToolTag(augmented)) {
         chatManager.markProactiveToolUsed(recommendation.type);
     }
 
     return augmented;
 }
 
-async function finalizeAgenticReply(rawReply, userMessage, proactiveRecommendation = null, highRiskRecommendations = []) {
-    const cleanReply = await finalizeReplyWithProactiveTool(rawReply, userMessage, proactiveRecommendation);
+async function finalizeAgenticReply(
+    rawReply,
+    userMessage,
+    proactiveRecommendation = null,
+    highRiskRecommendations = [],
+    route = 'GeneralFriendAgent',
+    preferences = DEFAULT_RESPONSE_PREFERENCES,
+    turnSupport = null
+) {
+    const cleanReply = await finalizeReplyWithProactiveTool(
+        rawReply,
+        userMessage,
+        proactiveRecommendation,
+        route,
+        preferences,
+        turnSupport
+    );
     if (!cleanReply) return null;
     return attachHighRiskSafetyRecommendations(cleanReply, highRiskRecommendations);
 }
@@ -2235,28 +3109,54 @@ async function getOllamaResponse(userMessage, toolFollowUp = null, documentText 
         localStorage.getItem(STORAGE_KEYS.PROMPT) || PROMPTS.DEFAULT_SYSTEM,
         activeModel
     );
-    const profileStr = JSON.stringify(chatManager.state.localContentStore, null, 2);
+    const profileStr = JSON.stringify(chatManager.getCombinedContentStore(), null, 2);
     const runtimeContext = getRuntimeContextString();
     const chatHistory = chatManager.getActiveChatHistory();
+    const conversationSummary = await chatManager.getConversationSummary();
     const modelHistoryStr = buildModelSafeHistoryString(chatHistory);
-    const contextualUserMessage = buildContextualUserMessage(userMessage, chatHistory);
 
     if (toolFollowUp) {
+        const turnSupport = deriveHeuristicTurnSupport('', 'GeneralFriendAgent', chatHistory);
         const toolPreferences = chatManager.getActiveResponsePreferences();
-        const adaptiveContext = buildAdaptiveResponseContext(toolPreferences, 'GeneralFriendAgent');
+        const adaptiveContext = buildAdaptiveResponseContext(toolPreferences, 'GeneralFriendAgent', turnSupport);
         const prompt = `${responseSystemPrompt}
 [Adaptive Strategy]:
 ${adaptiveContext}
+[Turn Support]:
+${buildTurnSupportContext(turnSupport)}
 [System Context]:
 ${runtimeContext}
+[Conversation Summary]:
+${conversationSummary || 'No older summary needed.'}
 [Profile]:
 ${profileStr}
 [Note]: User interacted with tool: ${JSON.stringify(toolFollowUp)}`;
 
         const rawReply = await _callLLM(prompt);
-        return (await finalizeReplyWithProactiveTool(rawReply, '', null)) ||
+        return (await finalizeReplyWithProactiveTool(
+            rawReply,
+            '',
+            null,
+            'GeneralFriendAgent',
+            toolPreferences,
+            turnSupport
+        )) ||
             "Nice progress. If you want, we can build on this and handle the next step together.";
     }
+
+    const baseRoute = resolveAgentRoute(
+        userMessage,
+        await _callLLM(
+            PROMPTS.ROUTER
+                .replace('%PROFILE%', profileStr)
+                .replace('%RUNTIME%', runtimeContext)
+                .replace('%USER_MESSAGE%', userMessage || ''),
+            null,
+            'analysis'
+        )
+    );
+    const turnSupport = await inferTurnSupportDecision(userMessage, baseRoute, profileStr, chatHistory);
+    const contextualUserMessage = buildContextualUserMessage(userMessage, chatHistory, turnSupport);
 
     const routePrompt = PROMPTS.ROUTER
         .replace('%PROFILE%', profileStr)
@@ -2270,10 +3170,11 @@ ${profileStr}
     );
     const sourceNeedDecision = await inferSourceNeedDecision(contextualUserMessage, route, adaptivePreferences);
     const effectiveRoute = shouldUseSearchEvidence(route, sourceNeedDecision) ? 'SearchAgent' : route;
-    const adaptiveContext = buildAdaptiveResponseContext(adaptivePreferences, effectiveRoute);
+    const adaptiveContext = buildAdaptiveResponseContext(adaptivePreferences, effectiveRoute, turnSupport);
     const highRiskRecommendations = inferHighRiskSafetyRecommendations(contextualUserMessage);
     const proactiveRecommendation = await inferProactiveToolOpportunity(contextualUserMessage, effectiveRoute, adaptivePreferences);
     const proactiveToolGuidance = buildProactiveToolGuidance(proactiveRecommendation);
+    const turnSupportContext = buildTurnSupportContext(turnSupport);
 
     if (effectiveRoute.includes('Knowledge')) {
         const key = await _callLLM(PROMPTS.KNOWLEDGE_MAPPER.replace('%MESSAGE%', contextualUserMessage), null, 'analysis');
@@ -2286,6 +3187,8 @@ ${profileStr}
                             `${responseSystemPrompt}
 [Adaptive Strategy]:
 ${adaptiveContext}
+[Turn Support]:
+${turnSupportContext}
 ${proactiveToolGuidance ? `\n${proactiveToolGuidance}` : ''}
 
 ${PROMPTS.KNOWLEDGE_SYNTHESIS}`
@@ -2295,7 +3198,10 @@ ${PROMPTS.KNOWLEDGE_SYNTHESIS}`
                         ),
                         userMessage,
                         proactiveRecommendation,
-                        highRiskRecommendations
+                        highRiskRecommendations,
+                        effectiveRoute,
+                        adaptivePreferences,
+                        turnSupport
                     )) || attachHighRiskSafetyRecommendations(
                         "I couldn't produce a solid answer on that attempt. Ask again and I'll give you a clearer, more complete explanation.",
                         highRiskRecommendations
@@ -2332,7 +3238,15 @@ ${PROMPTS.KNOWLEDGE_SYNTHESIS}`
                 buildDeterministicSearchFallback(evidenceCatalog, adaptivePreferences);
 
             return (
-                (await finalizeAgenticReply(renderedReply, userMessage, proactiveRecommendation, highRiskRecommendations)) ||
+                (await finalizeAgenticReply(
+                    renderedReply,
+                    userMessage,
+                    proactiveRecommendation,
+                    highRiskRecommendations,
+                    effectiveRoute,
+                    adaptivePreferences,
+                    turnSupport
+                )) ||
                 attachHighRiskSafetyRecommendations(
                     "I couldn't verify that as cleanly as I want just yet. Give me a moment and I can take another, more thorough pass.",
                     highRiskRecommendations
@@ -2353,10 +3267,15 @@ ${PROMPTS.KNOWLEDGE_SYNTHESIS}`
     let finalPrompt = `${responseSystemPrompt}
 [Adaptive Strategy]:
 ${adaptiveContext}
+[Turn Support]:
+${turnSupportContext}
 ${proactiveToolGuidance ? `\n${proactiveToolGuidance}` : ''}
 
 [System Context]:
 ${runtimeContext}
+
+[Conversation Summary]:
+${conversationSummary || 'No older summary needed.'}
 
 [Behavioral Profile]: ${profileStr}
 
@@ -2374,7 +3293,10 @@ User: ${contextualUserMessage || userMessage}`;
         await _callLLM(finalPrompt),
         userMessage,
         proactiveRecommendation,
-        highRiskRecommendations
+        highRiskRecommendations,
+        effectiveRoute,
+        adaptivePreferences,
+        turnSupport
     )) || attachHighRiskSafetyRecommendations(
         "I couldn't generate a high-quality response on that try. Ask again and I'll give you a clearer, more complete answer.",
         highRiskRecommendations

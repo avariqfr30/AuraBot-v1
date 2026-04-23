@@ -21,6 +21,42 @@ function escapeHTML(value) {
         .replace(/'/g, '&#039;');
 }
 
+function showSourcesModal(links = []) {
+    const validLinks = (links || []).filter((link) => link?.href && link?.label);
+    if (!validLinks.length) return;
+
+    closeContentModal();
+    contentModalElement = document.createElement('div');
+    contentModalElement.id = 'contentModal';
+    contentModalElement.className = 'fixed inset-0 z-[60] overflow-y-auto bg-black bg-opacity-75 flex items-center justify-center p-4';
+
+    const modalContent = document.createElement('div');
+    modalContent.className = 'relative liquid-glass liquid-panel rounded-3xl p-6 w-full max-w-2xl shadow-2xl max-h-[80vh] overflow-y-auto';
+    modalContent.setAttribute('data-liquid', '');
+
+    const sourceItemsHtml = validLinks.map((link, index) => `
+        <li class="source-modal-item">
+            <a href="${escapeHTML(link.href)}" target="_blank" rel="noopener noreferrer" class="source-modal-link">
+                <span class="source-modal-index">${index + 1}.</span>
+                <span class="source-modal-label">${escapeHTML(link.label)}</span>
+            </a>
+        </li>
+    `).join('');
+
+    modalContent.innerHTML = `
+        <h3 class="text-2xl font-bold mb-4 text-gray-100">Sources</h3>
+        <div class="source-modal-copy">Open any source below if you want to inspect the underlying material.</div>
+        <ol class="source-modal-list">${sourceItemsHtml}</ol>
+        <div class="mt-6 flex justify-end">
+            <button id="closeContentButton" class="px-4 py-2 rounded-xl transition duration-200">Close</button>
+        </div>`;
+
+    contentModalElement.appendChild(modalContent);
+    document.body.appendChild(contentModalElement);
+    if (window.setupLiquidGlassInteractions) window.setupLiquidGlassInteractions();
+    document.getElementById('closeContentButton').addEventListener('click', closeContentModal);
+}
+
 function renderEmptyState() {
     chatMessages.classList.add('is-empty');
     chatMessages.innerHTML = `
@@ -291,20 +327,47 @@ function addMessage(sender, content, options = {}) {
 
     const extractSourceLinksFromMessage = (messageText) => {
         const raw = String(messageText || '');
-        const sourceLineMatch = raw.match(/(?:^|\n)\s*Sources:\s*(.+)$/i);
-        if (!sourceLineMatch) return { body: raw, links: [] };
-
-        const line = sourceLineMatch[1] || '';
         const markdownLinkRegex = /\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/gi;
-        const links = [...line.matchAll(markdownLinkRegex)].map((match) => ({
-            label: (match[1] || '').trim(),
-            href: (match[2] || '').trim()
-        })).filter((link) => link.label && link.href);
+        const lines = raw.split('\n');
+        const links = [];
+        const bodyLines = [];
 
-        if (links.length === 0) return { body: raw, links: [] };
+        lines.forEach((line) => {
+            if (!/^\s*Sources:\s*/i.test(line)) {
+                bodyLines.push(line);
+                return;
+            }
 
-        const body = raw.slice(0, sourceLineMatch.index).trim();
-        return { body, links };
+            const sourceText = line.replace(/^\s*Sources:\s*/i, '');
+            const lineLinks = [...sourceText.matchAll(markdownLinkRegex)].map((match) => ({
+                label: (match[1] || '').trim(),
+                href: (match[2] || '').trim()
+            })).filter((link) => link.label && link.href);
+
+            if (lineLinks.length > 0) {
+                links.push(...lineLinks);
+                return;
+            }
+
+            const urlRegex = /(https?:\/\/[^\s,]+)/gi;
+            const plainUrls = [...sourceText.matchAll(urlRegex)].map((match) => ({
+                label: (match[1] || '').trim(),
+                href: (match[1] || '').trim()
+            })).filter((link) => link.label && link.href);
+
+            if (plainUrls.length > 0) {
+                links.push(...plainUrls);
+            }
+        });
+
+        const dedupedLinks = links.filter((link, index, items) =>
+            items.findIndex((candidate) => candidate.href === link.href) === index
+        );
+
+        return {
+            body: bodyLines.join('\n').trim(),
+            links: dedupedLinks
+        };
     };
 
     if (isUser) {
@@ -329,17 +392,13 @@ function addMessage(sender, content, options = {}) {
             messageDiv.className = 'flex flex-col items-start mb-4 gap-2';
             const sourceRow = document.createElement('div');
             sourceRow.className = 'source-link-row';
-
-            links.forEach((link, index) => {
-                const sourceAnchor = document.createElement('a');
-                sourceAnchor.className = 'source-link-chip';
-                sourceAnchor.href = link.href;
-                sourceAnchor.target = '_blank';
-                sourceAnchor.rel = 'noopener noreferrer';
-                sourceAnchor.setAttribute('aria-label', `Open source ${index + 1}: ${link.label}`);
-                sourceAnchor.textContent = `${index + 1}. ${link.label}`;
-                sourceRow.appendChild(sourceAnchor);
-            });
+            const sourceButton = document.createElement('button');
+            sourceButton.type = 'button';
+            sourceButton.className = 'source-link-button';
+            sourceButton.textContent = 'Sources';
+            sourceButton.setAttribute('aria-label', `Open ${links.length} sources`);
+            sourceButton.addEventListener('click', () => showSourcesModal(links));
+            sourceRow.appendChild(sourceButton);
 
             messageDiv.appendChild(chatBubble);
             messageDiv.appendChild(sourceRow);
@@ -425,7 +484,9 @@ function closeSettingsModal() { settingsModal.classList.add('hidden'); }
 function openInsightsModal() {
     const modal = document.getElementById('insightsModal');
     const container = document.getElementById('insightsContent');
-    const store = window.chatManager ? window.chatManager.state.localContentStore : {};
+    const store = window.chatManager ? window.chatManager.getActiveContentStore() : {};
+    const userStore = window.chatManager ? window.chatManager.getUserMemoryStore() : {};
+    const userMemoryEnabled = localStorage.getItem(STORAGE_KEYS.USER_MEMORY_ENABLED) === 'true';
     const prefs = store.responsePreferences || {};
 
     const renderList = (arr, emptyMsg) => {
@@ -459,6 +520,11 @@ function openInsightsModal() {
                 <p class="text-sm">Technical depth: ${prefs.technicalLevel || 'plain'}</p>
                 <p class="text-sm">Structure: ${prefs.structureLevel || 'paragraphs'}</p>
                 <p class="text-sm">Directness: ${prefs.directnessLevel || 'balanced'}</p>
+            </div>
+            <div class="bg-gray-800 p-4 rounded-lg border border-cyan-900">
+                <h4 class="text-cyan-300 font-semibold mb-2">Persistent Companion Memory</h4>
+                <p class="text-sm mb-2">${userMemoryEnabled ? 'Enabled across chats on this device.' : 'Disabled.'}</p>
+                ${renderList(userStore.behavioralFacts, "No durable cross-chat memory stored yet.")}
             </div>
         </div>
     `;

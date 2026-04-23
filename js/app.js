@@ -16,6 +16,8 @@ document.addEventListener('DOMContentLoaded', () => {
     const locationAccessCheckbox = document.getElementById('locationAccessCheckbox');
     const locationStatusText = document.getElementById('locationStatusText');
     const refreshLocationButton = document.getElementById('refreshLocationButton');
+    const userMemoryCheckbox = document.getElementById('userMemoryCheckbox');
+    const userMemoryStatusText = document.getElementById('userMemoryStatusText');
     const cancelSettingsButton = document.getElementById('cancelSettingsButton');
     const resetSettingsButton = document.getElementById('resetSettingsButton');
     const saveSettingsButton = document.getElementById('saveSettingsButton');
@@ -105,6 +107,10 @@ document.addEventListener('DOMContentLoaded', () => {
         return localStorage.getItem(STORAGE_KEYS.LOCATION_ENABLED) === 'true';
     }
 
+    function isUserMemorySharingEnabled() {
+        return localStorage.getItem(STORAGE_KEYS.USER_MEMORY_ENABLED) === 'true';
+    }
+
     function getStoredLocationContext() {
         return safeParseJson(localStorage.getItem(STORAGE_KEYS.LOCATION_CONTEXT), null);
     }
@@ -123,6 +129,19 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function setLocationStatus(message) {
         locationStatusText.textContent = message;
+    }
+
+    function refreshUserMemoryStatus() {
+        if (!userMemoryCheckbox?.checked) {
+            userMemoryStatusText.textContent = 'Cross-chat memory is off.';
+            return;
+        }
+
+        const store = window.chatManager ? window.chatManager.getUserMemoryStore() : null;
+        const rememberedCount = (store?.behavioralFacts?.length || 0) + (store?.moodPatterns?.length || 0);
+        userMemoryStatusText.textContent = rememberedCount > 0
+            ? `Cross-chat memory is on. Aura is carrying ${rememberedCount} durable memory items across chats on this device.`
+            : 'Cross-chat memory is on. Aura will start building durable memory across chats on this device.';
     }
 
     async function refreshLocationStatus() {
@@ -388,8 +407,10 @@ document.addEventListener('DOMContentLoaded', () => {
     async function openSettingsPanel() {
         systemPromptTextarea.value = localStorage.getItem(STORAGE_KEYS.PROMPT) || PROMPTS.DEFAULT_SYSTEM;
         locationAccessCheckbox.checked = isLocationSharingEnabled();
+        userMemoryCheckbox.checked = isUserMemorySharingEnabled();
         await populateModelOptions();
         await refreshLocationStatus();
+        refreshUserMemoryStatus();
         openSettingsModal();
     }
 
@@ -398,11 +419,15 @@ document.addEventListener('DOMContentLoaded', () => {
         localStorage.removeItem(STORAGE_KEYS.MODEL);
         localStorage.removeItem(STORAGE_KEYS.LOCATION_ENABLED);
         localStorage.removeItem(STORAGE_KEYS.LOCATION_CONTEXT);
+        localStorage.removeItem(STORAGE_KEYS.USER_MEMORY_ENABLED);
+        if (window.chatManager) window.chatManager.clearUserMemoryStore();
         systemPromptTextarea.value = PROMPTS.DEFAULT_SYSTEM;
         modelSelectDropdown.innerHTML = `<option value="${window.AURA_CONFIG.defaultModel}">${window.AURA_CONFIG.defaultModel}</option>`;
         modelSelectDropdown.value = window.AURA_CONFIG.defaultModel;
         locationAccessCheckbox.checked = false;
+        userMemoryCheckbox.checked = false;
         setLocationStatus('Location access is off.');
+        refreshUserMemoryStatus();
     }
 
     async function saveSettings() {
@@ -425,6 +450,9 @@ document.addEventListener('DOMContentLoaded', () => {
         } else {
             await requestCurrentLocation({ silent: false });
         }
+
+        localStorage.setItem(STORAGE_KEYS.USER_MEMORY_ENABLED, String(userMemoryCheckbox.checked));
+        refreshUserMemoryStatus();
 
         closeSettingsModal();
     }
@@ -540,6 +568,7 @@ document.addEventListener('DOMContentLoaded', () => {
     saveSettingsButton.addEventListener('click', saveSettings);
     locationAccessCheckbox.addEventListener('change', refreshLocationStatus);
     refreshLocationButton.addEventListener('click', () => requestCurrentLocation({ silent: false }));
+    if (userMemoryCheckbox) userMemoryCheckbox.addEventListener('change', refreshUserMemoryStatus);
 
     toolsModalContent.addEventListener('click', async (event) => {
         const target = event.target.closest('[data-action]');
@@ -625,7 +654,9 @@ document.addEventListener('DOMContentLoaded', () => {
     normalizeStoredModel();
     applyTheme(getStoredTheme());
     locationAccessCheckbox.checked = isLocationSharingEnabled();
+    if (userMemoryCheckbox) userMemoryCheckbox.checked = isUserMemorySharingEnabled();
     refreshLocationStatus();
+    refreshUserMemoryStatus();
     setupLiquidGlassInteractions();
     chatMessagesSurface.addEventListener('scroll', syncChromeCompression, { passive: true });
     syncChromeCompression();

@@ -1,6 +1,7 @@
 require('dotenv').config();
 
 const path = require('path');
+const crypto = require('crypto');
 const express = require('express');
 const cors = require('cors');
 const axios = require('axios');
@@ -11,7 +12,7 @@ const app = express();
 const HOST = process.env.HOST || '0.0.0.0';
 const PORT = Number(process.env.PORT || 3000);
 const APP_ROOT = __dirname;
-const REQUEST_TIMEOUT_MS = Number(process.env.REQUEST_TIMEOUT_MS || 45000);
+const REQUEST_TIMEOUT_MS = Number(process.env.REQUEST_TIMEOUT_MS || 90000);
 const CHROMA_URL = process.env.CHROMA_URL || 'http://127.0.0.1:8000';
 const OLLAMA_URL = process.env.OLLAMA_URL || 'http://127.0.0.1:11434';
 const EMBEDDING_MODEL = process.env.EMBEDDING_MODEL || 'bge-m3:latest';
@@ -23,6 +24,13 @@ const chroma = new ChromaClient({
     ssl: chromaTarget.protocol === 'https:'
 });
 let memoryCollectionPromise = null;
+const TAGS_CACHE_TTL_MS = 60 * 1000;
+const OSINT_FRESH_CACHE_TTL_MS = 5 * 60 * 1000;
+const OSINT_STABLE_CACHE_TTL_MS = 30 * 60 * 1000;
+const responseCaches = {
+    ollamaTags: new Map(),
+    osint: new Map()
+};
 
 app.use(cors());
 app.use(express.json({ limit: '2mb' }));
@@ -61,6 +69,49 @@ function cleanSearchQuery(value) {
 
 function normalizeSourceLink(item = {}) {
     return item.link || item.website || item.descriptionLink || null;
+}
+
+function readCache(cache, key, ttlMs) {
+    const entry = cache.get(key);
+    if (!entry) return null;
+    if ((Date.now() - entry.createdAt) > ttlMs) {
+        cache.delete(key);
+        return null;
+    }
+    return entry.value;
+}
+
+function writeCache(cache, key, value) {
+    cache.set(key, {
+        createdAt: Date.now(),
+        value
+    });
+    return value;
+}
+
+function hashCacheKey(parts) {
+    return crypto
+        .createHash('sha1')
+        .update(JSON.stringify(parts))
+        .digest('hex');
+}
+
+function isFreshnessSensitiveQuery(value) {
+    const text = String(value || '').toLowerCase();
+    if (!text.trim()) return false;
+
+    return [
+        /\btoday\b/,
+        /\bcurrent\b/,
+        /\blatest\b/,
+        /\brecent\b/,
+        /\bnews\b/,
+        /\bnow\b/,
+        /\bthis week\b/,
+        /\bthis month\b/,
+        /\bupdate\b/,
+        /\b202[0-9]\b/
+    ].some((pattern) => pattern.test(text));
 }
 
 function dedupeByLink(items) {
@@ -180,6 +231,17 @@ async function buildOsintReport({ primaryQuery, supportingQueries = [], includeN
         throw new Error('A primary query is required for OSINT research');
     }
 
+    const freshnessSensitive = [cleanedPrimaryQuery, ...cleanedSupportingQueries]
+        .some((query) => isFreshnessSensitiveQuery(query));
+    const cacheKey = hashCacheKey({
+        primaryQuery: cleanedPrimaryQuery,
+        supportingQueries: cleanedSupportingQueries,
+        includeNews: Boolean(includeNews)
+    });
+    const cacheTtl = freshnessSensitive ? OSINT_FRESH_CACHE_TTL_MS : OSINT_STABLE_CACHE_TTL_MS;
+    const cached = readCache(responseCaches.osint, cacheKey, cacheTtl);
+    if (cached) return cached;
+
     const webQueries = [cleanedPrimaryQuery, ...cleanedSupportingQueries];
     const webResponses = await Promise.all(webQueries.map((query) => requestSerper('/search', query)));
     const newsResponse = includeNews ? await requestSerper('/news', cleanedPrimaryQuery) : null;
@@ -200,7 +262,7 @@ async function buildOsintReport({ primaryQuery, supportingQueries = [], includeN
         date
     }));
 
-    return {
+    return writeCache(responseCaches.osint, cacheKey, {
         executedAt: new Date().toISOString(),
         primaryQuery: cleanedPrimaryQuery,
         supportingQueries: cleanedSupportingQueries,
@@ -208,7 +270,7 @@ async function buildOsintReport({ primaryQuery, supportingQueries = [], includeN
         news,
         sources,
         evidence
-    };
+    });
 }
 
 function respondWithUpstreamError(res, label, error) {
@@ -255,10 +317,15 @@ app.get('/api/health', async (_req, res) => {
 
 app.get('/api/ollama/tags', async (_req, res) => {
     try {
+        const cached = readCache(responseCaches.ollamaTags, 'default', TAGS_CACHE_TTL_MS);
+        if (cached) {
+            return res.json(cached);
+        }
+
         const response = await axios.get(`${OLLAMA_URL}/api/tags`, {
             timeout: REQUEST_TIMEOUT_MS
         });
-        res.json(response.data);
+        return res.json(writeCache(responseCaches.ollamaTags, 'default', response.data));
     } catch (error) {
         respondWithUpstreamError(res, 'Ollama tags request', error);
     }
@@ -306,17 +373,23 @@ app.post('/api/store_memory', async (req, res) => {
 
 app.post('/api/search_memory', async (req, res) => {
     try {
-        const { query, nResults = 3 } = req.body;
+        const { query, nResults = 3, chatId } = req.body;
 
         if (!query) {
             return res.status(400).json({ error: 'A search query is required' });
         }
 
         const collection = await getMemoryCollection();
-        const results = await collection.query({
+        const queryPayload = {
             queryTexts: [query],
             nResults
-        });
+        };
+
+        if (chatId) {
+            queryPayload.where = { chatId };
+        }
+
+        const results = await collection.query(queryPayload);
 
         res.json({ results });
     } catch (error) {

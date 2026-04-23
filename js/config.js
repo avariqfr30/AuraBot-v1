@@ -14,5 +14,23 @@ window.AURA_CONFIG = {
         'medgemma-1.5-4b-it:Q4_K_M',
         'google/medgemma-1.5-4b-it'
     ],
-    defaultTheme: 'dark'
+    defaultTheme: 'dark',
+    ollamaOptions: {
+        default: {
+            num_ctx: 8192,
+            num_predict: 896
+        },
+        analysis: {
+            num_ctx: 6144,
+            num_predict: 384
+        },
+        cleanup: {
+            num_ctx: 6144,
+            num_predict: 448
+        },
+        json: {
+            num_ctx: 6144,
+            num_predict: 512
+        }
+    }
 };

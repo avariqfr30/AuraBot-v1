@@ -124,6 +124,16 @@
                     <div id="locationStatusText" class="text-xs text-gray-400">Location access is off.</div>
                     <button id="refreshLocationButton" type="button" class="px-3 py-2 rounded-xl transition duration-200 text-sm">Refresh Location</button>
                 </div>
+                <div class="space-y-3">
+                    <div class="flex items-start justify-between gap-4">
+                        <div>
+                            <label for="userMemoryCheckbox" class="block text-sm font-medium text-gray-300">Persistent Companion Memory</label>
+                            <p class="text-xs text-gray-400 mt-1">Lets Aura carry durable preferences and recurring support context across chats on this device.</p>
+                        </div>
+                        <input id="userMemoryCheckbox" type="checkbox" class="mt-1 h-4 w-4 rounded border-gray-500 bg-gray-800 text-pink-600 focus:ring-pink-500">
+                    </div>
+                    <div id="userMemoryStatusText" class="text-xs text-gray-400">Cross-chat memory is off.</div>
+                </div>
             </div>
             <div class="mt-8 flex justify-end space-x-4">
                 <button id="cancelSettingsButton" class="px-4 py-2 rounded-xl transition duration-200">Cancel</button>
