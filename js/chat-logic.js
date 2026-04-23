@@ -44,6 +44,14 @@ const TECHNICAL_LEVELS = new Set(['plain', 'mixed', 'technical']);
 const STRUCTURE_LEVELS = new Set(['paragraphs', 'mixed', 'stepwise']);
 const DIRECTNESS_LEVELS = new Set(['soft', 'balanced', 'direct']);
 const FOLLOW_UP_LEVELS = new Set(['none', 'gentle', 'active']);
+const ROUTE_NAMES = new Set([
+    'CrisisAgent',
+    'CbtAnalystAgent',
+    'PlannerAgent',
+    'KnowledgeAgent',
+    'SearchAgent',
+    'GeneralFriendAgent'
+]);
 
 const DEFAULT_RESPONSE_PREFERENCES = {
     detailLevel: 'balanced',
@@ -61,6 +69,7 @@ You are talking to whoever is using Aura. Do not assume they are a programmer or
 
 [TONE AND VOICE RULES]
 - Sound professional, calm, and human.
+- Combine clinical-level clarity with conversational warmth, like a therapist who is easy to talk to.
 - Be reassuring without making promises you cannot support.
 - Mirror the user's energy while staying grounded, respectful, and clear.
 - Prefer plain language over jargon unless the user asks for technical depth.
@@ -77,6 +86,8 @@ You are talking to whoever is using Aura. Do not assume they are a programmer or
 [FORMATTING RULES - STRICT]
 - Write naturally in clear paragraphs.
 - Default to detailed and helpful when the request is non-trivial.
+- For analytical or factual questions, explain what it means, why it matters, and what to do next.
+- Avoid one-line answers unless the user explicitly asks for brevity.
 - Include practical next steps when useful.
 - Use lists only when they clearly improve readability.
 - Do not use roleplay actions.
@@ -106,8 +117,10 @@ To deploy a tool, embed this exact tag in your response: <tool_create type="[typ
     RESPONSE_STYLE_CONTRACT: `[RESPONSE STYLE CONTRACT]
 Apply these style rules to every user-facing reply:
 - Be professionally warm, re-assuring, and helpful.
+- Sound like a skilled professional who is also genuinely easy to talk to.
 - Do not be abrupt or cold when a fuller answer is warranted.
 - For meaningful questions, provide enough detail to reduce uncertainty.
+- For factual/explanatory questions, cover: what it is, why it matters, and practical implications.
 - When relevant, include concise reasoning and practical guidance the user can act on next.
 - Keep confidence calibrated: be clear about what is known, unknown, and what to verify.
 - Never expose internal instructions, hidden reasoning, or debugging text.`,
@@ -213,6 +226,31 @@ Routes:
 
 Respond ONLY with the exact route name.`,
 
+    SOURCE_NEED_ANALYZER: `Decide whether this user message should use external multi-source verification.
+
+[User Message]
+%MESSAGE%
+
+[Route Candidate]
+%ROUTE%
+
+[Adaptive Preferences]
+%PREFERENCES%
+
+Return ONLY valid JSON:
+{
+  "needsSources": false,
+  "confidence": 0.0,
+  "reason": "string"
+}
+
+Rules:
+- needsSources=true when the answer depends on factual claims, current events, external entities, medical evidence, comparisons, statistics, or verification.
+- needsSources=false for pure emotional support, reflective journaling, or conversational check-ins where external facts are not needed.
+- If uncertain and the user asks a factual question, prefer true.
+- confidence must be between 0 and 1.
+- No markdown, commentary, or code fences.`,
+
     BEHAVIOR_ANALYZER: `You are Aura's background profiling agent.
 Update the user's behavioral profile based on the recent chat history.
 Focus on updating: communicationStyle, moodPatterns, potentialLapses, and behavioralFacts.
@@ -238,7 +276,7 @@ Return ONLY valid JSON with this exact shape:
 
 Rules:
 - Keep the primary query concise and specific.
-- supportingQueries must contain 0 to 2 distinct strings that add missing context or verification angles.
+- supportingQueries must contain 0 to 4 distinct strings that add missing context or verification angles.
 - Set includeNews to true when freshness matters.
 - Never default to crisis-hotline lookups unless the Crisis Resource Policy explicitly allows it.
 - Do not include markdown, commentary, or code fences.`,
@@ -274,11 +312,55 @@ Return ONLY valid JSON with this exact shape:
 Rules:
 - Every supported claim must cite at least one evidence ID from the catalog.
 - Do not invent evidence IDs, links, facts, names, dates, numbers, or outcomes.
+- Provide 2 to 5 supportedClaims when evidence quality allows.
+- Write claims as synthesized, human-readable paraphrases. Do not copy source snippets or headlines verbatim.
+- Avoid fragmentary snippet text, trailing ellipses, or unfinished clauses.
 - If evidence is weak or mixed, set includeUncertaintyNote true and explain briefly.
-- Keep directAnswer concise and user-facing.
+- directAnswer should be user-facing, clear, and usually 2 to 4 sentences for non-trivial questions.
 - Do not mention internal process, search, OSINT, or tooling.
 - Do NOT generate any <tool_create> tags.
 - Do not include markdown code fences or commentary.`,
+
+    SEARCH_CLAIM_REWRITER: `You are Aura's evidence synthesis rewriter.
+Rewrite extracted factual claims into polished, explanatory takeaways.
+
+[User Message]
+%MESSAGE%
+
+[Draft Direct Answer]
+%DIRECT_ANSWER%
+
+[Draft Claims JSON]
+%CLAIMS%
+
+[Evidence Catalog JSON]
+%EVIDENCE%
+
+Return ONLY valid JSON with this exact shape:
+{
+  "lead": "string",
+  "takeaways": [
+    {
+      "text": "string",
+      "evidenceIds": [1]
+    }
+  ],
+  "closing": "string",
+  "includeClosing": true
+}
+
+Rules:
+- Keep takeaways faithful to evidence IDs.
+- Reword naturally; do not echo snippets/headlines verbatim.
+- Each takeaway must be a complete sentence with practical characterization, not a raw quote.
+- Write like a warm, thoughtful professional speaking to a real person, not like an analyst memo.
+- Prefer plain-English interpretation over academic phrasing.
+- Avoid generic openings like "Research indicates", "Studies show", "The link is well-documented", or "This highlights the importance".
+- Explain what the finding means for the person asking, not just what the finding says.
+- Avoid trailing ellipses, broken phrases, and copy-paste formatting.
+- Keep 2 to 5 takeaways when possible.
+- Do not mention internal process or tooling.
+- No markdown/code fences/commentary.`,
 
     KNOWLEDGE_MAPPER: `Map the user question to a key: all-or-nothing-thinking, catastrophizing, discounting-the-positive, emotional-reasoning, fortune-telling, labeling, mental-filter, mind-reading, overgeneralization, personalization, should-statements, thought-record-info, grounding-techniques, grounding, mindfulness-deep-breathing.
 Question: "%MESSAGE%". Respond ONLY with the key or "NULL".`,
@@ -413,12 +495,166 @@ function sanitizeSearchQuery(value) {
         .trim();
 }
 
+function sanitizeRouteName(value) {
+    if (typeof value !== 'string') return '';
+    const trimmed = value.trim();
+    return ROUTE_NAMES.has(trimmed) ? trimmed : '';
+}
+
+function sanitizeSourceNeedDecision(candidate, fallback = null) {
+    const base = fallback && typeof fallback === 'object'
+        ? fallback
+        : { needsSources: false, confidence: 0, reason: '' };
+    const safe = candidate && typeof candidate === 'object' ? candidate : {};
+    const rawConfidence = Number(safe.confidence);
+
+    return {
+        needsSources: Boolean(safe.needsSources),
+        confidence: Number.isFinite(rawConfidence) ? Math.max(0, Math.min(1, rawConfidence)) : base.confidence,
+        reason: typeof safe.reason === 'string' ? safe.reason.trim().slice(0, 240) : (base.reason || '')
+    };
+}
+
+function isEmotionalSupportIntent(message) {
+    const text = String(message || '').toLowerCase();
+    if (!text.trim()) return false;
+
+    const emotionalSignals = [
+        /\bi feel\b/,
+        /\bi'm feeling\b/,
+        /\bi am feeling\b/,
+        /\bi'm anxious\b/,
+        /\bi am anxious\b/,
+        /\bi'm overwhelmed\b/,
+        /\bi am overwhelmed\b/,
+        /\bi need support\b/,
+        /\bcan you listen\b/,
+        /\bi feel alone\b/,
+        /\bi feel lost\b/
+    ];
+
+    const factualSignals = [
+        /\bwhat is\b/,
+        /\bwho is\b/,
+        /\bwhen did\b/,
+        /\bwhere is\b/,
+        /\bhow does\b/,
+        /\bresearch\b/,
+        /\bcitations?\b/,
+        /\bevidence\b/,
+        /\bsource-backed\b/,
+        /\blatest\b/,
+        /\bcurrent\b/
+    ];
+
+    return emotionalSignals.some((pattern) => pattern.test(text)) &&
+        !factualSignals.some((pattern) => pattern.test(text));
+}
+
+function requiresSourceBackedRouting(message) {
+    const text = String(message || '').toLowerCase();
+    if (!text.trim()) return false;
+
+    return [
+        /\bsource-backed\b/,
+        /\bwith sources\b/,
+        /\bcite(?:d|s|)\b/,
+        /\bcitations?\b/,
+        /\bresearch\b/,
+        /\bverify\b/,
+        /\bfact-check\b/,
+        /\bevidence\b/,
+        /\blatest\b/,
+        /\bcurrent\b/,
+        /\bnews\b/
+    ].some((pattern) => pattern.test(text));
+}
+
+function resolveAgentRoute(userMessage, modelRoute) {
+    const safeModelRoute = sanitizeRouteName(modelRoute);
+    if (requiresSourceBackedRouting(userMessage)) return 'SearchAgent';
+    return safeModelRoute || 'GeneralFriendAgent';
+}
+
+function deriveHeuristicSourceNeed(userMessage, route) {
+    const text = String(userMessage || '').toLowerCase();
+    if (!text.trim()) {
+        return { needsSources: false, confidence: 0, reason: 'Empty message.' };
+    }
+
+    if (route.includes('Search')) {
+        return { needsSources: true, confidence: 0.95, reason: 'Search route selected.' };
+    }
+
+    if (route.includes('Crisis') || route.includes('Cbt') || isEmotionalSupportIntent(userMessage)) {
+        return { needsSources: false, confidence: 0.9, reason: 'Support-oriented intent.' };
+    }
+
+    const factualPatterns = [
+        /\b(what|who|when|where|why|how)\b/,
+        /\b(compare|difference|versus|vs\.?|pros and cons)\b/,
+        /\b(statistics?|rate|risk|prevalence|odds)\b/,
+        /\b(study|studies|guideline|evidence|research)\b/,
+        /\b(symptoms?|causes?|treatment|diagnosis|prognosis)\b/,
+        /\b(law|policy|regulation|standard)\b/,
+        /\b(company|organization|country|city|president|ceo)\b/,
+        /\b(latest|current|today|recent|news|update)\b/,
+        /\b(verify|fact-check|source|citation)\b/
+    ];
+    const factualHits = factualPatterns.filter((pattern) => pattern.test(text)).length;
+    const hasQuestion = /\?/.test(text);
+    const hasYear = /\b(19|20)\d{2}\b/.test(text);
+    const strongSourceSignal = requiresSourceBackedRouting(userMessage);
+
+    if (strongSourceSignal) {
+        return { needsSources: true, confidence: 0.95, reason: 'Explicit source/research intent.' };
+    }
+
+    if (factualHits >= 2 || (factualHits >= 1 && (hasQuestion || hasYear))) {
+        return { needsSources: true, confidence: 0.82, reason: 'Likely factual/external claim request.' };
+    }
+
+    return { needsSources: false, confidence: 0.55, reason: 'No strong external-evidence signals.' };
+}
+
+async function inferSourceNeedDecision(userMessage, route, adaptivePreferences) {
+    const heuristic = sanitizeSourceNeedDecision(
+        deriveHeuristicSourceNeed(userMessage, route),
+        { needsSources: false, confidence: 0, reason: '' }
+    );
+
+    const analyzerPrompt = PROMPTS.SOURCE_NEED_ANALYZER
+        .replace('%MESSAGE%', userMessage || '')
+        .replace('%ROUTE%', route || 'GeneralFriendAgent')
+        .replace('%PREFERENCES%', JSON.stringify(adaptivePreferences || DEFAULT_RESPONSE_PREFERENCES, null, 2));
+    const modelDecisionRaw = await _callLLM(analyzerPrompt, 'json', 'analysis');
+    const modelDecision = sanitizeSourceNeedDecision(safeParseJson(modelDecisionRaw, null), heuristic);
+
+    if (modelDecision.needsSources && modelDecision.confidence >= Math.max(0.55, heuristic.confidence - 0.05)) {
+        return modelDecision;
+    }
+
+    if (heuristic.needsSources && heuristic.confidence >= 0.75) {
+        return heuristic;
+    }
+
+    return modelDecision.confidence >= heuristic.confidence ? modelDecision : heuristic;
+}
+
+function shouldUseSearchEvidence(route, sourceDecision) {
+    if (route.includes('Search')) return true;
+    if (!sourceDecision?.needsSources) return false;
+    if (route.includes('Crisis') || route.includes('Cbt')) return false;
+    if (route.includes('Planner')) return sourceDecision.confidence >= 0.82;
+    return sourceDecision.confidence >= 0.6;
+}
+
 function sanitizeSearchPlan(plan, fallbackMessage) {
     const primaryQuery = sanitizeSearchQuery(plan?.primaryQuery || fallbackMessage);
     const supportingQueries = [...new Set((plan?.supportingQueries || []).map(sanitizeSearchQuery))]
         .filter(Boolean)
         .filter((query) => query !== primaryQuery)
-        .slice(0, 2);
+        .slice(0, 4);
 
     return {
         primaryQuery,
@@ -607,6 +843,12 @@ function deriveHeuristicResponsePreferences(message, base = DEFAULT_RESPONSE_PRE
         derived.structureLevel = 'paragraphs';
     }
 
+    if (requiresSourceBackedRouting(message)) {
+        derived.detailLevel = 'detailed';
+        if (derived.structureLevel === 'paragraphs') derived.structureLevel = 'mixed';
+        derived.followUpLevel = 'active';
+    }
+
     if (/\?$/.test(text.trim())) {
         derived.followUpLevel = derived.followUpLevel === 'active' ? 'active' : 'gentle';
     } else {
@@ -629,8 +871,71 @@ function deriveHeuristicResponsePreferences(message, base = DEFAULT_RESPONSE_PRE
 function getRecentChatSnippet(history, maxMessages = 8) {
     return (history || [])
         .slice(-maxMessages)
-        .map((message) => `${message.role}: ${String(message.content || '').slice(0, 600)}`)
+        .map((message) => `${message.role}: ${sanitizeContentForModelContext(message.content).slice(0, 600)}`)
         .join('\n');
+}
+
+function sanitizeContentForModelContext(content) {
+    const raw = String(content || '');
+    if (!raw.trim()) return '';
+
+    const sanitized = normalizeReplyWhitespace(
+        stripPlanningScaffold(
+            stripMetaPreface(
+                stripToolTags(raw)
+            )
+        )
+    );
+
+    if (sanitized && !looksLikeLeakedReasoning(sanitized)) return sanitized;
+    return normalizeReplyWhitespace(stripToolTags(raw)).slice(0, 1200);
+}
+
+function buildModelSafeHistoryString(history, maxMessages = 16) {
+    return (history || [])
+        .slice(-maxMessages)
+        .map((message) => `${message.role}: ${sanitizeContentForModelContext(message.content)}`)
+        .filter((line) => !/: $/.test(line))
+        .join('\n');
+}
+
+function isAmbiguousFollowUpMessage(message) {
+    const text = String(message || '').trim();
+    if (!text) return false;
+    const tokenCount = text.split(/\s+/).filter(Boolean).length;
+    const ambiguousPronouns = /\b(it|this|that|them|those|these|they|he|she|its|their|there)\b/i;
+    return tokenCount <= 18 && ambiguousPronouns.test(text);
+}
+
+function buildContextualUserMessage(userMessage, history) {
+    const cleanMessage = String(userMessage || '').trim();
+    if (!cleanMessage) return '';
+    if (!isAmbiguousFollowUpMessage(cleanMessage)) return cleanMessage;
+
+    const priorUserMessages = (history || [])
+        .filter((message) => message.role === 'user' && String(message.content || '').trim())
+        .map((message) => sanitizeContentForModelContext(message.content))
+        .filter(Boolean);
+    const latestPriorUser = priorUserMessages.length ? priorUserMessages[priorUserMessages.length - 1] : '';
+
+    const priorAiMessages = (history || [])
+        .filter((message) => message.role === 'ai' && String(message.content || '').trim())
+        .map((message) => sanitizeContentForModelContext(message.content))
+        .filter(Boolean);
+    const latestPriorAi = priorAiMessages.length ? priorAiMessages[priorAiMessages.length - 1] : '';
+
+    const references = [
+        latestPriorUser ? `Previous user message: "${latestPriorUser.slice(0, 380)}"` : '',
+        latestPriorAi ? `Previous assistant message: "${latestPriorAi.slice(0, 380)}"` : ''
+    ].filter(Boolean);
+
+    if (!references.length) return cleanMessage;
+
+    return [
+        cleanMessage,
+        '[Follow-up context]',
+        ...references
+    ].join('\n');
 }
 
 function chooseAdaptiveSkill(route, preferences) {
@@ -853,6 +1158,76 @@ function stripThinkingTags(text) {
     return String(text || '').replace(/<think>[\s\S]*?<\/think>/gi, ' ');
 }
 
+function stripPlanningScaffold(text) {
+    const cleaned = normalizeReplyWhitespace(text);
+    if (!cleaned) return '';
+
+    const lines = cleaned.split('\n');
+    const filtered = lines.filter((line) => {
+        const trimmed = line.trim();
+        if (!trimmed) return true;
+
+        return ![
+            /^identify (?:the )?(?:core )?request\b[:\s-]/i,
+            /^identify (?:the )?(?:core )?question\b[:\s-]/i,
+            /^structure (?:the )?response\b[:\s-]/i,
+            /^structure (?:the )?answer\b[:\s-]/i,
+            /^gather information\b[:\s-]/i,
+            /^formulate (?:the )?response\b[:\s-]/i,
+            /^formulate (?:the )?answer\b[:\s-]/i,
+            /^review to ensure\b[:\s-]/i,
+            /^self-?correction\b[:\s-]/i,
+            /^\(self-?correction\/?refinement\)/i,
+            /^plan\b[:\s-]/i,
+            /^recall (?:the )?previous context\b[:\s-]/i,
+            /^determine (?:the )?scope\b[:\s-]/i,
+            /^access knowledge\b[:\s-]/i,
+            /^synthesize (?:the )?answer\b[:\s-]/i,
+            /^refine (?:the )?language\b[:\s-]/i,
+            /^check against rules\b[:\s-]/i,
+            /^final check\b[:\s-]/i,
+            /^draft(?:ing)? (?:the )?response\b[:\s-]/i,
+            /^avoid overly technical\b[:\s-]/i,
+            /^steps?\b[:\s-]/i,
+            /^approach\b[:\s-]/i,
+            /^core request\b[:\s-]/i
+        ].some((pattern) => pattern.test(trimmed));
+    });
+
+    let result = normalizeReplyWhitespace(filtered.join('\n'));
+    if (!result) return '';
+
+    const conversationalAnchor = result.match(
+        /(?:^|\n)\s*(?:okay[,! ]+let'?s|let'?s\b|here'?s\b|short answer[:\-]|quick answer[:\-])/i
+    );
+
+    if (conversationalAnchor && conversationalAnchor.index > 0) {
+        result = normalizeReplyWhitespace(result.slice(conversationalAnchor.index));
+    }
+
+    return result;
+}
+
+function extractLikelyUserFacingSegment(text) {
+    const normalized = normalizeReplyWhitespace(stripToolTags(stripThinkingTags(text)));
+    if (!normalized) return '';
+
+    const anchors = [
+        /(?:^|\n)\s*(?:okay[,! ]+let'?s|let'?s\b|here'?s\b|short answer[:\-]|quick answer[:\-])/i,
+        /(?:^|\n)\s*[A-Z][A-Za-z0-9\s'()\/&-]{3,80}:\s*$/m
+    ];
+
+    for (const pattern of anchors) {
+        const match = normalized.match(pattern);
+        if (match && typeof match.index === 'number') {
+            const candidate = normalizeReplyWhitespace(normalized.slice(match.index));
+            if (candidate) return candidate;
+        }
+    }
+
+    return normalized;
+}
+
 function isMetaInstructionLine(line) {
     const trimmed = line.trim();
     if (!trimmed) return true;
@@ -872,6 +1247,25 @@ function isMetaInstructionLine(line) {
         /^respond only\b/i,
         /^return only\b/i,
         /^focus on\b/i,
+        /^identify (?:the )?(?:core )?request\b/i,
+        /^identify (?:the )?(?:core )?question\b/i,
+        /^structure (?:the )?response\b/i,
+        /^structure (?:the )?answer\b/i,
+        /^gather information\b/i,
+        /^formulate (?:the )?response\b/i,
+        /^formulate (?:the )?answer\b/i,
+        /^review to ensure\b/i,
+        /^self-?correction\b/i,
+        /^\(self-?correction\/?refinement\)/i,
+        /^recall (?:the )?previous context\b/i,
+        /^determine (?:the )?scope\b/i,
+        /^access knowledge\b/i,
+        /^synthesize (?:the )?answer\b/i,
+        /^refine (?:the )?language\b/i,
+        /^check against rules\b/i,
+        /^final check\b/i,
+        /^draft(?:ing)? (?:the )?response\b/i,
+        /^core request\b[:\s-]/i,
         /^\[?(?:behavioral profile|runtime context|system context|current session history|relevant past memories|current profile|recent chat|draft reply|user message)\]?[:\]]/i,
         /^\d+\.\s+/,
         /^[-*]\s+/
@@ -917,6 +1311,23 @@ function looksLikeLeakedReasoning(text) {
         /\bi must\b/i,
         /\buse the provided html structure\b/i,
         /\bbased on the prompt\b/i,
+        /\bidentify (?:the )?(?:core )?request\b/i,
+        /\bidentify (?:the )?(?:core )?question\b/i,
+        /\bstructure (?:the )?response\b/i,
+        /\bstructure (?:the )?answer\b/i,
+        /\bgather information\b/i,
+        /\bformulate (?:the )?response\b/i,
+        /\bformulate (?:the )?answer\b/i,
+        /\breview to ensure\b/i,
+        /\bself-?correction\b/i,
+        /\brecall (?:the )?previous context\b/i,
+        /\bdetermine (?:the )?scope\b/i,
+        /\baccess knowledge\b/i,
+        /\bsynthesize (?:the )?answer\b/i,
+        /\brefine (?:the )?language\b/i,
+        /\bcheck against rules\b/i,
+        /\bfinal check\b/i,
+        /\bdrafting (?:the )?response\b/i,
         /\bbehavioral profile\b/i,
         /\bruntime context\b/i,
         /\bsystem context\b/i,
@@ -941,13 +1352,27 @@ async function finalizeAssistantReply(rawReply, userMessage = '') {
     if (!rawReply) return null;
 
     const toolTags = extractToolTags(rawReply);
-    let cleanedBody = stripMetaPreface(stripToolTags(rawReply));
+    let cleanedBody = stripPlanningScaffold(stripMetaPreface(stripToolTags(rawReply)));
 
     if (looksLikeLeakedReasoning(rawReply) || looksLikeLeakedReasoning(cleanedBody)) {
         const rewrittenReply = await cleanupLeakedReply(stripToolTags(rawReply), userMessage);
         if (rewrittenReply) {
-            cleanedBody = stripMetaPreface(stripToolTags(rewrittenReply));
+            cleanedBody = stripPlanningScaffold(stripMetaPreface(stripToolTags(rewrittenReply)));
         }
+    }
+
+    if (!cleanedBody || looksLikeLeakedReasoning(cleanedBody)) {
+        cleanedBody = stripPlanningScaffold(stripMetaPreface(extractLikelyUserFacingSegment(rawReply)));
+    }
+
+    if (!cleanedBody || looksLikeLeakedReasoning(cleanedBody)) {
+        const tailCandidate = normalizeReplyWhitespace(
+            String(rawReply || '')
+                .split('\n')
+                .slice(-12)
+                .join('\n')
+        );
+        cleanedBody = stripPlanningScaffold(stripMetaPreface(stripToolTags(tailCandidate)));
     }
 
     if (!cleanedBody || looksLikeLeakedReasoning(cleanedBody)) {
@@ -1218,7 +1643,7 @@ class ChatManager {
 
         const historyStr = chat.history
             .slice(-8)
-            .map((message) => `${message.role}: ${message.content}`)
+            .map((message) => `${message.role}: ${sanitizeContentForModelContext(message.content)}`)
             .join('\n');
 
         const prompt = PROMPTS.BEHAVIOR_ANALYZER
@@ -1486,7 +1911,7 @@ function sanitizeEvidenceExtractorResult(parsed, evidenceCount) {
             return { text, evidenceIds };
         })
         .filter(Boolean)
-        .slice(0, 3);
+        .slice(0, 5);
 
     const directAnswer = typeof normalized.directAnswer === 'string' ? normalized.directAnswer.trim() : '';
     const uncertaintyNote = typeof normalized.uncertaintyNote === 'string' ? normalized.uncertaintyNote.trim() : '';
@@ -1497,6 +1922,146 @@ function sanitizeEvidenceExtractorResult(parsed, evidenceCount) {
         supportedClaims: cleanClaims,
         uncertaintyNote,
         includeUncertaintyNote
+    };
+}
+
+function normalizeComparisonText(value) {
+    return String(value || '')
+        .toLowerCase()
+        .replace(/https?:\/\/\S+/g, ' ')
+        .replace(/[^a-z0-9\s]/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+
+function normalizeClaimMeaning(value) {
+    return normalizeComparisonText(value)
+        .replace(/\b(research|studies|study|evidence|sources?)\s+(indicate|indicates|show|shows|suggest|suggests)\b/g, ' ')
+        .replace(/\b(well documented|well documented in the research|importance of|highlights the importance of)\b/g, ' ')
+        .replace(/\b(individuals with|people with|those with)\b/g, ' ')
+        .replace(/\b(compared to|relative to)\b/g, ' ')
+        .replace(/\b(general population|those without adhd|people without adhd)\b/g, ' ')
+        .replace(/\b(link|connection)\b/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+
+function dedupeClaimTexts(claims = []) {
+    const seen = new Set();
+
+    return claims.filter((claim) => {
+        const normalized = normalizeClaimMeaning(claim);
+        if (!normalized) return false;
+        if (seen.has(normalized)) return false;
+        seen.add(normalized);
+        return true;
+    });
+}
+
+function humanizeLeadForSearch(userMessage, preferences) {
+    const text = String(userMessage || '').toLowerCase();
+    if (/\b(adhd|anxiety|panic|mental health|therapy|trauma|depression)\b/.test(text)) {
+        return preferences.reassuranceLevel === 'high'
+            ? "There is a real connection here, and the sources paint a clearer picture than that one-line answer suggests."
+            : "There is a real connection here, and the sources point to a more nuanced answer than a simple yes-or-no.";
+    }
+
+    if (/\b(compare|difference|versus|vs\.?)\b/.test(text)) {
+        return "Once you line the sources up side by side, the main differences become a lot clearer.";
+    }
+
+    if (/\b(cause|why|how)\b/.test(text)) {
+        return "The short version is that the sources point to a few main drivers rather than one single cause.";
+    }
+
+    return preferences.reassuranceLevel === 'high'
+        ? "I pulled the strongest available sources and translated them into the plain-English version."
+        : "I pulled the strongest available sources and translated them into the plain-English version.";
+}
+
+function shouldRenderSearchAsList(userMessage, preferences) {
+    const text = String(userMessage || '').toLowerCase();
+    if (/\b(list|bullet|bullets|takeaways|key points|summary|summarize)\b/.test(text)) return true;
+    return preferences.structureLevel === 'stepwise';
+}
+
+function buildWarmSearchParagraphs(directAnswer, claims, userMessage) {
+    const paragraphs = [];
+    const cleanedClaims = dedupeClaimTexts(claims).slice(0, 4);
+
+    if (directAnswer) paragraphs.push(directAnswer);
+    if (!cleanedClaims.length) return paragraphs;
+
+    const text = String(userMessage || '').toLowerCase();
+    if (/\b(adhd|anxiety|panic|mental health|therapy|trauma|depression)\b/.test(text)) {
+        const [first, second, third, fourth] = cleanedClaims;
+        if (first) paragraphs.push(`In plain English, ${first.charAt(0).toLowerCase()}${first.slice(1)}`);
+        if (second) paragraphs.push(`What that tends to look like in real life is this: ${second.charAt(0).toLowerCase()}${second.slice(1)}`);
+        if (third || fourth) paragraphs.push([third, fourth].filter(Boolean).join(' '));
+        return paragraphs;
+    }
+
+    cleanedClaims.forEach((claim) => paragraphs.push(claim));
+    return paragraphs;
+}
+
+function claimLooksSnippetLike(text, evidenceCatalog, evidenceIds = []) {
+    const raw = String(text || '').trim();
+    if (!raw) return true;
+    if (raw.length < 24) return true;
+    if (/\.{3,}|…/.test(raw)) return true;
+    if (/[\|]/.test(raw)) return true;
+    if (/^(see|read|learn|click)\b/i.test(raw)) return true;
+
+    const normalizedClaim = normalizeComparisonText(raw);
+    if (!normalizedClaim || normalizedClaim.length < 20) return true;
+
+    const relevantEvidence = evidenceIds.length
+        ? evidenceCatalog.filter((entry) => evidenceIds.includes(entry.id))
+        : evidenceCatalog;
+    const claimTokens = normalizedClaim.split(' ');
+    const claimTokenSet = new Set(claimTokens);
+
+    for (const entry of relevantEvidence) {
+        const normalizedSnippet = normalizeComparisonText(entry?.snippet || '');
+        const normalizedTitle = normalizeComparisonText(entry?.title || '');
+
+        for (const sourceText of [normalizedSnippet, normalizedTitle]) {
+            if (!sourceText) continue;
+            if (sourceText.includes(normalizedClaim) && normalizedClaim.length >= 36) return true;
+
+            const sourceTokens = sourceText.split(' ');
+            if (!sourceTokens.length) continue;
+            const shared = sourceTokens.filter((token) => claimTokenSet.has(token)).length;
+            const overlapRatio = shared / Math.max(1, claimTokens.length);
+            if (claimTokens.length >= 9 && overlapRatio >= 0.88) return true;
+        }
+    }
+
+    return false;
+}
+
+function sanitizeClaimRewriteResult(parsed, evidenceCount, evidenceCatalog) {
+    const normalized = parsed && typeof parsed === 'object' ? parsed : {};
+    const takeaways = Array.isArray(normalized.takeaways) ? normalized.takeaways : [];
+    const cleanTakeaways = takeaways
+        .map((item) => {
+            const text = typeof item?.text === 'string' ? item.text.trim() : '';
+            const evidenceIds = [...new Set((item?.evidenceIds || [])
+                .map((value) => Number(value))
+                .filter((value) => Number.isInteger(value) && value >= 1 && value <= evidenceCount))];
+            if (!text || evidenceIds.length === 0) return null;
+            if (claimLooksSnippetLike(text, evidenceCatalog, evidenceIds)) return null;
+            return { text, evidenceIds };
+        })
+        .filter(Boolean)
+        .slice(0, 5);
+
+    return {
+        lead: typeof normalized.lead === 'string' ? normalized.lead.trim() : '',
+        takeaways: cleanTakeaways,
+        closing: typeof normalized.closing === 'string' ? normalized.closing.trim() : '',
+        includeClosing: Boolean(normalized.includeClosing)
     };
 }
 
@@ -1521,30 +2086,91 @@ function buildSourcesLineFromEvidenceIds(evidenceIds, evidenceCatalog) {
     return `Sources: ${links.join(', ')}`;
 }
 
-function buildEvidenceBackedReply(extracted, evidenceCatalog, preferences = DEFAULT_RESPONSE_PREFERENCES) {
-    const evidenceIds = [...new Set(extracted.supportedClaims.flatMap((claim) => claim.evidenceIds))];
-    const directAnswer = extracted.directAnswer || extracted.supportedClaims[0]?.text || '';
-    const orderedClaims = extracted.supportedClaims
+function buildCatalogFallbackTakeaways(evidenceCatalog, maxItems = 3) {
+    return evidenceCatalog
+        .filter((entry) => entry && (entry.title || entry.source))
+        .slice(0, maxItems)
+        .map((entry) => {
+            const sourceLabel = cleanSourceLabel(entry.source || entry.title || 'Source');
+            const text = String(entry.title || 'A relevant source')
+                .replace(/\s+/g, ' ')
+                .trim()
+                .replace(/[.]{3,}|…/g, '');
+            return `A supporting source from ${sourceLabel} covers: ${text}.`;
+        })
+        .filter(Boolean);
+}
+
+async function rewriteEvidenceClaimsForNarrative(userMessage, extracted, evidenceCatalog) {
+    if (!extracted?.supportedClaims?.length) return null;
+
+    const rewritePrompt = PROMPTS.SEARCH_CLAIM_REWRITER
+        .replace('%MESSAGE%', userMessage || '')
+        .replace('%DIRECT_ANSWER%', extracted.directAnswer || '')
+        .replace('%CLAIMS%', JSON.stringify(extracted.supportedClaims, null, 2))
+        .replace('%EVIDENCE%', JSON.stringify(evidenceCatalog, null, 2));
+    const rewrittenRaw = await _callLLM(rewritePrompt, 'json', 'analysis');
+    const rewritten = sanitizeClaimRewriteResult(
+        safeParseJson(rewrittenRaw, null),
+        evidenceCatalog.length,
+        evidenceCatalog
+    );
+
+    if (!rewritten.takeaways.length) return null;
+    return rewritten;
+}
+
+function buildEvidenceBackedReply(
+    extracted,
+    evidenceCatalog,
+    preferences = DEFAULT_RESPONSE_PREFERENCES,
+    userMessage = '',
+    rewrittenNarrative = null
+) {
+    const chosenClaims = rewrittenNarrative?.takeaways?.length
+        ? rewrittenNarrative.takeaways
+        : extracted.supportedClaims;
+    const evidenceIds = [...new Set(chosenClaims.flatMap((claim) => claim.evidenceIds))];
+    const directAnswer = rewrittenNarrative?.lead || extracted.directAnswer || chosenClaims[0]?.text || '';
+    const orderedClaims = chosenClaims
         .map((claim) => claim.text)
         .filter((text) => text && text !== directAnswer);
+    const userText = String(userMessage || '').toLowerCase();
+    const asksForTakeaways = /\btakeaways?|key points?|summary|summarize\b/.test(userText);
+    const asksForEvidenceDepth = requiresSourceBackedRouting(userMessage);
+    const shouldPreferTakeawayFormat = asksForTakeaways || asksForEvidenceDepth || preferences.detailLevel === 'detailed';
+    const renderAsList = shouldRenderSearchAsList(userMessage, preferences);
     const extraClaims = preferences.detailLevel === 'brief'
         ? orderedClaims.slice(0, 1)
-        : orderedClaims;
+        : orderedClaims.slice(0, 4);
     const responseParts = [];
+    responseParts.push(humanizeLeadForSearch(userMessage, preferences));
 
-    if (preferences.reassuranceLevel === 'high') {
-        responseParts.push("Here's the most reliable answer I can confirm right now.");
-    }
+    const mergedTakeaways = [directAnswer, ...extraClaims].filter(Boolean);
+    const fallbackTakeaways = shouldPreferTakeawayFormat && mergedTakeaways.length < 2
+        ? buildCatalogFallbackTakeaways(evidenceCatalog, preferences.detailLevel === 'brief' ? 1 : 2)
+        : [];
+    const finalTakeaways = dedupeClaimTexts(
+        [...mergedTakeaways, ...fallbackTakeaways]
+        .filter(Boolean)
+        .map((claim) => claim.trim())
+        .filter(Boolean)
+        .filter((claim) => !claimLooksSnippetLike(claim, evidenceCatalog))
+    )
+        .slice(0, preferences.detailLevel === 'brief' ? 2 : 5);
 
-    if (directAnswer) responseParts.push(directAnswer);
-    if (extraClaims.length) {
-        const claimText = preferences.structureLevel === 'stepwise'
-            ? extraClaims.map((claim, index) => `${index + 1}. ${claim}`).join('\n')
-            : extraClaims.join(' ');
-        responseParts.push(claimText);
+    if (shouldPreferTakeawayFormat && finalTakeaways.length && renderAsList) {
+        responseParts.push("Here are the source-backed takeaways:");
+        responseParts.push(finalTakeaways.map((claim, index) => `${index + 1}. ${claim}`).join('\n'));
+    } else {
+        const paragraphs = buildWarmSearchParagraphs(directAnswer, finalTakeaways.filter((claim) => claim !== directAnswer), userMessage);
+        responseParts.push(...paragraphs);
     }
     if (extracted.includeUncertaintyNote && extracted.uncertaintyNote) {
         responseParts.push(extracted.uncertaintyNote);
+    }
+    if (rewrittenNarrative?.includeClosing && rewrittenNarrative?.closing) {
+        responseParts.push(rewrittenNarrative.closing);
     }
 
     if (preferences.followUpLevel === 'active') {
@@ -1553,7 +2179,7 @@ function buildEvidenceBackedReply(extracted, evidenceCatalog, preferences = DEFA
 
     const fallbackEvidenceIds = evidenceIds.length
         ? evidenceIds
-        : evidenceCatalog.filter((entry) => entry.url).slice(0, 2).map((entry) => entry.id);
+        : evidenceCatalog.filter((entry) => entry.url).slice(0, 4).map((entry) => entry.id);
     const sourcesLine = buildSourcesLineFromEvidenceIds(fallbackEvidenceIds, evidenceCatalog);
     const messageBody = normalizeReplyWhitespace(responseParts.join('\n\n'));
 
@@ -1575,7 +2201,7 @@ function buildDeterministicSearchFallback(evidenceCatalog, preferences = DEFAULT
     const topEvidence = evidenceCatalog[0];
     const topSnippet = topEvidence.snippet || `I found a relevant source: ${topEvidence.title}.`;
     const sourcesLine = buildSourcesLineFromEvidenceIds(
-        evidenceCatalog.filter((entry) => entry.url).slice(0, 2).map((entry) => entry.id),
+        evidenceCatalog.filter((entry) => entry.url).slice(0, 4).map((entry) => entry.id),
         evidenceCatalog
     );
 
@@ -1611,6 +2237,9 @@ async function getOllamaResponse(userMessage, toolFollowUp = null, documentText 
     );
     const profileStr = JSON.stringify(chatManager.state.localContentStore, null, 2);
     const runtimeContext = getRuntimeContextString();
+    const chatHistory = chatManager.getActiveChatHistory();
+    const modelHistoryStr = buildModelSafeHistoryString(chatHistory);
+    const contextualUserMessage = buildContextualUserMessage(userMessage, chatHistory);
 
     if (toolFollowUp) {
         const toolPreferences = chatManager.getActiveResponsePreferences();
@@ -1632,19 +2261,22 @@ ${profileStr}
     const routePrompt = PROMPTS.ROUTER
         .replace('%PROFILE%', profileStr)
         .replace('%RUNTIME%', runtimeContext)
-        .replace('%USER_MESSAGE%', userMessage);
-    const route = (await _callLLM(routePrompt, null, 'analysis')) || 'GeneralFriendAgent';
-    const { preferences: adaptivePreferences, context: adaptiveContext } = await inferAdaptiveResponsePreferences(
-        userMessage,
+        .replace('%USER_MESSAGE%', contextualUserMessage);
+    const route = resolveAgentRoute(contextualUserMessage, await _callLLM(routePrompt, null, 'analysis'));
+    const { preferences: adaptivePreferences } = await inferAdaptiveResponsePreferences(
+        contextualUserMessage,
         route,
         runtimeContext
     );
-    const highRiskRecommendations = inferHighRiskSafetyRecommendations(userMessage);
-    const proactiveRecommendation = await inferProactiveToolOpportunity(userMessage, route, adaptivePreferences);
+    const sourceNeedDecision = await inferSourceNeedDecision(contextualUserMessage, route, adaptivePreferences);
+    const effectiveRoute = shouldUseSearchEvidence(route, sourceNeedDecision) ? 'SearchAgent' : route;
+    const adaptiveContext = buildAdaptiveResponseContext(adaptivePreferences, effectiveRoute);
+    const highRiskRecommendations = inferHighRiskSafetyRecommendations(contextualUserMessage);
+    const proactiveRecommendation = await inferProactiveToolOpportunity(contextualUserMessage, effectiveRoute, adaptivePreferences);
     const proactiveToolGuidance = buildProactiveToolGuidance(proactiveRecommendation);
 
-    if (route.includes('Knowledge')) {
-        const key = await _callLLM(PROMPTS.KNOWLEDGE_MAPPER.replace('%MESSAGE%', userMessage), null, 'analysis');
+    if (effectiveRoute.includes('Knowledge')) {
+        const key = await _callLLM(PROMPTS.KNOWLEDGE_MAPPER.replace('%MESSAGE%', contextualUserMessage), null, 'analysis');
         if (key && key !== 'NULL') {
             const content = await fetchMarkdownContent(key.toLowerCase());
             if (content) {
@@ -1657,7 +2289,7 @@ ${adaptiveContext}
 ${proactiveToolGuidance ? `\n${proactiveToolGuidance}` : ''}
 
 ${PROMPTS.KNOWLEDGE_SYNTHESIS}`
-                                .replace('%MESSAGE%', userMessage)
+                                .replace('%MESSAGE%', contextualUserMessage)
                                 .replace('%RUNTIME%', runtimeContext)
                                 .replace('%CONTENT%', content)
                         ),
@@ -1673,19 +2305,30 @@ ${PROMPTS.KNOWLEDGE_SYNTHESIS}`
         }
     }
 
-    if (route.includes('Search')) {
+    if (effectiveRoute.includes('Search')) {
         try {
-            const searchPlan = await buildSearchPlan(userMessage, profileStr, runtimeContext);
+            const searchPlan = await buildSearchPlan(contextualUserMessage, profileStr, runtimeContext);
             const osintReport = await postJson(API_ENDPOINTS.osint, searchPlan);
             const evidenceCatalog = buildEvidenceCatalog(osintReport);
             const extractorPrompt = PROMPTS.SEARCH_EVIDENCE_EXTRACTOR
-                .replace('%MESSAGE%', userMessage)
+                .replace('%MESSAGE%', contextualUserMessage)
                 .replace('%RUNTIME%', runtimeContext)
                 .replace('%PROFILE%', profileStr)
                 .replace('%EVIDENCE%', JSON.stringify(evidenceCatalog, null, 2));
             const extractedRaw = await _callLLM(extractorPrompt, 'json', 'analysis');
             const extracted = sanitizeEvidenceExtractorResult(safeParseJson(extractedRaw, null), evidenceCatalog.length);
-            const renderedReply = buildEvidenceBackedReply(extracted, evidenceCatalog, adaptivePreferences) ||
+            const rewrittenNarrative = await rewriteEvidenceClaimsForNarrative(
+                contextualUserMessage,
+                extracted,
+                evidenceCatalog
+            );
+            const renderedReply = buildEvidenceBackedReply(
+                extracted,
+                evidenceCatalog,
+                adaptivePreferences,
+                contextualUserMessage,
+                rewrittenNarrative
+            ) ||
                 buildDeterministicSearchFallback(evidenceCatalog, adaptivePreferences);
 
             return (
@@ -1704,11 +2347,8 @@ ${PROMPTS.KNOWLEDGE_SYNTHESIS}`
         }
     }
 
-    const vectorContext = await chatManager.searchVectorData(userMessage);
-    const historyStr = chatManager
-        .getActiveChatHistory()
-        .map((message) => `${message.role}: ${message.content}`)
-        .join('\n');
+    const vectorContext = await chatManager.searchVectorData(contextualUserMessage || userMessage);
+    const historyStr = modelHistoryStr;
 
     let finalPrompt = `${responseSystemPrompt}
 [Adaptive Strategy]:
@@ -1726,7 +2366,7 @@ ${vectorContext || 'No specific past context found.'}
 [Current Session History]:
 ${historyStr}
 
-User: ${userMessage}`;
+User: ${contextualUserMessage || userMessage}`;
 
     if (documentText) finalPrompt += `\n[Doc Content]: ${documentText}`;
 

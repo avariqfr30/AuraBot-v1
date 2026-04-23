@@ -174,7 +174,7 @@ async function buildOsintReport({ primaryQuery, supportingQueries = [], includeN
     const cleanedSupportingQueries = [...new Set((supportingQueries || []).map(cleanSearchQuery))]
         .filter(Boolean)
         .filter((query) => query !== cleanedPrimaryQuery)
-        .slice(0, 2);
+        .slice(0, 4);
 
     if (!cleanedPrimaryQuery) {
         throw new Error('A primary query is required for OSINT research');
