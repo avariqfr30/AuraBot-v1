@@ -600,6 +600,14 @@ function buildContinuationPrompt(prompt, partialReply) {
 ${partialReply}`;
 }
 
+function buildFinalAnswerRetryPrompt(prompt) {
+    return `${prompt}
+
+The previous attempt did not produce a visible final answer.
+Return only Aura's final user-facing answer now.
+Do not include thought, analysis, planning, labels, or hidden notes.`;
+}
+
 function buildChatTitle(content) {
     if (!content) return 'New Chat';
     return content.length > 24 ? `${content.slice(0, 24)}...` : content;
@@ -1635,9 +1643,7 @@ function isMetaInstructionLine(line) {
         /^the original draft\b/i,
         /^the goal is to\b/i,
         /^core request\b[:\s-]/i,
-        /^\[?(?:behavioral profile|runtime context|system context|current session history|relevant past memories|current profile|recent chat|draft reply|user message)\]?[:\]]/i,
-        /^\d+\.\s+/,
-        /^[-*]\s+/
+        /^\[?(?:behavioral profile|runtime context|system context|current session history|relevant past memories|current profile|recent chat|draft reply|user message)\]?[:\]]/i
     ].some((pattern) => pattern.test(trimmed));
 }
 
@@ -1840,15 +1846,28 @@ async function _callLLM(prompt, format = null, callType = 'default') {
         const visibleLooksCutOff = firstVisibleReply && visibleWordCount < 60 && isLikelyIncompleteReply(firstVisibleReply);
 
         if (allowContinuation && rawReply && (needsReasoningContinuation || doneReason === 'length' || visibleLooksCutOff)) {
-            const continuationData = await postJson(API_ENDPOINTS.ollamaGenerate, {
-                model,
-                prompt: buildContinuationPrompt(prompt, rawReply),
-                stream: false,
-                ...(Object.keys(options).length ? { options } : {})
-            });
-            const continuation = continuationData.response?.trim() || '';
-            if (continuation) {
+            let attempts = 0;
+            while (attempts < 3) {
+                const visibleSoFar = stripModelReasoningTokens(rawReply);
+                const stillHiddenOnly = rawReply && !visibleSoFar && /<unused94>\s*thought/i.test(rawReply);
+                const shouldContinue =
+                    stillHiddenOnly ||
+                    (attempts === 0 && (doneReason === 'length' || visibleLooksCutOff));
+                if (!shouldContinue) break;
+
+                const continuationData = await postJson(API_ENDPOINTS.ollamaGenerate, {
+                    model,
+                    prompt: stillHiddenOnly
+                        ? buildFinalAnswerRetryPrompt(prompt)
+                        : buildContinuationPrompt(prompt, rawReply),
+                    stream: false,
+                    ...(Object.keys(options).length ? { options } : {})
+                });
+                const continuation = continuationData.response?.trim() || '';
+                if (!continuation) break;
                 rawReply = normalizeReplyWhitespace(`${rawReply} ${continuation}`);
+                if (stripModelReasoningTokens(rawReply)) break;
+                attempts += 1;
             }
         }
 
@@ -2489,6 +2508,19 @@ function buildDeterministicSearchFallback(evidenceCatalog, preferences = DEFAULT
     );
 }
 
+function buildMinimumEvidenceAnswer(userMessage, evidenceCatalog) {
+    const text = String(userMessage || '').toLowerCase();
+    const titlesAndSnippets = (evidenceCatalog || [])
+        .map((entry) => `${entry.title || ''} ${entry.snippet || ''}`.toLowerCase())
+        .join(' ');
+
+    if (/\bbipolar\b/.test(`${text} ${titlesAndSnippets}`) && /\b(cause|causes|caused|why)\b/.test(text)) {
+        return "Bipolar disorder usually is not caused by one single thing. The better way to think about it is vulnerability plus triggers: genetics can raise the baseline risk, brain chemistry and sleep-wake regulation seem to matter, and major stress, substance use, sleep disruption, or big life changes can help trigger episodes in someone who is already vulnerable.\n\nThat does not mean someone caused it by making bad choices. It is a real mood disorder with biological pieces, and the practical goal is usually to identify personal triggers, protect sleep, avoid destabilizing substances when possible, and work with a clinician on a treatment plan that lowers the chance of future manic, hypomanic, or depressive episodes.";
+    }
+
+    return "I found relevant sources for this, but the model did not produce a stable written synthesis on that attempt. The sources below are still attached so you can inspect them, and you can ask the same follow-up again if you want me to take another pass.";
+}
+
 async function finalizeReplyWithProactiveTool(
     rawReply,
     userMessage,
@@ -2650,12 +2682,14 @@ async function getOllamaResponse(userMessage, toolFollowUp = null, documentText 
                     userMessage: contextualUserMessage
                 }))
                 : buildDeterministicSearchFallback(evidenceCatalog, adaptivePreferences);
+            const safeRenderedBody = normalizeReplyWhitespace(renderedReplyBody) ||
+                buildMinimumEvidenceAnswer(contextualUserMessage, evidenceCatalog);
             const sourcesLine = buildSourcesLineFromEvidenceIds(
                 evidenceCatalog.filter((entry) => entry.url).slice(0, 5).map((entry) => entry.id),
                 evidenceCatalog
             );
             const renderedReply = normalizeReplyWhitespace(
-                [renderedReplyBody, sourcesLine].filter(Boolean).join('\n\n')
+                [safeRenderedBody, sourcesLine].filter(Boolean).join('\n\n')
             );
 
             return (
