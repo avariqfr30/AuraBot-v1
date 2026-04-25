@@ -100,27 +100,28 @@ You are talking to whoever is using Aura. Do not assume they are a programmer or
 - Use lists only when they clearly improve readability.
 - Do not use roleplay actions.
 
-[TOOL USAGE RULES - STRICT GUARDRAILS]
-You have access to interactive tools, but you must use them RARELY and ONLY when realistically appropriate.
-DO NOT create tools if the user is asking a general question, asking for a definition, or just chatting casually.
-ONLY create a tool if the user is in an ACTIVE state of need.
+[TOOL USAGE RULES]
+You have access to interactive tools. Use them like a thoughtful human assistant would: naturally, helpfully, and only when they make the reply more useful.
+If the user explicitly asks you to make, open, start, set up, track, or share a tool-like support item, create the matching tool in the same reply.
+If the user is asking for a definition, explanation, research summary, comparison, or casual conversation, answer the question directly and do not create a tool unless they also ask for a practical aid.
+If a tool would help but the user did not directly ask for one, create it only when it genuinely reduces friction in the moment. The tool should feel like a useful next step, not a canned add-on.
 
-Available Tools & Exact Triggers:
-- 'mood_tracker': Use ONLY if they state a strong, active emotion right now.
-- 'checklist': Use ONLY if they explicitly ask for a plan, or are actively overwhelmed by a specific task.
-- 'thought_record': Use ONLY if they are actively exhibiting a cognitive distortion.
-- 'affirmation_card': Use ONLY if they are actively expressing deep self-doubt or need immediate encouragement.
-- 'breathing_exercise': Use ONLY if they are actively panicking, having an anxiety attack, or report high physical stress.
-- 'safety_plan': Use ONLY if they ask what to do during crises, spirals, or high-risk moments in the future.
-- 'medication_checklist': Use ONLY for practical medication adherence/safety organization; never for prescribing or dosing authority.
-- 'appointment_prep': Use ONLY when they are preparing to speak with a clinician and need structured questions/details.
-- 'follow_up_plan': Use ONLY when they ask for check-ins, continuity, or a stepwise follow-through plan.
+Available Tools & Natural Triggers:
+- 'mood_tracker': Use when they want to track mood, describe recurring mood swings, or are trying to understand emotional patterns.
+- 'checklist': Use when they ask for a checklist, plan, shared steps, action list, or feel overwhelmed and need the next steps made concrete.
+- 'thought_record': Use when they ask to reframe/challenge a thought, describe a thought loop, catastrophizing, all-or-nothing thinking, or a belief that needs careful unpacking.
+- 'affirmation_card': Use when they ask for encouragement, reassurance, a reminder, or are expressing self-criticism/self-worth pain.
+- 'breathing_exercise': Use when they ask to calm down, ground themselves, breathe, or describe panic/high physical anxiety.
+- 'safety_plan': Use when they ask for a crisis/spiral/safety plan or what to do if things get worse. Keep emergency/hotline actions opt-in recommendations only.
+- 'medication_checklist': Use for practical medication adherence/safety organization. Never prescribe, dose, or imply clinical authority.
+- 'appointment_prep': Use when they are preparing to speak with a doctor, therapist, psychiatrist, pharmacist, or clinician.
+- 'follow_up_plan': Use when they ask to keep track, follow up, check in, continue later, or maintain momentum across days.
 
 High-risk policy:
 - Recommendations for emergency services, crisis lines, poison control, or law enforcement must always be opt-in suggestions.
 - Never perform, imply, or claim automatic external actions.
 
-To deploy a tool, embed this exact tag in your response: <tool_create type="[type]" theme="[brief theme]" />`,
+To deploy a tool, embed this exact tag once in your response: <tool_create type="[type]" theme="[brief theme]" />`,
 
     RESPONSE_STYLE_CONTRACT: `[RESPONSE STYLE CONTRACT]
 Apply these style rules to every user-facing reply:
@@ -879,6 +880,146 @@ function sanitizeToolOpportunity(candidate) {
     };
 }
 
+function makeToolOpportunity(type, theme, reason, confidence, userLine) {
+    return sanitizeToolOpportunity({
+        shouldUseTool: true,
+        type,
+        theme,
+        reason,
+        confidence,
+        userLine
+    });
+}
+
+function getRecentConversationText(limit = 4) {
+    if (typeof window === 'undefined' || !window.chatManager) return '';
+    return window.chatManager
+        .getActiveChatHistory()
+        .slice(-limit)
+        .map((message) => sanitizeContentForModelContext(message.content))
+        .filter(Boolean)
+        .join(' ')
+        .toLowerCase();
+}
+
+function inferToolThemeFromConversation(userMessage, fallback = 'Quick support') {
+    const text = `${String(userMessage || '').toLowerCase()} ${getRecentConversationText(4)}`;
+
+    if (/\bpanic|anxiety attack|breath|heart racing\b/.test(text)) return 'Panic support';
+    if (/\badhd|focus|executive|task|procrastinat\b/.test(text)) return 'ADHD support';
+    if (/\bbipolar|mood swing|mania|hypomania|depression\b/.test(text)) return 'Mood support';
+    if (/\bmedication|meds|dose|pill|prescription\b/.test(text)) return 'Medication safety';
+    if (/\bdoctor|clinician|therapist|psychiatrist|appointment\b/.test(text)) return 'Appointment prep';
+    if (/\bshare|send|them|together\b/.test(text)) return 'Shared support';
+
+    return fallback;
+}
+
+function deriveExplicitToolRequest(userMessage) {
+    const text = String(userMessage || '').toLowerCase();
+    if (!text.trim()) return sanitizeToolOpportunity(null);
+
+    const explicitAction = /\b(can you|could you|can we|could we|please|let'?s|make|create|build|set up|open|give me|start|add|prepare|prep|help me make|help me create|help me set up|help me prepare|help me prep)\b/;
+    const wantsShared = /\b(share|send|them|together|track it together|track together|use together)\b/.test(text);
+
+    if (explicitAction.test(text) && /\b(medication checklist|med checklist|meds checklist|pill checklist|track meds|medication tracker)\b/.test(text)) {
+        return makeToolOpportunity(
+            'medication_checklist',
+            'Medication safety',
+            'The user explicitly asked for medication organization support.',
+            0.96,
+            'I’ll open a medication safety checklist so this is organized clearly.'
+        );
+    }
+
+    if (explicitAction.test(text) && /\b(appointment prep|doctor prep|therapist prep|psychiatrist prep|questions for (my )?(doctor|therapist|psychiatrist|clinician)|prepare questions.*(doctor|therapist|psychiatrist|clinician|appointment)|prepare.*(doctor|therapist|psychiatrist|clinician|appointment))\b/.test(text)) {
+        return makeToolOpportunity(
+            'appointment_prep',
+            'Appointment prep',
+            'The user explicitly asked to prepare for a clinician conversation.',
+            0.96,
+            'I’ll set up an appointment prep card so the key questions are ready.'
+        );
+    }
+
+    if (explicitAction.test(text) && /\b(checklist|check list|to-do|todo|task list|action list)\b/.test(text)) {
+        const theme = wantsShared
+            ? `${inferToolThemeFromConversation(userMessage, 'Shared support')} checklist`
+            : `${inferToolThemeFromConversation(userMessage, 'Personal support')} checklist`;
+        return makeToolOpportunity(
+            'checklist',
+            theme,
+            'The user explicitly asked for a checklist.',
+            0.98,
+            wantsShared
+                ? 'I’ll make that as a checklist so you can use it and track it together.'
+                : 'I’ll make that as a checklist so it is easier to follow.'
+        );
+    }
+
+    if (explicitAction.test(text) && /\b(mood tracker|track my mood|mood log|log my mood|monitor my mood)\b/.test(text)) {
+        return makeToolOpportunity(
+            'mood_tracker',
+            `${inferToolThemeFromConversation(userMessage, 'Mood')} tracker`,
+            'The user explicitly asked to track mood.',
+            0.97,
+            'I’ll open a mood tracker so we can follow the pattern together.'
+        );
+    }
+
+    if (explicitAction.test(text) && /\b(thought record|thought log|reframe|challenge my thought|challenge these thoughts|cognitive distortion)\b/.test(text)) {
+        return makeToolOpportunity(
+            'thought_record',
+            'Thought reframing',
+            'The user explicitly asked to work through a thought pattern.',
+            0.96,
+            'I’ll open a thought record so we can work through it step by step.'
+        );
+    }
+
+    if (explicitAction.test(text) && /\b(affirmation|affirmation card|encouragement card|self-worth card|kind reminder)\b/.test(text)) {
+        return makeToolOpportunity(
+            'affirmation_card',
+            'Grounding encouragement',
+            'The user explicitly asked for encouragement support.',
+            0.94,
+            'I’ll make a short affirmation card for this moment.'
+        );
+    }
+
+    if (explicitAction.test(text) && /\b(breathing exercise|breathing reset|breathwork|grounding exercise|calm me down|ground me)\b/.test(text)) {
+        return makeToolOpportunity(
+            'breathing_exercise',
+            'Calming reset',
+            'The user explicitly asked for grounding or breathing support.',
+            0.98,
+            'I’ll open a short breathing reset you can use right now.'
+        );
+    }
+
+    if (explicitAction.test(text) && /\b(safety plan|crisis plan|spiral plan|if things get worse|stay safe plan)\b/.test(text)) {
+        return makeToolOpportunity(
+            'safety_plan',
+            'Personal safety plan',
+            'The user explicitly asked for a safety-oriented plan.',
+            0.96,
+            'I’ll make a safety plan card so the next steps are clear when things spike.'
+        );
+    }
+
+    if (explicitAction.test(text) && /\b(follow-up plan|follow up plan|check-in plan|check in plan|track this|track it|keep track|keep me on track)\b/.test(text)) {
+        return makeToolOpportunity(
+            'follow_up_plan',
+            'Track and follow up',
+            'The user explicitly asked for ongoing follow-through.',
+            0.95,
+            'I’ll set up a follow-up plan so we can keep track of it together.'
+        );
+    }
+
+    return sanitizeToolOpportunity(null);
+}
+
 function containsToolTag(text) {
     return /<tool_create[^>]*\/?>/i.test(String(text || ''));
 }
@@ -889,11 +1030,11 @@ function buildProactiveToolGuidance(recommendation) {
     const tag = `<tool_create type="${recommendation.type}" theme="${recommendation.theme}" />`;
     return [
         `[Proactive Tool Guidance]`,
-        `A tool can materially help in this specific moment.`,
+        `A tool will materially help in this specific moment.`,
         `Type: ${recommendation.type}`,
         `Theme: ${recommendation.theme}`,
         `Reason: ${recommendation.reason || 'High immediate utility.'}`,
-        `If it fits naturally, include exactly this tag once in your reply: ${tag}`
+        `Answer the user normally first, then include exactly this tag once where it feels natural: ${tag}`
     ].join('\n');
 }
 
@@ -1374,6 +1515,23 @@ function deriveHeuristicToolOpportunity(userMessage, route) {
 
     if (!text.trim()) return sanitizeToolOpportunity(null);
 
+    const explicitTool = deriveExplicitToolRequest(userMessage);
+    if (explicitTool.shouldUseTool) return explicitTool;
+
+    if (
+        /\b(make|create|build|set up|open|give)\b.*\b(checklist|check list)\b/.test(text) ||
+        /\b(checklist|check list)\b.*\b(share|send|give|track together|track it together|use together)\b/.test(text)
+    ) {
+        return sanitizeToolOpportunity({
+            shouldUseTool: true,
+            type: 'checklist',
+            theme: /\bshare|send|them|together\b/.test(text) ? 'Shared checklist' : 'Personal checklist',
+            reason: 'The user explicitly asked for a checklist they can use and track.',
+            confidence: 0.96,
+            userLine: 'I’ll make that as a checklist so you can use it and track it together.'
+        });
+    }
+
     if (
         /\b(identify|spot|recognize|notice|tell if|warning signs|red flags)\b/.test(text) &&
         /\b(panic|anxiety attack|episode|spiral|crisis)\b/.test(text) &&
@@ -1401,47 +1559,43 @@ function deriveHeuristicToolOpportunity(userMessage, route) {
     }
 
     if (/\b(safety plan|what should i do if i spiral|plan for crisis|if i get worse|in case i panic again|what to do if this happens again)\b/.test(text)) {
-        return sanitizeToolOpportunity({
-            shouldUseTool: true,
-            type: 'safety_plan',
-            theme: 'Personal safety plan',
-            reason: 'A written safety plan improves follow-through under stress.',
-            confidence: 0.86,
-            userLine: 'I can create a personal safety plan card so the next steps are clear if things spike.'
-        });
+        return makeToolOpportunity(
+            'safety_plan',
+            'Personal safety plan',
+            'A written safety plan improves follow-through under stress.',
+            0.86,
+            'I can create a personal safety plan card so the next steps are clear if things spike.'
+        );
     }
 
     if (/\b(medication|meds|pill|prescription|dose|missed dose|side effect|interaction|remember to take)\b/.test(text) && /\b(i|my|me|organize|track|checklist)\b/.test(text)) {
-        return sanitizeToolOpportunity({
-            shouldUseTool: true,
-            type: 'medication_checklist',
-            theme: 'Medication safety organization',
-            reason: 'A practical checklist reduces avoidable medication errors.',
-            confidence: 0.8,
-            userLine: 'I can open a medication safety checklist so we can organize this clearly.'
-        });
+        return makeToolOpportunity(
+            'medication_checklist',
+            'Medication safety organization',
+            'A practical checklist reduces avoidable medication errors.',
+            0.82,
+            'I can open a medication safety checklist so we can organize this clearly.'
+        );
     }
 
     if (/\b(doctor|clinician|appointment|visit|follow-up visit|specialist|therapist|psychiatrist)\b/.test(text) && /\b(prepare|prep|questions|what should i ask|before|bring up|talk to)\b/.test(text)) {
-        return sanitizeToolOpportunity({
-            shouldUseTool: true,
-            type: 'appointment_prep',
-            theme: 'Clinician appointment prep',
-            reason: 'Structured prep leads to better clinical visits.',
-            confidence: 0.78,
-            userLine: 'I can set up an appointment prep card so you have the key questions and details ready.'
-        });
+        return makeToolOpportunity(
+            'appointment_prep',
+            'Clinician appointment prep',
+            'Structured prep leads to better clinical visits.',
+            0.82,
+            'I can set up an appointment prep card so you have the key questions and details ready.'
+        );
     }
 
     if (/\b(check in|check-in|follow up|follow-up|keep me on track|remind me to|keep momentum|next few days|next week)\b/.test(text)) {
-        return sanitizeToolOpportunity({
-            shouldUseTool: true,
-            type: 'follow_up_plan',
-            theme: 'Follow-up plan',
-            reason: 'A lightweight follow-up structure improves continuity.',
-            confidence: 0.77,
-            userLine: 'I can create a follow-up plan card so we keep momentum without overwhelm.'
-        });
+        return makeToolOpportunity(
+            'follow_up_plan',
+            'Follow-up plan',
+            'A lightweight follow-up structure improves continuity.',
+            0.8,
+            'I can create a follow-up plan card so we keep momentum without overwhelm.'
+        );
     }
 
     if (/\b(overwhelmed|too much|can't keep up|i'm stuck|need a plan|organize|break this down|step by step|what should i do next|help me start|make a plan)\b/.test(text)) {
@@ -1467,47 +1621,43 @@ function deriveHeuristicToolOpportunity(userMessage, route) {
     }
 
     if (/\b(i'm worthless|i hate myself|i'm a failure|not good enough|can't do anything right)\b/.test(text)) {
-        return sanitizeToolOpportunity({
-            shouldUseTool: true,
-            type: 'affirmation_card',
-            theme: 'Self-worth reinforcement',
-            reason: 'Helpful for active self-critical loops.',
-            confidence: 0.8,
-            userLine: 'I can also create a short grounding affirmation card for this moment.'
-        });
+        return makeToolOpportunity(
+            'affirmation_card',
+            'Self-worth reinforcement',
+            'Helpful for active self-critical loops.',
+            0.82,
+            'I can also create a short grounding affirmation card for this moment.'
+        );
     }
 
     if (/\b(always|never|everyone thinks|i know it will fail|i'm doomed|i keep thinking|can't stop thinking|thought loop)\b/.test(text)) {
-        return sanitizeToolOpportunity({
-            shouldUseTool: true,
-            type: 'thought_record',
-            theme: 'Reality-check reframing',
-            reason: 'Useful when cognitive distortion patterns are active.',
-            confidence: 0.75,
-            userLine: 'I can open a quick thought-record to help unpack this pattern step by step.'
-        });
+        return makeToolOpportunity(
+            'thought_record',
+            'Reality-check reframing',
+            'Useful when cognitive distortion patterns are active.',
+            0.8,
+            'I can open a quick thought-record to help unpack this pattern step by step.'
+        );
     }
 
     if (/\b(feel terrible|really low|sad all day|angry all day|my mood|mood swings|mood has been|tracking my mood)\b/.test(text)) {
-        return sanitizeToolOpportunity({
-            shouldUseTool: true,
-            type: 'mood_tracker',
-            theme: 'Mood trend check-in',
-            reason: 'Tracking can clarify patterns and triggers.',
-            confidence: 0.7,
-            userLine: 'If helpful, I can open a quick mood tracker so we can spot patterns.'
-        });
+        return makeToolOpportunity(
+            'mood_tracker',
+            'Mood trend check-in',
+            'Tracking can clarify patterns and triggers.',
+            0.76,
+            'I can open a quick mood tracker so we can spot patterns.'
+        );
     }
 
-    if (/\b(can you help me remember|can we keep track|track this|monitor this|log this)\b/.test(text)) {
-        return sanitizeToolOpportunity({
-            shouldUseTool: true,
-            type: 'follow_up_plan',
-            theme: 'Track and follow up',
-            reason: 'Tracking and follow-up help keep the conversation useful beyond one answer.',
-            confidence: 0.74,
-            userLine: 'I can set up a small follow-up card so we can keep track of this together.'
-        });
+    if (/\b(can you help me remember|can we keep track|track this|track it|track them|track together|monitor this|monitor it|log this|log it)\b/.test(text)) {
+        return makeToolOpportunity(
+            'follow_up_plan',
+            'Track and follow up',
+            'Tracking and follow-up help keep the conversation useful beyond one answer.',
+            0.78,
+            'I can set up a small follow-up card so we can keep track of this together.'
+        );
     }
 
     if (route.includes('Search') || route.includes('Knowledge')) return sanitizeToolOpportunity(null);
@@ -1567,9 +1717,21 @@ function hasActionableToolIntent(userMessage) {
 
     return [
         /\b(what should i do|what do i do|how do i deal|how can i cope|help me cope|calm down|ground me)\b/,
-        /\b(plan|steps|checklist|routine|organize|prepare|prep|track|monitor|log|remember|follow up|check in)\b/,
+        /\b(plan|steps|checklist|check list|routine|organize|prepare|prep|track|track it together|monitor|log|remember|follow up|check in|share)\b/,
         /\b(identify|spot|recognize|warning signs|red flags|tell if)\b/,
-        /\b(make me|create|build|set up|open)\b/
+        /\b(make me|make|create|build|set up|open|give me)\b/
+    ].some((pattern) => pattern.test(text));
+}
+
+function isExplicitToolCreationRequest(userMessage) {
+    const text = String(userMessage || '').toLowerCase();
+    if (!text.trim()) return false;
+
+    return [
+        /\b(make|create|build|set up|open|give|start|add)\b.*\b(checklist|check list|tracker|card|plan|tool|breathing exercise|thought record|mood log|appointment prep)\b/,
+        /\b(can you|could you|can we|could we|please|let'?s)\b.*\b(make|create|build|set up|open|give|start|add|track|share|prepare|prep)\b/,
+        /\b(mood tracker|thought record|breathing exercise|safety plan|crisis plan|medication checklist|meds checklist|appointment prep|follow-up plan|follow up plan)\b/,
+        /\bwe can track (it|this|them) together\b/
     ].some((pattern) => pattern.test(text));
 }
 
@@ -1592,7 +1754,7 @@ async function inferProactiveToolOpportunity(userMessage, route, adaptivePrefere
     if (!LOW_RISK_PROACTIVE_TYPES.has(candidate.type)) return null;
     if (route.includes('Crisis') && !CRISIS_ROUTE_PROACTIVE_TYPES.has(candidate.type)) return null;
     if (candidate.confidence < 0.65) return null;
-    if (!chatManager.canUseProactiveTool(candidate.type)) return null;
+    if (!isExplicitToolCreationRequest(userMessage) && !chatManager.canUseProactiveTool(candidate.type)) return null;
 
     return candidate;
 }
