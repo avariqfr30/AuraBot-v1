@@ -176,7 +176,8 @@ Professional safety:
 Tools:
 - Tools are optional skills, not decorations.
 - Do not create a tool for normal definitions, research, or educational questions.
-- Create a tool only when the user is actively trying to cope, plan, track, prepare, or stay safe right now.`,
+- Create a tool when it would make the answer easier to use: coping, planning, tracking, preparing, remembering, identifying warning signs, or following through.
+- If a tool is useful but not urgent, introduce it naturally as an optional support, not as an interruption.`,
 
     AURA_DIRECT_REPLY: `%SYSTEM_PROMPT%
 
@@ -190,6 +191,9 @@ Runtime context:
 
 Conversation memory:
 %MEMORY%
+
+Conversation continuity:
+%CONTINUITY%
 
 Recent chat:
 %HISTORY%
@@ -226,6 +230,9 @@ Runtime context:
 
 Conversation memory:
 %MEMORY%
+
+Conversation continuity:
+%CONTINUITY%
 
 Recent chat:
 %HISTORY%
@@ -494,6 +501,7 @@ function buildAuraDirectPrompt({
     turnProfile,
     runtimeContext,
     memoryContext,
+    continuityContext,
     history,
     vectorContext,
     toolGuidance,
@@ -506,6 +514,7 @@ function buildAuraDirectPrompt({
         .replace('%TURN_PROFILE%', turnProfile)
         .replace('%RUNTIME%', runtimeContext || 'Unavailable.')
         .replace('%MEMORY%', memoryContext || 'No stored context yet.')
+        .replace('%CONTINUITY%', continuityContext || 'No active thread yet.')
         .replace('%HISTORY%', history || 'No recent chat yet.')
         .replace('%VECTOR_CONTEXT%', vectorContext || 'No specific recalled context.')
         .replace('%TOOL_GUIDANCE%', toolGuidance || '')
@@ -520,6 +529,7 @@ function buildAuraEvidencePrompt({
     turnProfile,
     runtimeContext,
     memoryContext,
+    continuityContext,
     history,
     vectorContext,
     evidenceCatalog,
@@ -531,6 +541,7 @@ function buildAuraEvidencePrompt({
         .replace('%TURN_PROFILE%', turnProfile)
         .replace('%RUNTIME%', runtimeContext || 'Unavailable.')
         .replace('%MEMORY%', memoryContext || 'No stored context yet.')
+        .replace('%CONTINUITY%', continuityContext || 'No active thread yet.')
         .replace('%HISTORY%', history || 'No recent chat yet.')
         .replace('%VECTOR_CONTEXT%', vectorContext || 'No specific recalled context.')
         .replace('%EVIDENCE%', JSON.stringify(evidenceCatalog || [], null, 2))
@@ -1001,23 +1012,97 @@ function sanitizeContentForModelContext(content) {
     if (!raw.trim()) return '';
 
     const sanitized = normalizeReplyWhitespace(
-        stripPlanningScaffold(
-            stripMetaPreface(
-                stripToolTags(raw)
+        stripInlineSourceLine(
+            stripPlanningScaffold(
+                stripMetaPreface(
+                    stripToolTags(raw)
+                )
             )
         )
     );
 
     if (sanitized && !looksLikeLeakedReasoning(sanitized)) return sanitized;
-    return normalizeReplyWhitespace(stripToolTags(raw)).slice(0, 1200);
+    return normalizeReplyWhitespace(stripInlineSourceLine(stripToolTags(raw))).slice(0, 1200);
 }
 
-function buildModelSafeHistoryString(history, maxMessages = 16) {
+function buildModelSafeHistoryString(history, maxMessages = 20) {
     return (history || [])
         .slice(-maxMessages)
         .map((message) => `${message.role}: ${sanitizeContentForModelContext(message.content)}`)
         .filter((line) => !/: $/.test(line))
         .join('\n');
+}
+
+function getLatestMessageByRole(history = [], role) {
+    return [...(history || [])]
+        .reverse()
+        .find((message) => message.role === role && String(message.content || '').trim());
+}
+
+function getRecentThreadPairs(history = [], maxPairs = 4) {
+    const pairs = [];
+    let pendingUser = null;
+
+    (history || []).forEach((message) => {
+        const content = sanitizeContentForModelContext(message.content);
+        if (!content) return;
+
+        if (message.role === 'user') {
+            pendingUser = content;
+            return;
+        }
+
+        if (message.role === 'ai' && pendingUser) {
+            pairs.push({
+                user: pendingUser,
+                assistant: content
+            });
+            pendingUser = null;
+        }
+    });
+
+    return pairs.slice(-maxPairs);
+}
+
+function inferActiveThreadLabel(history = [], currentMessage = '') {
+    const text = [
+        currentMessage,
+        ...getRecentThreadPairs(history, 3).flatMap((pair) => [pair.user, pair.assistant])
+    ].join(' ').toLowerCase();
+
+    const topicPatterns = [
+        { label: 'bipolar disorder', pattern: /\bbipolar\b/ },
+        { label: 'ADHD and anxiety', pattern: /\badhd\b.*\banxiety\b|\banxiety\b.*\badhd\b/ },
+        { label: 'panic or anxiety symptoms', pattern: /\banxiety\b|\bpanic\b/ },
+        { label: 'medication safety', pattern: /\bmedication|meds|dose|prescription|side effect|interaction\b/ },
+        { label: 'mood and emotional support', pattern: /\bmood|feel|feeling|sad|angry|overwhelmed|stressed|lonely\b/ },
+        { label: 'planning and follow-through', pattern: /\bplan|steps|routine|schedule|organize|goal|task\b/ }
+    ];
+
+    return topicPatterns.find((entry) => entry.pattern.test(text))?.label || 'the current conversation thread';
+}
+
+function buildContinuityContext(history = [], currentMessage = '', turnSupport = null) {
+    const cleanCurrent = sanitizeContentForModelContext(currentMessage);
+    const latestUser = getLatestMessageByRole(history, 'user');
+    const latestAi = getLatestMessageByRole(history, 'ai');
+    const recentPairs = getRecentThreadPairs(history, 4);
+    const topic = inferActiveThreadLabel(history, cleanCurrent);
+    const safeTurn = sanitizeTurnSupportDecision(turnSupport);
+
+    const lines = [
+        `Active thread: ${topic}.`,
+        `Current turn: ${safeTurn.followUpIntent === 'new_topic' ? 'new topic or standalone question' : `follow-up (${safeTurn.followUpIntent})`}.`,
+        safeTurn.topicShift ? 'Topic shift: yes. Do not force old context.' : 'Topic shift: no. Preserve the thread and resolve pronouns from recent context.',
+        latestUser ? `Previous user turn: ${sanitizeContentForModelContext(latestUser.content).slice(0, 500)}` : '',
+        latestAi ? `Previous Aura turn: ${sanitizeContentForModelContext(latestAi.content).slice(0, 650)}` : '',
+        recentPairs.length
+            ? `Recent thread arc:\n${recentPairs.map((pair, index) => `${index + 1}. User: ${pair.user.slice(0, 240)}\n   Aura: ${pair.assistant.slice(0, 280)}`).join('\n')}`
+            : '',
+        'Continuity rule: answer the current turn as part of this thread, avoid restarting the whole topic, do not repeat the previous Aura turn verbatim, and carry forward useful unresolved context.'
+    ].filter(Boolean);
+
+    return lines.join('\n');
 }
 
 function buildChatScopedProfile() {
@@ -1289,7 +1374,22 @@ function deriveHeuristicToolOpportunity(userMessage, route) {
 
     if (!text.trim()) return sanitizeToolOpportunity(null);
 
-    if (/\b(panic|panic attack|can't breathe|hyperventilat|heart racing right now)\b/.test(text)) {
+    if (
+        /\b(identify|spot|recognize|notice|tell if|warning signs|red flags)\b/.test(text) &&
+        /\b(panic|anxiety attack|episode|spiral|crisis)\b/.test(text) &&
+        !/\b(right now|currently|happening now|can't breathe|hyperventilat|heart racing)\b/.test(text)
+    ) {
+        return sanitizeToolOpportunity({
+            shouldUseTool: true,
+            type: 'checklist',
+            theme: 'Signs and next steps',
+            reason: 'A recognition checklist turns information into something usable in the moment.',
+            confidence: 0.82,
+            userLine: 'I can also open a quick signs-and-next-steps checklist so this is easier to use in real life.'
+        });
+    }
+
+    if (/\b(panic|panic attack|anxiety attack|can't breathe|hyperventilat|heart racing right now|calm down right now)\b/.test(text)) {
         return sanitizeToolOpportunity({
             shouldUseTool: true,
             type: 'breathing_exercise',
@@ -1300,7 +1400,7 @@ function deriveHeuristicToolOpportunity(userMessage, route) {
         });
     }
 
-    if (/\b(safety plan|what should i do if i spiral|plan for crisis|if i get worse|in case i panic again)\b/.test(text)) {
+    if (/\b(safety plan|what should i do if i spiral|plan for crisis|if i get worse|in case i panic again|what to do if this happens again)\b/.test(text)) {
         return sanitizeToolOpportunity({
             shouldUseTool: true,
             type: 'safety_plan',
@@ -1311,7 +1411,7 @@ function deriveHeuristicToolOpportunity(userMessage, route) {
         });
     }
 
-    if (/\b(medication|meds|pill|prescription|dose|missed dose|side effect|interaction)\b/.test(text) && /\b(i|my|me)\b/.test(text)) {
+    if (/\b(medication|meds|pill|prescription|dose|missed dose|side effect|interaction|remember to take)\b/.test(text) && /\b(i|my|me|organize|track|checklist)\b/.test(text)) {
         return sanitizeToolOpportunity({
             shouldUseTool: true,
             type: 'medication_checklist',
@@ -1322,7 +1422,7 @@ function deriveHeuristicToolOpportunity(userMessage, route) {
         });
     }
 
-    if (/\b(doctor|clinician|appointment|visit|follow-up visit|specialist)\b/.test(text) && /\b(prepare|prep|questions|what should i ask|before)\b/.test(text)) {
+    if (/\b(doctor|clinician|appointment|visit|follow-up visit|specialist|therapist|psychiatrist)\b/.test(text) && /\b(prepare|prep|questions|what should i ask|before|bring up|talk to)\b/.test(text)) {
         return sanitizeToolOpportunity({
             shouldUseTool: true,
             type: 'appointment_prep',
@@ -1333,7 +1433,7 @@ function deriveHeuristicToolOpportunity(userMessage, route) {
         });
     }
 
-    if (/\b(check in|check-in|follow up|follow-up|keep me on track|remind me to)\b/.test(text)) {
+    if (/\b(check in|check-in|follow up|follow-up|keep me on track|remind me to|keep momentum|next few days|next week)\b/.test(text)) {
         return sanitizeToolOpportunity({
             shouldUseTool: true,
             type: 'follow_up_plan',
@@ -1344,7 +1444,7 @@ function deriveHeuristicToolOpportunity(userMessage, route) {
         });
     }
 
-    if (/\b(overwhelmed|too much|can't keep up|i'm stuck|need a plan|organize)\b/.test(text)) {
+    if (/\b(overwhelmed|too much|can't keep up|i'm stuck|need a plan|organize|break this down|step by step|what should i do next|help me start|make a plan)\b/.test(text)) {
         return sanitizeToolOpportunity({
             shouldUseTool: true,
             type: 'checklist',
@@ -1352,6 +1452,17 @@ function deriveHeuristicToolOpportunity(userMessage, route) {
             reason: 'Task decomposition reduces overload and improves execution.',
             confidence: 0.85,
             userLine: 'I can set up a quick checklist so this feels more manageable immediately.'
+        });
+    }
+
+    if (/\b(how can i|how do i|help me)\b/.test(text) && /\b(identify|spot|recognize|notice|tell if|warning signs|red flags)\b/.test(text)) {
+        return sanitizeToolOpportunity({
+            shouldUseTool: true,
+            type: 'checklist',
+            theme: 'Signs and next steps',
+            reason: 'A recognition checklist turns information into something usable in the moment.',
+            confidence: 0.78,
+            userLine: 'I can also open a quick signs-and-next-steps checklist so this is easier to use in real life.'
         });
     }
 
@@ -1366,7 +1477,7 @@ function deriveHeuristicToolOpportunity(userMessage, route) {
         });
     }
 
-    if (/\b(always|never|everyone thinks|i know it will fail|i'm doomed)\b/.test(text)) {
+    if (/\b(always|never|everyone thinks|i know it will fail|i'm doomed|i keep thinking|can't stop thinking|thought loop)\b/.test(text)) {
         return sanitizeToolOpportunity({
             shouldUseTool: true,
             type: 'thought_record',
@@ -1377,7 +1488,7 @@ function deriveHeuristicToolOpportunity(userMessage, route) {
         });
     }
 
-    if (/\b(feel terrible|really low|sad all day|angry all day|my mood)\b/.test(text)) {
+    if (/\b(feel terrible|really low|sad all day|angry all day|my mood|mood swings|mood has been|tracking my mood)\b/.test(text)) {
         return sanitizeToolOpportunity({
             shouldUseTool: true,
             type: 'mood_tracker',
@@ -1385,6 +1496,17 @@ function deriveHeuristicToolOpportunity(userMessage, route) {
             reason: 'Tracking can clarify patterns and triggers.',
             confidence: 0.7,
             userLine: 'If helpful, I can open a quick mood tracker so we can spot patterns.'
+        });
+    }
+
+    if (/\b(can you help me remember|can we keep track|track this|monitor this|log this)\b/.test(text)) {
+        return sanitizeToolOpportunity({
+            shouldUseTool: true,
+            type: 'follow_up_plan',
+            theme: 'Track and follow up',
+            reason: 'Tracking and follow-up help keep the conversation useful beyond one answer.',
+            confidence: 0.74,
+            userLine: 'I can set up a small follow-up card so we can keep track of this together.'
         });
     }
 
@@ -1439,9 +1561,24 @@ function hasActivePersonalNeedSignal(userMessage) {
     ].some((pattern) => pattern.test(text));
 }
 
+function hasActionableToolIntent(userMessage) {
+    const text = String(userMessage || '').toLowerCase();
+    if (!text.trim()) return false;
+
+    return [
+        /\b(what should i do|what do i do|how do i deal|how can i cope|help me cope|calm down|ground me)\b/,
+        /\b(plan|steps|checklist|routine|organize|prepare|prep|track|monitor|log|remember|follow up|check in)\b/,
+        /\b(identify|spot|recognize|warning signs|red flags|tell if)\b/,
+        /\b(make me|create|build|set up|open)\b/
+    ].some((pattern) => pattern.test(text));
+}
+
 function shouldSuppressProactiveToolOpportunity(userMessage, route) {
-    if (route.includes('Search') || route.includes('Knowledge')) return true;
-    if (isInformationalExplanationRequest(userMessage) && !hasActivePersonalNeedSignal(userMessage)) return true;
+    const actionable = hasActionableToolIntent(userMessage);
+    if ((route.includes('Search') || route.includes('Knowledge')) && !actionable && !hasActivePersonalNeedSignal(userMessage)) {
+        return true;
+    }
+    if (isInformationalExplanationRequest(userMessage) && !actionable && !hasActivePersonalNeedSignal(userMessage)) return true;
     return false;
 }
 
@@ -2163,7 +2300,7 @@ class ChatManager {
         return buildConversationSummaryContext(chat.contextSummary);
     }
 
-    canUseProactiveTool(type, minCooldownMs = 3 * 60 * 1000) {
+    canUseProactiveTool(type, minCooldownMs = 90 * 1000) {
         if (!TOOL_TYPES.has(type)) return false;
         const chat = this.state.chats[this.state.activeChatId];
         if (!chat) return false;
@@ -2172,7 +2309,7 @@ class ChatManager {
         if (chat.lastProactiveToolAt && (now - chat.lastProactiveToolAt) < minCooldownMs) return false;
 
         const currentCount = Array.isArray(chat.tools?.[type]) ? chat.tools[type].length : 0;
-        const maxPerType = (type === 'checklist' || type === 'follow_up_plan') ? 2 : 1;
+        const maxPerType = type === 'checklist' ? 4 : (type === 'follow_up_plan' ? 3 : 2);
         return currentCount < maxPerType;
     }
 
@@ -2462,6 +2599,95 @@ function claimLooksSnippetLike(text, evidenceCatalog, evidenceIds = []) {
     return false;
 }
 
+function cleanEvidenceSnippet(value) {
+    return normalizeReplyWhitespace(
+        String(value || '')
+            .replace(/\.{3,}|…/g, '.')
+            .replace(/\s+\|\s+.*$/g, '')
+            .replace(/\b(read more|learn more|click here)\b.*$/i, '')
+    );
+}
+
+function getQuestionFocus(message = '') {
+    const text = String(message || '').toLowerCase();
+    if (/\b(cause|causes|caused|why|risk factor|risk factors)\b/.test(text)) return 'causes';
+    if (/\b(symptom|symptoms|identify|spot|recognize|tell if|warning signs|red flags)\b/.test(text)) return 'signs';
+    if (/\b(treat|treatment|therapy|medication|manage|help)\b/.test(text)) return 'care';
+    if (/\b(types?|classes?|kinds?|categories?|how many)\b/.test(text)) return 'types';
+    if (/\b(link|relationship|connection|related|overlap)\b/.test(text)) return 'relationship';
+    return 'general';
+}
+
+function evidenceMatchesFocus(text, focus) {
+    const value = String(text || '').toLowerCase();
+    const focusPatterns = {
+        causes: /\b(cause|causes|caused|risk|genetic|family|brain|chemical|environment|stress|trigger)\b/,
+        signs: /\b(symptom|sign|heart|breath|sweat|trembl|fear|dizziness|chest|nausea|episode|attack)\b/,
+        care: /\b(treat|treatment|therapy|medication|manage|support|care|doctor|clinician)\b/,
+        types: /\b(type|class|bipolar i|bipolar ii|cyclothym|category|categories)\b/,
+        relationship: /\b(link|relationship|connection|comorbid|overlap|associated|risk)\b/,
+        general: /./
+    };
+    return (focusPatterns[focus] || focusPatterns.general).test(value);
+}
+
+function extractEvidenceFactCandidates(userMessage, evidenceCatalog) {
+    const focus = getQuestionFocus(userMessage);
+    const candidates = [];
+    const seen = new Set();
+
+    (evidenceCatalog || []).forEach((entry) => {
+        const sourceText = cleanEvidenceSnippet(entry.snippet || entry.title || '');
+        if (!sourceText) return;
+
+        const fragments = sourceText
+            .split(/(?<=[.!?])\s+|;\s+/)
+            .map((fragment) => cleanEvidenceSnippet(fragment))
+            .filter((fragment) => fragment.length >= 45)
+            .filter((fragment) => evidenceMatchesFocus(fragment, focus));
+
+        const usableFragments = fragments.length ? fragments : [sourceText].filter((fragment) => fragment.length >= 45);
+        usableFragments.forEach((fragment) => {
+            const key = normalizeComparisonText(fragment).slice(0, 160);
+            if (!key || seen.has(key)) return;
+            seen.add(key);
+            candidates.push(fragment);
+        });
+    });
+
+    return candidates.slice(0, 4);
+}
+
+function makeSentence(value) {
+    const text = normalizeReplyWhitespace(value);
+    if (!text) return '';
+    return /[.!?]$/.test(text) ? text : `${text}.`;
+}
+
+function buildEvidenceAnswerFromFragments(userMessage, evidenceCatalog) {
+    const facts = extractEvidenceFactCandidates(userMessage, evidenceCatalog)
+        .map(makeSentence)
+        .filter(Boolean);
+
+    if (!facts.length) return '';
+
+    const focus = getQuestionFocus(userMessage);
+    const openingByFocus = {
+        causes: "It usually is not one single cause. The clearest picture is a mix of vulnerability and triggers.",
+        signs: "The main thing to look for is a sudden shift: the person may seem intensely frightened or overwhelmed, and their body may look like it has gone into alarm mode.",
+        care: "The useful way to think about treatment is that it usually needs both symptom relief and prevention, not just a one-time fix.",
+        types: "The cleanest way to answer it is by separating the main categories first, then looking at what makes each one different.",
+        relationship: "The relationship is real, but it is not usually a simple one-way cause. It is more of an overlap where each condition can make the other harder to manage.",
+        general: "The most useful way to frame it is this:"
+    };
+
+    return normalizeReplyWhitespace([
+        openingByFocus[focus] || openingByFocus.general,
+        facts.slice(0, 3).join(' '),
+        facts.length > 3 ? facts[3] : ''
+    ].filter(Boolean).join('\n\n'));
+}
+
 function cleanSourceLabel(label) {
     return String(label || '')
         .replace(/[\[\]]/g, '')
@@ -2483,21 +2709,52 @@ function buildSourcesLineFromEvidenceIds(evidenceIds, evidenceCatalog) {
     return `Sources: ${links.join(', ')}`;
 }
 
-function buildDeterministicSearchFallback(evidenceCatalog, preferences = DEFAULT_RESPONSE_PREFERENCES) {
+function buildHumanFallbackAnswer(userMessage, route = 'GeneralFriendAgent') {
+    const focus = getQuestionFocus(userMessage);
+    const text = String(userMessage || '').toLowerCase();
+
+    if (focus === 'signs') {
+        return "Look for a sudden change from the person’s normal state. With panic or intense anxiety, that can look like fast breathing, shaking, sweating, chest tightness, dizziness, nausea, a racing heart, feeling trapped, or saying they feel like they might die or lose control.\n\nThe most helpful response is usually calm and simple: stay with them, lower stimulation if you can, remind them it will pass, and help them slow their breathing. If symptoms look medically serious, especially chest pain, fainting, one-sided weakness, severe shortness of breath, or this is new for them, treat it as a medical concern and get urgent help.";
+    }
+
+    if (focus === 'causes') {
+        return "It is usually not one single cause. A better way to think about it is vulnerability plus triggers: biology, family history, sleep, stress, substances, health changes, and life events can all interact.\n\nThat matters because it means the goal is not blame. The useful move is to look for patterns: when it happens, what changed beforehand, how sleep has been, what stressors are active, and whether anything makes it better or worse.";
+    }
+
+    if (focus === 'types') {
+        return "The cleanest way to answer is to separate the main categories first, then explain what makes each one different. In mental-health topics, those categories usually depend on the pattern, duration, severity, and how much daily life is affected.\n\nA clinician would not rely on the label alone. They would look at the timeline, symptoms, sleep, functioning, risk, and whether there have been episodes before.";
+    }
+
+    if (focus === 'care') {
+        return "The practical approach is usually two-part: handle what is happening right now, then reduce the chance it keeps happening. That can mean calming the immediate symptoms, tracking patterns, protecting sleep, reducing obvious triggers, and getting professional help when symptoms are recurring, risky, or disrupting daily life.";
+    }
+
+    if (route.includes('Search')) {
+        return "I do not want to pretend certainty where details matter. The safest way to answer is to separate what is stable from what needs checking: the broad pattern can be explained, but anything current, local, legal, or very specific should be verified before acting on it.";
+    }
+
+    return "The useful way to think about it is to stay with the actual pattern rather than jump to a label. What changed, how intense it is, how long it lasts, what makes it better or worse, and whether it affects safety or daily life usually matter more than a quick one-line answer.";
+}
+
+function buildDeterministicSearchFallback(userMessage, evidenceCatalog, preferences = DEFAULT_RESPONSE_PREFERENCES) {
     if (!evidenceCatalog.length) {
-        const lead = preferences.reassuranceLevel === 'high'
-            ? "I know this is important, and I want to be accurate."
-            : '';
-        const core = "I can't verify this confidently from reliable live sources right now.";
-        const next = "If you want, I can try again shortly and cross-check more references.";
-        return normalizeReplyWhitespace([lead, core, next].filter(Boolean).join(' '));
+        return buildHumanFallbackAnswer(userMessage, 'SearchAgent');
+    }
+
+    const fragmentAnswer = buildEvidenceAnswerFromFragments(userMessage, evidenceCatalog);
+    if (fragmentAnswer) {
+        const sourcesLine = buildSourcesLineFromEvidenceIds(
+            evidenceCatalog.filter((entry) => entry.url).slice(0, 4).map((entry) => entry.id),
+            evidenceCatalog
+        );
+        return normalizeReplyWhitespace(`${fragmentAnswer}${sourcesLine ? `\n\n${sourcesLine}` : ''}`);
     }
 
     const topEvidence = evidenceCatalog[0];
     const topSnippet = String(topEvidence.snippet || '').trim();
     const naturalFallback = topSnippet && !claimLooksSnippetLike(topSnippet, evidenceCatalog, [topEvidence.id])
         ? topSnippet
-        : "I found relevant sources on this, but I don't want to overstate what I can verify cleanly from that evidence alone.";
+        : buildMinimumEvidenceAnswer(userMessage, evidenceCatalog);
     const sourcesLine = buildSourcesLineFromEvidenceIds(
         evidenceCatalog.filter((entry) => entry.url).slice(0, 4).map((entry) => entry.id),
         evidenceCatalog
@@ -2509,16 +2766,34 @@ function buildDeterministicSearchFallback(evidenceCatalog, preferences = DEFAULT
 }
 
 function buildMinimumEvidenceAnswer(userMessage, evidenceCatalog) {
-    const text = String(userMessage || '').toLowerCase();
-    const titlesAndSnippets = (evidenceCatalog || [])
-        .map((entry) => `${entry.title || ''} ${entry.snippet || ''}`.toLowerCase())
-        .join(' ');
+    return buildEvidenceAnswerFromFragments(userMessage, evidenceCatalog) ||
+        "I would treat this as something that needs a careful, plain-English answer rather than a quick guess. The safest read from the available information is that there are several moving parts, so the next step is to look at the pattern, timing, severity, and what changed recently.";
+}
 
-    if (/\bbipolar\b/.test(`${text} ${titlesAndSnippets}`) && /\b(cause|causes|caused|why)\b/.test(text)) {
-        return "Bipolar disorder usually is not caused by one single thing. The better way to think about it is vulnerability plus triggers: genetics can raise the baseline risk, brain chemistry and sleep-wake regulation seem to matter, and major stress, substance use, sleep disruption, or big life changes can help trigger episodes in someone who is already vulnerable.\n\nThat does not mean someone caused it by making bad choices. It is a real mood disorder with biological pieces, and the practical goal is usually to identify personal triggers, protect sleep, avoid destabilizing substances when possible, and work with a clinician on a treatment plan that lowers the chance of future manic, hypomanic, or depressive episodes.";
+function removeImmediateAssistantEcho(reply) {
+    const artifacts = splitReplyArtifacts(reply);
+    const body = normalizeReplyWhitespace(artifacts.body);
+    if (!body || typeof window === 'undefined' || !window.chatManager) return reply;
+
+    const latestAi = getLatestMessageByRole(window.chatManager.getActiveChatHistory(), 'ai');
+    const previousBody = sanitizeContentForModelContext(latestAi?.content || '');
+    if (!previousBody) return reply;
+
+    const paragraphs = body.split(/\n{2,}/).map((part) => part.trim()).filter(Boolean);
+    if (paragraphs.length < 2) return reply;
+
+    const firstParagraph = paragraphs[0];
+    const normalizedFirst = normalizeComparisonText(firstParagraph);
+    const normalizedPrevious = normalizeComparisonText(previousBody);
+    if (!normalizedFirst || normalizedFirst.length < 40 || !normalizedPrevious.includes(normalizedFirst)) {
+        return reply;
     }
 
-    return "I found relevant sources for this, but the model did not produce a stable written synthesis on that attempt. The sources below are still attached so you can inspect them, and you can ask the same follow-up again if you want me to take another pass.";
+    return reassembleReplyArtifacts({
+        body: paragraphs.slice(1).join('\n\n'),
+        toolTags: artifacts.toolTags,
+        sourceLines: artifacts.sourceLines
+    });
 }
 
 async function finalizeReplyWithProactiveTool(
@@ -2529,7 +2804,7 @@ async function finalizeReplyWithProactiveTool(
     preferences = DEFAULT_RESPONSE_PREFERENCES,
     turnSupport = null
 ) {
-    const cleanReply = await finalizeAssistantReply(rawReply, userMessage);
+    const cleanReply = removeImmediateAssistantEcho(await finalizeAssistantReply(rawReply, userMessage));
     if (!cleanReply) return null;
     if (!recommendation) return cleanReply;
 
@@ -2585,6 +2860,7 @@ async function getOllamaResponse(userMessage, toolFollowUp = null, documentText 
             turnProfile,
             runtimeContext,
             memoryContext: buildAuraMemoryContext(profileStr, conversationSummary),
+            continuityContext: buildContinuityContext(chatHistory, 'Respond to the tool interaction and help the user continue.', turnSupport),
             history: modelHistoryStr,
             vectorContext: '',
             toolGuidance: `The user interacted with an Aura tool: ${JSON.stringify(toolFollowUp)}. Respond naturally to that interaction.`,
@@ -2618,12 +2894,13 @@ async function getOllamaResponse(userMessage, toolFollowUp = null, documentText 
         { needsSources: false, confidence: 0, reason: '' }
     );
     const effectiveRoute = shouldUseSearchEvidence(route, sourceNeedDecision) ? 'SearchAgent' : route;
-    const highRiskRecommendations = inferHighRiskSafetyRecommendations(contextualUserMessage);
-    const proactiveRecommendation = await inferProactiveToolOpportunity(contextualUserMessage, effectiveRoute, adaptivePreferences);
+    const highRiskRecommendations = inferHighRiskSafetyRecommendations(userMessage);
+    const proactiveRecommendation = await inferProactiveToolOpportunity(userMessage, effectiveRoute, adaptivePreferences);
     const proactiveToolGuidance = buildProactiveToolGuidance(proactiveRecommendation);
     const vectorContext = await chatManager.searchVectorData(contextualUserMessage || userMessage);
     const historyStr = modelHistoryStr;
     const memoryContext = buildAuraMemoryContext(profileStr, conversationSummary);
+    const continuityContext = buildContinuityContext(chatHistory, contextualUserMessage || userMessage, turnSupport);
     const turnProfile = buildAuraTurnProfile({
         route: effectiveRoute,
         sourceDecision: sourceNeedDecision,
@@ -2644,6 +2921,7 @@ async function getOllamaResponse(userMessage, toolFollowUp = null, documentText 
                             turnProfile,
                             runtimeContext,
                             memoryContext: `${memoryContext}\n\nKnowledge base material:\n${content}`,
+                            continuityContext,
                             history: historyStr,
                             vectorContext,
                             toolGuidance: proactiveToolGuidance,
@@ -2657,7 +2935,7 @@ async function getOllamaResponse(userMessage, toolFollowUp = null, documentText 
                         adaptivePreferences,
                         turnSupport
                     )) || attachHighRiskSafetyRecommendations(
-                        "I couldn't produce a solid answer on that attempt. Ask again and I'll give you a clearer, more complete explanation.",
+                        buildHumanFallbackAnswer(contextualUserMessage, effectiveRoute),
                         highRiskRecommendations
                     )
                 );
@@ -2676,12 +2954,13 @@ async function getOllamaResponse(userMessage, toolFollowUp = null, documentText 
                     turnProfile,
                     runtimeContext,
                     memoryContext,
+                    continuityContext,
                     history: historyStr,
                     vectorContext,
                     evidenceCatalog,
                     userMessage: contextualUserMessage
                 }))
-                : buildDeterministicSearchFallback(evidenceCatalog, adaptivePreferences);
+                : buildDeterministicSearchFallback(contextualUserMessage, evidenceCatalog, adaptivePreferences);
             const safeRenderedBody = normalizeReplyWhitespace(renderedReplyBody) ||
                 buildMinimumEvidenceAnswer(contextualUserMessage, evidenceCatalog);
             const sourcesLine = buildSourcesLineFromEvidenceIds(
@@ -2703,14 +2982,14 @@ async function getOllamaResponse(userMessage, toolFollowUp = null, documentText 
                     turnSupport
                 )) ||
                 attachHighRiskSafetyRecommendations(
-                    "I could not verify enough reliable detail to answer that well right now. Please try again in a moment and I will cross-check it again.",
+                    buildHumanFallbackAnswer(contextualUserMessage, effectiveRoute),
                     highRiskRecommendations
                 )
             );
         } catch (error) {
             console.error('[SearchAgent] Full failure details:', error);
             return attachHighRiskSafetyRecommendations(
-                "I'm temporarily unable to verify that live right now. Please try again in a moment and I'll provide a source-backed answer.",
+                buildHumanFallbackAnswer(contextualUserMessage, effectiveRoute),
                 highRiskRecommendations
             );
         }
@@ -2721,6 +3000,7 @@ async function getOllamaResponse(userMessage, toolFollowUp = null, documentText 
         turnProfile,
         runtimeContext,
         memoryContext,
+        continuityContext,
         history: historyStr,
         vectorContext,
         toolGuidance: proactiveToolGuidance,
@@ -2736,8 +3016,5 @@ async function getOllamaResponse(userMessage, toolFollowUp = null, documentText 
         effectiveRoute,
         adaptivePreferences,
         turnSupport
-    )) || attachHighRiskSafetyRecommendations(
-        "I couldn't generate a high-quality response on that try. Ask again and I'll give you a clearer, more complete answer.",
-        highRiskRecommendations
-    );
+    )) || attachHighRiskSafetyRecommendations(buildHumanFallbackAnswer(contextualUserMessage || userMessage, effectiveRoute), highRiskRecommendations);
 }
