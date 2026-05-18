@@ -10,6 +10,7 @@ window.AURA_CONFIG = {
     defaultModel: 'medgemma1.5:4b',
     preferredModels: [
         'medgemma1.5:4b',
+        'gpt-oss:120b-cloud',
         'dcarrascosa/medgemma-1.5-4b-it:Q4_K_M',
         'medgemma-1.5-4b-it:Q4_K_M',
         'google/medgemma-1.5-4b-it'

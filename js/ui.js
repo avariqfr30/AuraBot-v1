@@ -58,6 +58,9 @@ function showSourcesModal(links = []) {
 }
 
 function renderEmptyState() {
+    const activeStyle = typeof window.getExperienceStyleKey === 'function'
+        ? window.getExperienceStyleKey()
+        : 'balanced';
     chatMessages.classList.add('is-empty');
     chatMessages.innerHTML = `
         <section class="empty-state-panel" aria-label="Start a new conversation">
@@ -74,6 +77,19 @@ function renderEmptyState() {
             </div>
             <h2 class="empty-state-title">What do you want to work through?</h2>
             <p class="empty-state-subtitle">Aura can chat, reason through health questions, look things up, and help you sort out your next step without changing how the app already works.</p>
+            <div class="experience-style-panel" aria-label="Choose Aura response style">
+                <div>
+                    <div class="experience-style-eyebrow">Aura style</div>
+                    <p class="experience-style-copy">Pick how you want Aura to feel in this chat. You can still ask for anything normally.</p>
+                </div>
+                <div class="experience-style-grid">
+                    <button type="button" class="experience-style-chip ${activeStyle === 'balanced' ? 'is-active' : ''}" data-experience-style="balanced">Balanced</button>
+                    <button type="button" class="experience-style-chip ${activeStyle === 'gentle' ? 'is-active' : ''}" data-experience-style="gentle">Gentle</button>
+                    <button type="button" class="experience-style-chip ${activeStyle === 'practical' ? 'is-active' : ''}" data-experience-style="practical">Step-by-step</button>
+                    <button type="button" class="experience-style-chip ${activeStyle === 'research' ? 'is-active' : ''}" data-experience-style="research">Research-minded</button>
+                    <button type="button" class="experience-style-chip ${activeStyle === 'direct' ? 'is-active' : ''}" data-experience-style="direct">Direct</button>
+                </div>
+            </div>
             <div class="prompt-label">Try one of these</div>
             <div class="prompt-chip-grid">
                 <button type="button" class="prompt-chip" data-prompt-suggestion="Help me understand a symptom in plain English.">Help me understand a symptom</button>
@@ -415,6 +431,17 @@ function addToolStatusMessage(toolType) {
     chatMessages.querySelector('.empty-state-panel')?.remove();
     chatMessages.classList.remove('is-empty');
     const formattedName = toolType.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+    const actionCopy = {
+        mood_tracker: 'Aura is opening a mood tracker.',
+        checklist: 'Aura is turning this into a checklist.',
+        thought_record: 'Aura is setting up a thought record.',
+        affirmation_card: 'Aura is making an affirmation card.',
+        breathing_exercise: 'Aura is opening a breathing reset.',
+        safety_plan: 'Aura is building a safety plan.',
+        medication_checklist: 'Aura is organizing a medication checklist.',
+        appointment_prep: 'Aura is preparing an appointment card.',
+        follow_up_plan: 'Aura is setting up a follow-up plan.'
+    };
     const statusDiv = document.createElement('div');
     statusDiv.className = 'flex justify-start tool-status-message mb-4';
     statusDiv.innerHTML = `
@@ -422,7 +449,7 @@ function addToolStatusMessage(toolType) {
             <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 animate-spin" viewBox="0 0 20 20" fill="currentColor">
                 <path fill-rule="evenodd" d="M11.49 3.17c-.38-1.56-2.6-1.56-2.98 0a1.532 1.532 0 01-2.286.948c-1.372-.836-2.942.734-2.106 2.106.54.886.061 2.042-.947 2.287-1.561.379-1.561 2.6 0 2.978a1.532 1.532 0 01.947 2.287c-.836 1.372.734 2.942 2.106 2.106a1.532 1.532 0 012.287.947c.379 1.561 2.6 1.561 2.978 0a1.532 1.532 0 012.287-.947c1.372.836 2.942-.734 2.106-2.106a1.532 1.532 0 01-.947-2.287c1.561-.379 1.561-2.6 0-2.978a1.532 1.532 0 01-.947-2.287c.836-1.372-.734-2.942-2.106-2.106a1.532 1.532 0 01-2.287-.947zM10 13a3 3 0 100-6 3 3 0 000 6z" clip-rule="evenodd" />
             </svg>
-            <i>Aura is using the <strong>${formattedName}</strong> tool...</i>
+            <i>${actionCopy[toolType] || `Aura is setting up ${formattedName}.`}</i>
         </div>`;
     chatMessages.appendChild(statusDiv); chatMessages.scrollTo({ top: chatMessages.scrollHeight, behavior: 'smooth' });
 }
@@ -464,13 +491,17 @@ function renderChatList(chats, activeChatId) {
 }
 
 function toggleToolsButton(hasTools) { toolsButton.classList.toggle('hidden', !hasTools); }
-function showTypingIndicator() {
+function showTypingIndicator(message = 'Aura is thinking this through.') {
     if (document.getElementById('typingIndicator')) return;
     chatMessages.querySelector('.empty-state-panel')?.remove();
     chatMessages.classList.remove('is-empty');
     const typingDiv = document.createElement('div'); typingDiv.id = 'typingIndicator'; typingDiv.className = 'flex justify-start mb-4';
-    typingDiv.innerHTML = `<div class="chat-bubble bg-gray-800 max-w-[75%] p-4 rounded-xl shadow-md"><div class="flex items-center space-x-1.5"><div class="w-2.5 h-2.5 bg-gray-500 rounded-full animate-bounce" style="animation-delay: -0.3s;"></div><div class="w-2.5 h-2.5 bg-gray-500 rounded-full animate-bounce" style="animation-delay: -0.15s;"></div><div class="w-2.5 h-2.5 bg-gray-500 rounded-full animate-bounce"></div></div></div>`;
+    typingDiv.innerHTML = `<div class="chat-bubble bg-gray-800 max-w-[75%] p-4 rounded-xl shadow-md"><div class="typing-content"><div class="typing-dots"><span style="animation-delay: -0.3s;"></span><span style="animation-delay: -0.15s;"></span><span></span></div><span class="typing-status">${escapeHTML(message)}</span></div></div>`;
     chatMessages.appendChild(typingDiv); chatMessages.scrollTo({ top: chatMessages.scrollHeight, behavior: 'smooth' });
+}
+function updateTypingIndicator(message) {
+    const target = document.querySelector('#typingIndicator .typing-status');
+    if (target) target.textContent = message;
 }
 function hideTypingIndicator() { document.getElementById('typingIndicator')?.remove(); }
 

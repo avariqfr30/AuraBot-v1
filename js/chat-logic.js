@@ -1,11 +1,14 @@
 const STORAGE_KEYS = {
     STATE: 'aura_app_state',
     PROMPT: 'aura_system_prompt',
+    PROMPT_OVERRIDE_ENABLED: 'aura_prompt_override_enabled',
     MODEL: 'aura_model_name',
     THEME: 'aura_theme',
     LOCATION_ENABLED: 'aura_location_enabled',
     LOCATION_CONTEXT: 'aura_location_context',
-    USER_MEMORY_ENABLED: 'aura_user_memory_enabled'
+    USER_MEMORY_ENABLED: 'aura_user_memory_enabled',
+    EXPERIENCE_STYLE: 'aura_experience_style',
+    THINKING_MODE: 'aura_thinking_mode'
 };
 
 const API_ENDPOINTS = {
@@ -69,6 +72,79 @@ const DEFAULT_RESPONSE_PREFERENCES = {
     directnessLevel: 'balanced',
     followUpLevel: 'gentle',
     likelyTone: 'neutral'
+};
+
+const EXPERIENCE_STYLE_PRESETS = {
+    balanced: {
+        label: 'Balanced',
+        preferences: {}
+    },
+    gentle: {
+        label: 'Gentle Support',
+        preferences: {
+            reassuranceLevel: 'high',
+            directnessLevel: 'soft',
+            followUpLevel: 'active',
+            likelyTone: 'gentle'
+        }
+    },
+    practical: {
+        label: 'Step-by-Step',
+        preferences: {
+            detailLevel: 'balanced',
+            structureLevel: 'stepwise',
+            directnessLevel: 'balanced',
+            followUpLevel: 'active',
+            likelyTone: 'practical'
+        }
+    },
+    research: {
+        label: 'Research-Minded',
+        preferences: {
+            detailLevel: 'detailed',
+            structureLevel: 'mixed',
+            technicalLevel: 'mixed',
+            followUpLevel: 'active',
+            likelyTone: 'curious'
+        }
+    },
+    direct: {
+        label: 'Clear and Direct',
+        preferences: {
+            detailLevel: 'balanced',
+            directnessLevel: 'direct',
+            structureLevel: 'mixed',
+            followUpLevel: 'gentle',
+            likelyTone: 'direct'
+        }
+    }
+};
+
+const THINKING_MODE_PRESETS = {
+    fast: {
+        label: 'Fast',
+        prompt: 'Use a quick internal pass. Prefer speed for simple, low-risk questions.',
+        defaultOptions: { num_ctx: 6144, num_predict: 768 },
+        analysisOptions: { num_ctx: 4096, num_predict: 256 },
+        cleanupOptions: { num_ctx: 4096, num_predict: 320 },
+        jsonOptions: { num_ctx: 4096, num_predict: 384 }
+    },
+    balanced: {
+        label: 'Balanced',
+        prompt: 'Use normal internal care. Balance speed, context, and completeness.',
+        defaultOptions: {},
+        analysisOptions: {},
+        cleanupOptions: {},
+        jsonOptions: {}
+    },
+    deep: {
+        label: 'Deep',
+        prompt: 'Use a more careful internal pass. Check context, evidence needs, safety, and practical implications before answering.',
+        defaultOptions: { num_ctx: 12288, num_predict: 1792 },
+        analysisOptions: { num_ctx: 8192, num_predict: 640 },
+        cleanupOptions: { num_ctx: 8192, num_predict: 640 },
+        jsonOptions: { num_ctx: 8192, num_predict: 768 }
+    }
 };
 
 const PROMPTS = {
@@ -434,6 +510,12 @@ function buildResponseSystemPrompt(basePrompt, modelName) {
     ].join('\n\n');
 }
 
+function getEffectiveSystemPrompt() {
+    const overrideEnabled = localStorage.getItem(STORAGE_KEYS.PROMPT_OVERRIDE_ENABLED) === 'true';
+    const overridePrompt = String(localStorage.getItem(STORAGE_KEYS.PROMPT) || '').trim();
+    return overrideEnabled && overridePrompt ? overridePrompt : PROMPTS.DEFAULT_SYSTEM;
+}
+
 function buildAuraGenerationSystemPrompt(modelName) {
     const base = `You are Aura, a professional but warm AI companion for everyday support, learning, planning, and health questions.
 Write only the final user-facing answer. Do not write thought, analysis, planning, or hidden notes.`;
@@ -474,9 +556,13 @@ function buildAuraTurnProfile({ route, sourceDecision, preferences, turnSupport,
     const safePreferences = sanitizeResponsePreferences(preferences, DEFAULT_RESPONSE_PREFERENCES);
     const safeTurn = sanitizeTurnSupportDecision(turnSupport);
     const sourceMode = sourceDecision?.needsSources ? 'Use external evidence when answering factual claims.' : 'Use normal conversation and memory unless evidence is clearly needed.';
+    const experienceMode = buildExperienceStyleContext();
+    const thinkingMode = buildThinkingModeContext();
 
     return [
         `Intent route: ${safeRoute}`,
+        `Experience style: ${experienceMode}`,
+        `Thinking mode: ${thinkingMode}`,
         `Support mode: ${safeTurn.primaryMode}${safeTurn.secondaryMode !== 'none' ? ` + ${safeTurn.secondaryMode}` : ''}`,
         `Follow-up intent: ${safeTurn.followUpIntent}`,
         `Distress level: ${safeTurn.distressLevel}`,
@@ -557,8 +643,44 @@ function getConfiguredOllamaOptions(format = null, callType = 'default') {
     return configured.default || {};
 }
 
+function getThinkingModeKey(value = null) {
+    const raw = String(value || localStorage.getItem(STORAGE_KEYS.THINKING_MODE) || 'balanced').trim();
+    return Object.prototype.hasOwnProperty.call(THINKING_MODE_PRESETS, raw) ? raw : 'balanced';
+}
+
+function getThinkingModePreset(mode = null) {
+    return THINKING_MODE_PRESETS[getThinkingModeKey(mode)] || THINKING_MODE_PRESETS.balanced;
+}
+
+function getThinkingModeOptions(format = null, callType = 'default') {
+    const preset = getThinkingModePreset();
+    if (format === 'json') return preset.jsonOptions || {};
+    if (callType === 'analysis') return preset.analysisOptions || {};
+    if (callType === 'cleanup') return preset.cleanupOptions || {};
+    return preset.defaultOptions || {};
+}
+
+function buildThinkingModeContext(mode = null) {
+    const key = getThinkingModeKey(mode);
+    const preset = getThinkingModePreset(key);
+    return `${preset.label}: ${preset.prompt}`;
+}
+
+function applyThinkingMode(mode) {
+    const key = getThinkingModeKey(mode);
+    localStorage.setItem(STORAGE_KEYS.THINKING_MODE, key);
+    return key;
+}
+
+window.applyThinkingMode = applyThinkingMode;
+window.getThinkingModeKey = getThinkingModeKey;
+window.THINKING_MODE_PRESETS = THINKING_MODE_PRESETS;
+
 function getModelGenerationOptions(modelName, format = null, callType = 'default') {
-    const configuredOptions = getConfiguredOllamaOptions(format, callType);
+    const configuredOptions = {
+        ...getConfiguredOllamaOptions(format, callType),
+        ...getThinkingModeOptions(format, callType)
+    };
 
     if (format === 'json') {
         return {
@@ -580,9 +702,12 @@ function getModelGenerationOptions(modelName, format = null, callType = 'default
 
     if (!isMedGemmaModel(modelName)) return configuredOptions;
 
+    const thinkingMode = getThinkingModeKey();
     return {
         ...configuredOptions,
-        num_predict: Math.max(Number(configuredOptions.num_predict) || 0, 1536),
+        num_predict: thinkingMode === 'fast'
+            ? (Number(configuredOptions.num_predict) || 896)
+            : Math.max(Number(configuredOptions.num_predict) || 0, 1536),
         temperature: 0.28,
         top_p: 0.9,
         repeat_penalty: 1.05
@@ -1090,6 +1215,59 @@ function sanitizeResponsePreferences(candidate, fallback = DEFAULT_RESPONSE_PREF
     };
 }
 
+function getExperienceStyleKey(value = null) {
+    const raw = String(value || localStorage.getItem(STORAGE_KEYS.EXPERIENCE_STYLE) || 'balanced').trim();
+    return Object.prototype.hasOwnProperty.call(EXPERIENCE_STYLE_PRESETS, raw) ? raw : 'balanced';
+}
+
+function getExperienceStylePreset(style = null) {
+    return EXPERIENCE_STYLE_PRESETS[getExperienceStyleKey(style)] || EXPERIENCE_STYLE_PRESETS.balanced;
+}
+
+function getStoredExperienceResponsePreferences() {
+    const preset = getExperienceStylePreset();
+    return sanitizeResponsePreferences(
+        {
+            ...DEFAULT_RESPONSE_PREFERENCES,
+            ...preset.preferences
+        },
+        DEFAULT_RESPONSE_PREFERENCES
+    );
+}
+
+function buildExperienceStyleContext(style = null) {
+    const key = getExperienceStyleKey(style);
+    const preset = getExperienceStylePreset(key);
+
+    const guidance = {
+        balanced: 'Balanced warmth, clarity, and practical help.',
+        gentle: 'Lead with reassurance and emotional steadiness before advice.',
+        practical: 'Make the reply easy to act on with clear next steps.',
+        research: 'Give fuller explanations and quietly use evidence when useful.',
+        direct: 'Be concise, plain, and direct without becoming cold.'
+    };
+
+    return `${preset.label}: ${guidance[key] || guidance.balanced}`;
+}
+
+function applyExperienceStyle(style) {
+    const key = getExperienceStyleKey(style);
+    localStorage.setItem(STORAGE_KEYS.EXPERIENCE_STYLE, key);
+
+    if (typeof window !== 'undefined' && window.chatManager) {
+        window.chatManager.updateResponsePreferences({
+            ...window.chatManager.getActiveResponsePreferences(),
+            ...getExperienceStylePreset(key).preferences
+        });
+    }
+
+    return key;
+}
+
+window.applyExperienceStyle = applyExperienceStyle;
+window.getExperienceStyleKey = getExperienceStyleKey;
+window.EXPERIENCE_STYLE_PRESETS = EXPERIENCE_STYLE_PRESETS;
+
 function deriveHeuristicResponsePreferences(message, base = DEFAULT_RESPONSE_PREFERENCES) {
     const text = String(message || '').toLowerCase();
     const derived = { ...base };
@@ -1252,7 +1430,7 @@ function buildChatScopedProfile() {
         moodPatterns: [],
         potentialLapses: [],
         behavioralFacts: [],
-        responsePreferences: { ...DEFAULT_RESPONSE_PREFERENCES }
+        responsePreferences: getStoredExperienceResponsePreferences()
     };
 }
 
@@ -2394,6 +2572,17 @@ class ChatManager {
         return sanitizeChatScopedProfile(this.state.localContentStore, buildChatScopedProfile());
     }
 
+    rememberUserFact(text) {
+        const value = String(text || '').trim();
+        if (!value) return false;
+
+        const store = sanitizeChatScopedProfile(this.state.localContentStore, buildChatScopedProfile());
+        store.behavioralFacts = mergeUniqueStrings(store.behavioralFacts, [value]).slice(0, 20);
+        this.state.localContentStore = store;
+        this.saveState();
+        return true;
+    }
+
     getCombinedContentStore() {
         return buildCombinedProfileStore(
             this.getActiveContentStore(),
@@ -2404,6 +2593,29 @@ class ChatManager {
 
     clearUserMemoryStore() {
         this.state.localContentStore = buildChatScopedProfile();
+        this.saveState();
+    }
+
+    exportLocalData() {
+        return {
+            exportedAt: new Date().toISOString(),
+            version: 'aura-local-export-v1',
+            state: this.state,
+            settings: {
+                theme: localStorage.getItem(STORAGE_KEYS.THEME),
+                model: localStorage.getItem(STORAGE_KEYS.MODEL),
+                experienceStyle: localStorage.getItem(STORAGE_KEYS.EXPERIENCE_STYLE),
+                thinkingMode: localStorage.getItem(STORAGE_KEYS.THINKING_MODE),
+                locationEnabled: localStorage.getItem(STORAGE_KEYS.LOCATION_ENABLED) === 'true',
+                userMemoryEnabled: localStorage.getItem(STORAGE_KEYS.USER_MEMORY_ENABLED) === 'true'
+            }
+        };
+    }
+
+    deleteAllLocalData() {
+        Object.values(STORAGE_KEYS).forEach((key) => localStorage.removeItem(key));
+        this.state = this.getInitialState();
+        this.createNewChat();
         this.saveState();
     }
 
@@ -2566,7 +2778,7 @@ class ChatManager {
 
         const activeModel = getSelectedModelName();
         const responseSystemPrompt = buildResponseSystemPrompt(
-            localStorage.getItem(STORAGE_KEYS.PROMPT) || PROMPTS.DEFAULT_SYSTEM,
+            getEffectiveSystemPrompt(),
             activeModel
         );
         const prompt = `${responseSystemPrompt}
@@ -2999,184 +3211,396 @@ async function finalizeAgenticReply(
     return attachHighRiskSafetyRecommendations(cleanReply, highRiskRecommendations);
 }
 
-async function getOllamaResponse(userMessage, toolFollowUp = null, documentText = null) {
-    const activeModel = getSelectedModelName();
-    const responseSystemPrompt = buildAuraGenerationSystemPrompt(activeModel);
-    const profileStr = JSON.stringify(chatManager.getCombinedContentStore(), null, 2);
-    const runtimeContext = getRuntimeContextString();
-    const chatHistory = chatManager.getActiveChatHistory();
-    const conversationSummary = await chatManager.getConversationSummary();
-    const modelHistoryStr = buildModelSafeHistoryString(chatHistory);
+function buildAgentWorkflowLine(stages = []) {
+    const names = stages
+        .map((stage) => stage?.name)
+        .filter(Boolean);
+    if (!names.length) return 'Silent workflow: direct response composition.';
+    return `Silent workflow: ${names.join(' -> ')}. Use these handoffs internally; never mention them to the user.`;
+}
 
-    if (toolFollowUp) {
-        const turnSupport = deriveHeuristicTurnSupport('', 'GeneralFriendAgent', chatHistory);
-        const toolPreferences = chatManager.getActiveResponsePreferences();
-        const turnProfile = buildAuraTurnProfile({
-            route: 'GeneralFriendAgent',
-            sourceDecision: { needsSources: false, confidence: 0.9, reason: 'Tool follow-up.' },
-            preferences: toolPreferences,
-            turnSupport
-        });
-        const prompt = buildAuraDirectPrompt({
-            systemPrompt: responseSystemPrompt,
-            turnProfile,
-            runtimeContext,
-            memoryContext: buildAuraMemoryContext(profileStr, conversationSummary),
-            continuityContext: buildContinuityContext(chatHistory, 'Respond to the tool interaction and help the user continue.', turnSupport),
-            history: modelHistoryStr,
-            vectorContext: '',
-            toolGuidance: `The user interacted with an Aura tool: ${JSON.stringify(toolFollowUp)}. Respond naturally to that interaction.`,
-            userMessage: 'Respond to the tool interaction and help the user continue.',
-            documentText: null
-        });
-
-        const rawReply = await _callLLM(prompt);
-        return (await finalizeReplyWithProactiveTool(
-            rawReply,
-            '',
-            null,
-            'GeneralFriendAgent',
-            toolPreferences,
-            turnSupport
-        )) ||
-            "Nice progress. If you want, we can build on this and handle the next step together.";
-    }
-
+function runReceptionAgent(userMessage, chatHistory) {
     const baseRoute = deriveHeuristicRoute(userMessage);
     const turnSupport = deriveHeuristicTurnSupport(userMessage, baseRoute, chatHistory);
     const contextualUserMessage = buildContextualUserMessage(userMessage, chatHistory, turnSupport);
     const route = deriveHeuristicRoute(contextualUserMessage);
+
+    return {
+        name: 'ReceptionAgent',
+        baseRoute,
+        turnSupport,
+        contextualUserMessage,
+        route
+    };
+}
+
+function runPreferenceAgent(contextualUserMessage) {
     const adaptivePreferences = deriveHeuristicResponsePreferences(
         contextualUserMessage,
         chatManager.getActiveResponsePreferences()
     );
     chatManager.updateResponsePreferences(adaptivePreferences);
+
+    return {
+        name: 'PreferenceAgent',
+        adaptivePreferences
+    };
+}
+
+function runEvidenceDecisionAgent(contextualUserMessage, route) {
     const sourceNeedDecision = sanitizeSourceNeedDecision(
         deriveHeuristicSourceNeed(contextualUserMessage, route),
         { needsSources: false, confidence: 0, reason: '' }
     );
     const effectiveRoute = shouldUseSearchEvidence(route, sourceNeedDecision) ? 'SearchAgent' : route;
-    const highRiskRecommendations = inferHighRiskSafetyRecommendations(userMessage);
-    const proactiveRecommendation = await inferProactiveToolOpportunity(userMessage, effectiveRoute, adaptivePreferences);
-    const proactiveToolGuidance = buildProactiveToolGuidance(proactiveRecommendation);
-    const vectorContext = await chatManager.searchVectorData(contextualUserMessage || userMessage);
-    const historyStr = modelHistoryStr;
-    const memoryContext = buildAuraMemoryContext(profileStr, conversationSummary);
-    const continuityContext = buildContinuityContext(chatHistory, contextualUserMessage || userMessage, turnSupport);
-    const turnProfile = buildAuraTurnProfile({
-        route: effectiveRoute,
-        sourceDecision: sourceNeedDecision,
-        preferences: adaptivePreferences,
-        turnSupport,
-        documentText
+
+    return {
+        name: 'EvidenceDecisionAgent',
+        sourceNeedDecision,
+        effectiveRoute
+    };
+}
+
+function runSafetyAgent(userMessage) {
+    return {
+        name: 'SafetyAgent',
+        highRiskRecommendations: inferHighRiskSafetyRecommendations(userMessage)
+    };
+}
+
+async function runToolUseAgent(userMessage, effectiveRoute, adaptivePreferences) {
+    const proactiveRecommendation = await inferProactiveToolOpportunity(
+        userMessage,
+        effectiveRoute,
+        adaptivePreferences
+    );
+
+    return {
+        name: 'ToolUseAgent',
+        proactiveRecommendation,
+        proactiveToolGuidance: buildProactiveToolGuidance(proactiveRecommendation)
+    };
+}
+
+async function runMemoryAgent({
+    profileStr,
+    conversationSummary,
+    chatHistory,
+    contextualUserMessage,
+    userMessage,
+    modelHistoryStr,
+    turnSupport
+}) {
+    const effectiveUserMessage = contextualUserMessage || userMessage;
+
+    return {
+        name: 'MemoryAgent',
+        vectorContext: await chatManager.searchVectorData(effectiveUserMessage),
+        historyStr: modelHistoryStr,
+        memoryContext: buildAuraMemoryContext(profileStr, conversationSummary),
+        continuityContext: buildContinuityContext(chatHistory, effectiveUserMessage, turnSupport)
+    };
+}
+
+function runTurnProfileAgent({
+    effectiveRoute,
+    sourceNeedDecision,
+    adaptivePreferences,
+    turnSupport,
+    documentText,
+    workflowStages
+}) {
+    const turnProfile = [
+        buildAuraTurnProfile({
+            route: effectiveRoute,
+            sourceDecision: sourceNeedDecision,
+            preferences: adaptivePreferences,
+            turnSupport,
+            documentText
+        }),
+        buildAgentWorkflowLine(workflowStages)
+    ].filter(Boolean).join('\n');
+
+    return {
+        name: 'TurnProfileAgent',
+        turnProfile
+    };
+}
+
+async function buildAuraAgentContext(userMessage, documentText = null) {
+    const activeModel = getSelectedModelName();
+    const responseSystemPrompt = buildResponseSystemPrompt(getEffectiveSystemPrompt(), activeModel);
+    const profileStr = JSON.stringify(chatManager.getCombinedContentStore(), null, 2);
+    const runtimeContext = getRuntimeContextString();
+    const chatHistory = chatManager.getActiveChatHistory();
+    const conversationSummary = await chatManager.getConversationSummary();
+    const modelHistoryStr = buildModelSafeHistoryString(chatHistory);
+    const workflowStages = [];
+
+    const reception = runReceptionAgent(userMessage, chatHistory);
+    workflowStages.push(reception);
+
+    const preference = runPreferenceAgent(reception.contextualUserMessage);
+    workflowStages.push(preference);
+
+    const evidence = runEvidenceDecisionAgent(reception.contextualUserMessage, reception.route);
+    workflowStages.push(evidence);
+
+    const safety = runSafetyAgent(userMessage);
+    workflowStages.push(safety);
+
+    const toolUse = await runToolUseAgent(
+        userMessage,
+        evidence.effectiveRoute,
+        preference.adaptivePreferences
+    );
+    workflowStages.push(toolUse);
+
+    const memory = await runMemoryAgent({
+        profileStr,
+        conversationSummary,
+        chatHistory,
+        contextualUserMessage: reception.contextualUserMessage,
+        userMessage,
+        modelHistoryStr,
+        turnSupport: reception.turnSupport
     });
+    workflowStages.push(memory);
 
-    if (effectiveRoute.includes('Knowledge')) {
-        const key = await _callLLM(PROMPTS.KNOWLEDGE_MAPPER.replace('%MESSAGE%', contextualUserMessage), null, 'analysis');
-        if (key && key !== 'NULL') {
-            const content = await fetchMarkdownContent(key.toLowerCase());
-            if (content) {
-                return (
-                    (await finalizeAgenticReply(
-                        await _callLLM(buildAuraDirectPrompt({
-                            systemPrompt: responseSystemPrompt,
-                            turnProfile,
-                            runtimeContext,
-                            memoryContext: `${memoryContext}\n\nKnowledge base material:\n${content}`,
-                            continuityContext,
-                            history: historyStr,
-                            vectorContext,
-                            toolGuidance: proactiveToolGuidance,
-                            userMessage: contextualUserMessage,
-                            documentText
-                        })),
-                        userMessage,
-                        proactiveRecommendation,
-                        highRiskRecommendations,
-                        effectiveRoute,
-                        adaptivePreferences,
-                        turnSupport
-                    )) || attachHighRiskSafetyRecommendations(
-                        buildHumanFallbackAnswer(contextualUserMessage, effectiveRoute),
-                        highRiskRecommendations
-                    )
-                );
-            }
-        }
-    }
+    const profile = runTurnProfileAgent({
+        effectiveRoute: evidence.effectiveRoute,
+        sourceNeedDecision: evidence.sourceNeedDecision,
+        adaptivePreferences: preference.adaptivePreferences,
+        turnSupport: reception.turnSupport,
+        documentText,
+        workflowStages
+    });
+    workflowStages.push(profile);
 
-    if (effectiveRoute.includes('Search')) {
-        try {
-            const searchPlan = await buildSearchPlan(contextualUserMessage, profileStr, runtimeContext);
-            const osintReport = await postJson(API_ENDPOINTS.osint, searchPlan);
-            const evidenceCatalog = buildEvidenceCatalog(osintReport);
-            const renderedReplyBody = evidenceCatalog.length
-                ? await _callLLM(buildAuraEvidencePrompt({
-                    systemPrompt: responseSystemPrompt,
-                    turnProfile,
-                    runtimeContext,
-                    memoryContext,
-                    continuityContext,
-                    history: historyStr,
-                    vectorContext,
-                    evidenceCatalog,
-                    userMessage: contextualUserMessage
-                }))
-                : buildDeterministicSearchFallback(contextualUserMessage, evidenceCatalog, adaptivePreferences);
-            const safeRenderedBody = normalizeReplyWhitespace(renderedReplyBody) ||
-                buildMinimumEvidenceAnswer(contextualUserMessage, evidenceCatalog);
-            const sourcesLine = buildSourcesLineFromEvidenceIds(
-                evidenceCatalog.filter((entry) => entry.url).slice(0, 5).map((entry) => entry.id),
-                evidenceCatalog
-            );
-            const renderedReply = normalizeReplyWhitespace(
-                [safeRenderedBody, sourcesLine].filter(Boolean).join('\n\n')
-            );
+    return {
+        activeModel,
+        responseSystemPrompt,
+        profileStr,
+        runtimeContext,
+        chatHistory,
+        conversationSummary,
+        modelHistoryStr,
+        baseRoute: reception.baseRoute,
+        turnSupport: reception.turnSupport,
+        contextualUserMessage: reception.contextualUserMessage,
+        route: reception.route,
+        adaptivePreferences: preference.adaptivePreferences,
+        sourceNeedDecision: evidence.sourceNeedDecision,
+        effectiveRoute: evidence.effectiveRoute,
+        highRiskRecommendations: safety.highRiskRecommendations,
+        proactiveRecommendation: toolUse.proactiveRecommendation,
+        proactiveToolGuidance: toolUse.proactiveToolGuidance,
+        vectorContext: memory.vectorContext,
+        historyStr: memory.historyStr,
+        memoryContext: memory.memoryContext,
+        continuityContext: memory.continuityContext,
+        turnProfile: profile.turnProfile,
+        documentText,
+        workflowStages
+    };
+}
 
+async function runKnowledgeComposerAgent(context) {
+    if (!context.effectiveRoute.includes('Knowledge')) return null;
+
+    const key = await _callLLM(
+        PROMPTS.KNOWLEDGE_MAPPER.replace('%MESSAGE%', context.contextualUserMessage),
+        null,
+        'analysis'
+    );
+
+    if (key && key !== 'NULL') {
+        const content = await fetchMarkdownContent(key.toLowerCase());
+        if (content) {
             return (
                 (await finalizeAgenticReply(
-                    renderedReply,
-                    userMessage,
-                    proactiveRecommendation,
-                    highRiskRecommendations,
-                    effectiveRoute,
-                    adaptivePreferences,
-                    turnSupport
-                )) ||
-                attachHighRiskSafetyRecommendations(
-                    buildHumanFallbackAnswer(contextualUserMessage, effectiveRoute),
-                    highRiskRecommendations
+                    await _callLLM(buildAuraDirectPrompt({
+                        systemPrompt: context.responseSystemPrompt,
+                        turnProfile: context.turnProfile,
+                        runtimeContext: context.runtimeContext,
+                        memoryContext: `${context.memoryContext}\n\nKnowledge base material:\n${content}`,
+                        continuityContext: context.continuityContext,
+                        history: context.historyStr,
+                        vectorContext: context.vectorContext,
+                        toolGuidance: context.proactiveToolGuidance,
+                        userMessage: context.contextualUserMessage,
+                        documentText: context.documentText
+                    })),
+                    context.originalUserMessage || context.contextualUserMessage,
+                    context.proactiveRecommendation,
+                    context.highRiskRecommendations,
+                    context.effectiveRoute,
+                    context.adaptivePreferences,
+                    context.turnSupport
+                )) || attachHighRiskSafetyRecommendations(
+                    buildHumanFallbackAnswer(context.contextualUserMessage, context.effectiveRoute),
+                    context.highRiskRecommendations
                 )
-            );
-        } catch (error) {
-            console.error('[SearchAgent] Full failure details:', error);
-            return attachHighRiskSafetyRecommendations(
-                buildHumanFallbackAnswer(contextualUserMessage, effectiveRoute),
-                highRiskRecommendations
             );
         }
     }
 
+    return null;
+}
+
+async function runEvidenceComposerAgent(context) {
+    if (!context.effectiveRoute.includes('Search')) return null;
+
+    try {
+        const searchPlan = await buildSearchPlan(
+            context.contextualUserMessage,
+            context.profileStr,
+            context.runtimeContext
+        );
+        const osintReport = await postJson(API_ENDPOINTS.osint, searchPlan);
+        const evidenceCatalog = buildEvidenceCatalog(osintReport);
+        const renderedReplyBody = evidenceCatalog.length
+            ? await _callLLM(buildAuraEvidencePrompt({
+                systemPrompt: context.responseSystemPrompt,
+                turnProfile: context.turnProfile,
+                runtimeContext: context.runtimeContext,
+                memoryContext: context.memoryContext,
+                continuityContext: context.continuityContext,
+                history: context.historyStr,
+                vectorContext: context.vectorContext,
+                evidenceCatalog,
+                userMessage: context.contextualUserMessage
+            }))
+            : buildDeterministicSearchFallback(
+                context.contextualUserMessage,
+                evidenceCatalog,
+                context.adaptivePreferences
+            );
+        const safeRenderedBody = normalizeReplyWhitespace(renderedReplyBody) ||
+            buildMinimumEvidenceAnswer(context.contextualUserMessage, evidenceCatalog);
+        const sourcesLine = buildSourcesLineFromEvidenceIds(
+            evidenceCatalog.filter((entry) => entry.url).slice(0, 5).map((entry) => entry.id),
+            evidenceCatalog
+        );
+        const renderedReply = normalizeReplyWhitespace(
+            [safeRenderedBody, sourcesLine].filter(Boolean).join('\n\n')
+        );
+
+        return (
+            (await finalizeAgenticReply(
+                renderedReply,
+                context.originalUserMessage || context.contextualUserMessage,
+                context.proactiveRecommendation,
+                context.highRiskRecommendations,
+                context.effectiveRoute,
+                context.adaptivePreferences,
+                context.turnSupport
+            )) ||
+            attachHighRiskSafetyRecommendations(
+                buildHumanFallbackAnswer(context.contextualUserMessage, context.effectiveRoute),
+                context.highRiskRecommendations
+            )
+        );
+    } catch (error) {
+        console.error('[SearchAgent] Full failure details:', error);
+        return attachHighRiskSafetyRecommendations(
+            buildHumanFallbackAnswer(context.contextualUserMessage, context.effectiveRoute),
+            context.highRiskRecommendations
+        );
+    }
+}
+
+async function runDirectComposerAgent(context) {
     const finalPrompt = buildAuraDirectPrompt({
-        systemPrompt: responseSystemPrompt,
-        turnProfile,
-        runtimeContext,
-        memoryContext,
-        continuityContext,
-        history: historyStr,
-        vectorContext,
-        toolGuidance: proactiveToolGuidance,
-        userMessage: contextualUserMessage || userMessage,
-        documentText
+        systemPrompt: context.responseSystemPrompt,
+        turnProfile: context.turnProfile,
+        runtimeContext: context.runtimeContext,
+        memoryContext: context.memoryContext,
+        continuityContext: context.continuityContext,
+        history: context.historyStr,
+        vectorContext: context.vectorContext,
+        toolGuidance: context.proactiveToolGuidance,
+        userMessage: context.contextualUserMessage || context.originalUserMessage,
+        documentText: context.documentText
     });
 
     return (await finalizeAgenticReply(
         await _callLLM(finalPrompt),
-        userMessage,
-        proactiveRecommendation,
-        highRiskRecommendations,
-        effectiveRoute,
-        adaptivePreferences,
+        context.originalUserMessage || context.contextualUserMessage,
+        context.proactiveRecommendation,
+        context.highRiskRecommendations,
+        context.effectiveRoute,
+        context.adaptivePreferences,
+        context.turnSupport
+    )) || attachHighRiskSafetyRecommendations(
+        buildHumanFallbackAnswer(context.contextualUserMessage || context.originalUserMessage, context.effectiveRoute),
+        context.highRiskRecommendations
+    );
+}
+
+async function runToolFollowUpAgent(toolFollowUp) {
+    const activeModel = getSelectedModelName();
+    const responseSystemPrompt = buildResponseSystemPrompt(getEffectiveSystemPrompt(), activeModel);
+    const profileStr = JSON.stringify(chatManager.getCombinedContentStore(), null, 2);
+    const runtimeContext = getRuntimeContextString();
+    const chatHistory = chatManager.getActiveChatHistory();
+    const conversationSummary = await chatManager.getConversationSummary();
+    const modelHistoryStr = buildModelSafeHistoryString(chatHistory);
+    const turnSupport = deriveHeuristicTurnSupport('', 'GeneralFriendAgent', chatHistory);
+    const toolPreferences = chatManager.getActiveResponsePreferences();
+    const turnProfile = [
+        buildAuraTurnProfile({
+            route: 'GeneralFriendAgent',
+            sourceDecision: { needsSources: false, confidence: 0.9, reason: 'Tool follow-up.' },
+            preferences: toolPreferences,
+            turnSupport
+        }),
+        buildAgentWorkflowLine([
+            { name: 'ToolEventAgent' },
+            { name: 'MemoryAgent' },
+            { name: 'FollowThroughComposerAgent' }
+        ])
+    ].join('\n');
+
+    const prompt = buildAuraDirectPrompt({
+        systemPrompt: responseSystemPrompt,
+        turnProfile,
+        runtimeContext,
+        memoryContext: buildAuraMemoryContext(profileStr, conversationSummary),
+        continuityContext: buildContinuityContext(chatHistory, 'Respond to the tool interaction and help the user continue.', turnSupport),
+        history: modelHistoryStr,
+        vectorContext: '',
+        toolGuidance: `The user interacted with an Aura tool: ${JSON.stringify(toolFollowUp)}. Respond naturally to that interaction.`,
+        userMessage: 'Respond to the tool interaction and help the user continue.',
+        documentText: null
+    });
+
+    const rawReply = await _callLLM(prompt);
+    return (await finalizeReplyWithProactiveTool(
+        rawReply,
+        '',
+        null,
+        'GeneralFriendAgent',
+        toolPreferences,
         turnSupport
-    )) || attachHighRiskSafetyRecommendations(buildHumanFallbackAnswer(contextualUserMessage || userMessage, effectiveRoute), highRiskRecommendations);
+    )) ||
+        "Nice progress. If you want, we can build on this and handle the next step together.";
+}
+
+async function runAuraAgentPipeline(userMessage, documentText = null) {
+    const context = await buildAuraAgentContext(userMessage, documentText);
+    context.originalUserMessage = userMessage;
+
+    const knowledgeReply = await runKnowledgeComposerAgent(context);
+    if (knowledgeReply) return knowledgeReply;
+
+    const evidenceReply = await runEvidenceComposerAgent(context);
+    if (evidenceReply) return evidenceReply;
+
+    return runDirectComposerAgent(context);
+}
+
+async function getOllamaResponse(userMessage, toolFollowUp = null, documentText = null) {
+    if (toolFollowUp) return runToolFollowUpAgent(toolFollowUp);
+    return runAuraAgentPipeline(userMessage, documentText);
 }

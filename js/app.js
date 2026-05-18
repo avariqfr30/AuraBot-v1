@@ -11,8 +11,14 @@ document.addEventListener('DOMContentLoaded', () => {
     const insightsButton = document.getElementById('insightsButton');
     const themeToggleButton = document.getElementById('themeToggleButton');
     const settingsButton = document.getElementById('settingsButton');
-    const systemPromptTextarea = document.getElementById('systemPromptTextarea');
+    const auraStyleSelect = document.getElementById('auraStyleSelect');
+    const responseDetailSelect = document.getElementById('responseDetailSelect');
+    const advancedPromptToggle = document.getElementById('advancedPromptToggle');
+    const advancedPromptTextarea = document.getElementById('advancedPromptTextarea');
     const modelSelectDropdown = document.getElementById('modelSelectDropdown');
+    const composerThinkingMode = document.getElementById('composerThinkingMode');
+    const thinkingModeDropdown = document.getElementById('thinkingModeDropdown');
+    const thinkingModeStatusText = document.getElementById('thinkingModeStatusText');
     const locationAccessCheckbox = document.getElementById('locationAccessCheckbox');
     const locationStatusText = document.getElementById('locationStatusText');
     const refreshLocationButton = document.getElementById('refreshLocationButton');
@@ -21,10 +27,13 @@ document.addEventListener('DOMContentLoaded', () => {
     const cancelSettingsButton = document.getElementById('cancelSettingsButton');
     const resetSettingsButton = document.getElementById('resetSettingsButton');
     const saveSettingsButton = document.getElementById('saveSettingsButton');
+    const exportDataButton = document.getElementById('exportDataButton');
+    const clearMemoryButton = document.getElementById('clearMemoryButton');
+    const deleteAllDataButton = document.getElementById('deleteAllDataButton');
     const toolsModalContent = document.getElementById('toolsModalContent');
     const TOOL_TAG_REGEX = /<tool_create[^>]*type=["']([^"']+)["'][^>]*(?:theme=["']([^"']+)["'])?[^>]*\/?>/gi;
     const LOCATION_MAX_AGE_MS = 10 * 60 * 1000;
-    const LEGACY_DEFAULT_MODELS = new Set(['llama3:8b', 'gpt-oss:120b-cloud']);
+    const LEGACY_DEFAULT_MODELS = new Set(['llama3:8b']);
 
     let attachedFile = null;
 
@@ -35,6 +44,7 @@ document.addEventListener('DOMContentLoaded', () => {
     window.setupLiquidGlassInteractions = setupLiquidGlassInteractions;
 
     function syncChromeCompression() {
+        if (!chatMessagesSurface) return;
         document.body.classList.toggle('glass-condensed', chatMessagesSurface.scrollTop > 18);
     }
 
@@ -75,9 +85,27 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
+    function escapeOptionValue(value) {
+        return String(value || '')
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#039;');
+    }
+
+    function getPinnedModelNames() {
+        return [...new Set([
+            window.AURA_CONFIG.defaultModel,
+            ...(window.AURA_CONFIG.preferredModels || []),
+            'gpt-oss:120b-cloud'
+        ].filter(Boolean))];
+    }
+
     function getPrioritizedModels(models = []) {
-        const preferredModels = window.AURA_CONFIG.preferredModels || [window.AURA_CONFIG.defaultModel];
+        const preferredModels = getPinnedModelNames();
         const preferredSet = new Set(preferredModels);
+        const preferredOrder = new Map(preferredModels.map((modelName, index) => [modelName, index]));
 
         return [...models].sort((left, right) => {
             const leftPreferred = preferredSet.has(left);
@@ -85,20 +113,24 @@ document.addEventListener('DOMContentLoaded', () => {
 
             if (leftPreferred && !rightPreferred) return -1;
             if (!leftPreferred && rightPreferred) return 1;
+            if (leftPreferred && rightPreferred) {
+                return preferredOrder.get(left) - preferredOrder.get(right);
+            }
             return left.localeCompare(right);
         });
     }
 
     function resolvePreferredStoredModel(storedModel, availableModels = []) {
-        const preferredModels = window.AURA_CONFIG.preferredModels || [window.AURA_CONFIG.defaultModel];
+        const preferredModels = getPinnedModelNames();
         const availableSet = new Set(availableModels);
+        const pinnedSet = new Set(preferredModels);
         const hasStoredModel = storedModel && availableSet.has(storedModel);
 
-        if (storedModel && !LEGACY_DEFAULT_MODELS.has(storedModel) && (hasStoredModel || availableModels.length === 0)) {
+        if (storedModel && !LEGACY_DEFAULT_MODELS.has(storedModel) && (hasStoredModel || pinnedSet.has(storedModel) || availableModels.length === 0)) {
             return storedModel;
         }
 
-        const preferredAvailableModel = preferredModels.find((modelName) => availableSet.has(modelName));
+        const preferredAvailableModel = preferredModels.find((modelName) => availableSet.has(modelName) || pinnedSet.has(modelName));
 
         return preferredAvailableModel || storedModel || window.AURA_CONFIG.defaultModel;
     }
@@ -128,10 +160,12 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function setLocationStatus(message) {
-        locationStatusText.textContent = message;
+        if (locationStatusText) locationStatusText.textContent = message;
     }
 
     function refreshUserMemoryStatus() {
+        if (!userMemoryStatusText) return;
+
         if (!userMemoryCheckbox?.checked) {
             userMemoryStatusText.textContent = 'Cross-chat memory is off.';
             return;
@@ -144,8 +178,78 @@ document.addEventListener('DOMContentLoaded', () => {
             : 'Cross-chat memory is on. Aura will start building durable memory across chats on this device.';
     }
 
+    function refreshThinkingModeStatus() {
+        const mode = typeof window.getThinkingModeKey === 'function'
+            ? window.getThinkingModeKey(thinkingModeDropdown?.value || composerThinkingMode?.value)
+            : (thinkingModeDropdown?.value || composerThinkingMode?.value || 'balanced');
+        const copy = {
+            fast: 'Fast keeps simple chats snappy by using less internal context and shorter answer budgets.',
+            balanced: 'Balanced gives Aura normal depth without slowing every answer down.',
+            deep: 'Deep gives Aura more internal room for context, evidence checks, and careful synthesis.'
+        };
+
+        if (thinkingModeStatusText) thinkingModeStatusText.textContent = copy[mode] || copy.balanced;
+    }
+
+    function syncThinkingModeControls(mode = null) {
+        const activeMode = typeof window.getThinkingModeKey === 'function'
+            ? window.getThinkingModeKey(mode)
+            : (mode || 'balanced');
+
+        if (composerThinkingMode) composerThinkingMode.value = activeMode;
+        if (thinkingModeDropdown) thinkingModeDropdown.value = activeMode;
+        refreshThinkingModeStatus();
+    }
+
+    function setThinkingMode(mode) {
+        const activeMode = typeof window.applyThinkingMode === 'function'
+            ? window.applyThinkingMode(mode)
+            : (mode || 'balanced');
+        syncThinkingModeControls(activeMode);
+    }
+
+    function syncBehaviorControls() {
+        const activeStyle = typeof window.getExperienceStyleKey === 'function'
+            ? window.getExperienceStyleKey()
+            : (localStorage.getItem(STORAGE_KEYS.EXPERIENCE_STYLE) || 'balanced');
+        const activePreferences = window.chatManager
+            ? window.chatManager.getActiveResponsePreferences()
+            : DEFAULT_RESPONSE_PREFERENCES;
+
+        if (auraStyleSelect) auraStyleSelect.value = activeStyle;
+        if (responseDetailSelect) responseDetailSelect.value = activePreferences.detailLevel || DEFAULT_RESPONSE_PREFERENCES.detailLevel;
+        if (advancedPromptToggle) advancedPromptToggle.checked = localStorage.getItem(STORAGE_KEYS.PROMPT_OVERRIDE_ENABLED) === 'true';
+        if (advancedPromptTextarea) advancedPromptTextarea.value = localStorage.getItem(STORAGE_KEYS.PROMPT) || '';
+    }
+
+    function applyBehaviorControls() {
+        const selectedStyle = auraStyleSelect?.value || 'balanced';
+        const selectedDetail = responseDetailSelect?.value || DEFAULT_RESPONSE_PREFERENCES.detailLevel;
+
+        if (typeof window.applyExperienceStyle === 'function') {
+            window.applyExperienceStyle(selectedStyle);
+        } else {
+            localStorage.setItem(STORAGE_KEYS.EXPERIENCE_STYLE, selectedStyle);
+        }
+
+        if (window.chatManager) {
+            chatManager.updateResponsePreferences({
+                ...chatManager.getActiveResponsePreferences(),
+                detailLevel: selectedDetail
+            });
+        }
+
+        localStorage.setItem(STORAGE_KEYS.PROMPT_OVERRIDE_ENABLED, String(Boolean(advancedPromptToggle?.checked)));
+        const overrideValue = String(advancedPromptTextarea?.value || '').trim();
+        if (overrideValue) {
+            localStorage.setItem(STORAGE_KEYS.PROMPT, overrideValue);
+        } else {
+            localStorage.removeItem(STORAGE_KEYS.PROMPT);
+        }
+    }
+
     async function refreshLocationStatus() {
-        if (!locationAccessCheckbox.checked) {
+        if (!locationAccessCheckbox?.checked) {
             setLocationStatus('Location access is off.');
             return;
         }
@@ -183,7 +287,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     async function requestCurrentLocation({ silent = false } = {}) {
-        if (!locationAccessCheckbox.checked) {
+        if (!locationAccessCheckbox?.checked) {
             localStorage.removeItem(STORAGE_KEYS.LOCATION_CONTEXT);
             await refreshLocationStatus();
             return null;
@@ -292,6 +396,77 @@ document.addEventListener('DOMContentLoaded', () => {
         return message ? `[Attached: ${file.name}]\n\n${message}` : `[Attached: ${file.name}]`;
     }
 
+    function getProgressMessage(message, hasFile = false) {
+        const text = String(message || '').toLowerCase();
+        if (hasFile) return 'Aura is reading the attachment.';
+        if (/\b(source|sources|research|verify|fact-check|citation|latest|current|news)\b/.test(text)) {
+            return 'Aura is checking sources quietly.';
+        }
+        if (/\b(plan|steps|checklist|organize|prepare|track|follow up|appointment)\b/.test(text)) {
+            return 'Aura is organizing this into something usable.';
+        }
+        if (/\b(panic|anxious|overwhelmed|scared|spiral|unsafe)\b/.test(text)) {
+            return 'Aura is slowing this down with you.';
+        }
+        return 'Aura is thinking this through.';
+    }
+
+    function parseManualMemoryCommand(message) {
+        const text = String(message || '').trim();
+        const rememberMatch = text.match(/^(?:please\s+)?remember(?:\s+this)?[:\s-]+(.+)$/i);
+        if (rememberMatch?.[1]) {
+            return { action: 'remember', value: rememberMatch[1].trim() };
+        }
+
+        if (/^(?:please\s+)?forget(?:\s+my\s+)?(?:memory|memories|what you remember|everything you remember)$/i.test(text)) {
+            return { action: 'forget_all' };
+        }
+
+        return null;
+    }
+
+    function downloadJson(filename, data) {
+        const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = filename;
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        URL.revokeObjectURL(url);
+    }
+
+    function exportAuraData() {
+        if (!window.chatManager) return;
+        downloadJson(`aura-export-${new Date().toISOString().slice(0, 10)}.json`, chatManager.exportLocalData());
+    }
+
+    function clearAuraMemory() {
+        if (!window.chatManager) return;
+        if (!confirm('Forget cross-chat memory? Your chats will stay, but durable memory will be cleared.')) return;
+        chatManager.clearUserMemoryStore();
+        localStorage.setItem(STORAGE_KEYS.USER_MEMORY_ENABLED, 'false');
+        if (userMemoryCheckbox) userMemoryCheckbox.checked = false;
+        refreshUserMemoryStatus();
+        refreshUI();
+    }
+
+    function deleteAllAuraData() {
+        if (!window.chatManager) return;
+        if (!confirm('Delete all Aura chats, tools, memory, and settings from this browser?')) return;
+        chatManager.deleteAllLocalData();
+        normalizeStoredModel();
+        applyTheme(getStoredTheme());
+        if (locationAccessCheckbox) locationAccessCheckbox.checked = isLocationSharingEnabled();
+        if (userMemoryCheckbox) userMemoryCheckbox.checked = isUserMemorySharingEnabled();
+        syncThinkingModeControls('balanced');
+        refreshLocationStatus();
+        refreshUserMemoryStatus();
+        closeSettingsModal();
+        refreshUI();
+    }
+
     async function processToolTags(rawResponse) {
         let cleanedResponse = rawResponse || '';
         const matchedTags = [...cleanedResponse.matchAll(TOOL_TAG_REGEX)];
@@ -347,21 +522,46 @@ document.addEventListener('DOMContentLoaded', () => {
         userInput.value = '';
         clearResendDraft();
         resetAttachment();
-        showTypingIndicator();
+        const manualMemoryCommand = parseManualMemoryCommand(message);
+        if (manualMemoryCommand?.action === 'remember') {
+            chatManager.rememberUserFact(manualMemoryCommand.value);
+            const reply = 'I’ll remember that for future chats on this device. You can turn memory off or clear it anytime in Settings.';
+            addMessage('ai', reply);
+            chatManager.addMessageToActiveChat('ai', reply);
+            refreshUI();
+            return;
+        }
+
+        if (manualMemoryCommand?.action === 'forget_all') {
+            chatManager.clearUserMemoryStore();
+            localStorage.setItem(STORAGE_KEYS.USER_MEMORY_ENABLED, 'false');
+            const reply = 'I forgot the cross-chat memory stored on this device. Your current chat is still here unless you delete it in Settings.';
+            addMessage('ai', reply);
+            chatManager.addMessageToActiveChat('ai', reply);
+            refreshUserMemoryStatus();
+            refreshUI();
+            return;
+        }
+
+        showTypingIndicator(getProgressMessage(message, Boolean(currentAttachment)));
 
         try {
             const documentText = currentAttachment ? await readAttachedFile(currentAttachment) : null;
+            updateTypingIndicator(getProgressMessage(message, false));
             await ensureRuntimeLocationFresh();
             const screenResult = await chatManager.preScreenMessage(message);
 
             if (screenResult === 'CRISIS') {
+                updateTypingIndicator('Aura is focusing on immediate safety.');
                 const safeMessage = await chatManager.triggerSafetyIntervention(message);
                 addMessage('ai', safeMessage);
                 refreshUI();
                 return;
             }
 
+            updateTypingIndicator(getProgressMessage(message, Boolean(documentText)));
             const rawResponse = await getOllamaResponse(message, null, documentText);
+            updateTypingIndicator('Aura is shaping the reply.');
             const cleanedResponse = await processToolTags(rawResponse);
 
             addMessage('ai', cleanedResponse || "I'm here. I just didn't manage to form a full reply that time.");
@@ -378,12 +578,20 @@ document.addEventListener('DOMContentLoaded', () => {
 
     async function populateModelOptions() {
         const storedModel = localStorage.getItem(STORAGE_KEYS.MODEL) || window.AURA_CONFIG.defaultModel;
+        const controller = new AbortController();
+        const timeoutId = window.setTimeout(() => controller.abort(), 3500);
 
         try {
-            const data = await requestJson(`${window.AURA_CONFIG.ollamaBaseUrl}/tags`, { method: 'GET' });
+            modelSelectDropdown.innerHTML = `<option value="${escapeOptionValue(storedModel)}">Loading local models...</option>`;
+            modelSelectDropdown.value = storedModel;
+
+            const data = await requestJson(`${window.AURA_CONFIG.ollamaBaseUrl}/tags`, {
+                method: 'GET',
+                signal: controller.signal
+            });
             const models = (data.models || []).map((model) => model.name).filter(Boolean);
             const resolvedModel = resolvePreferredStoredModel(storedModel, models);
-            const uniqueModels = getPrioritizedModels([...new Set([resolvedModel, ...models])]);
+            const uniqueModels = getPrioritizedModels([...new Set([resolvedModel, ...getPinnedModelNames(), ...models])]);
 
             if (resolvedModel !== storedModel) {
                 localStorage.setItem(STORAGE_KEYS.MODEL, resolvedModel);
@@ -391,27 +599,33 @@ document.addEventListener('DOMContentLoaded', () => {
 
             modelSelectDropdown.innerHTML = uniqueModels
                 .map((modelName) => {
-                    const isPreferred = (window.AURA_CONFIG.preferredModels || []).includes(modelName);
+                    const isPreferred = getPinnedModelNames().includes(modelName);
                     const label = isPreferred ? `${modelName} (Preferred)` : modelName;
-                    return `<option value="${modelName}">${label}</option>`;
+                    return `<option value="${escapeOptionValue(modelName)}">${escapeOptionValue(label)}</option>`;
                 })
                 .join('');
         } catch (error) {
             console.error('Failed to load models:', error);
-            modelSelectDropdown.innerHTML = `<option value="${storedModel}">${storedModel}</option>`;
+            const fallbackModels = getPrioritizedModels([...new Set([storedModel, ...getPinnedModelNames()])]);
+            modelSelectDropdown.innerHTML = fallbackModels
+                .map((modelName) => `<option value="${escapeOptionValue(modelName)}">${escapeOptionValue(modelName)}</option>`)
+                .join('');
+        } finally {
+            window.clearTimeout(timeoutId);
         }
 
         modelSelectDropdown.value = localStorage.getItem(STORAGE_KEYS.MODEL) || storedModel;
     }
 
     async function openSettingsPanel() {
-        systemPromptTextarea.value = localStorage.getItem(STORAGE_KEYS.PROMPT) || PROMPTS.DEFAULT_SYSTEM;
-        locationAccessCheckbox.checked = isLocationSharingEnabled();
-        userMemoryCheckbox.checked = isUserMemorySharingEnabled();
-        await populateModelOptions();
-        await refreshLocationStatus();
-        refreshUserMemoryStatus();
+        syncBehaviorControls();
+        syncThinkingModeControls();
+        if (locationAccessCheckbox) locationAccessCheckbox.checked = isLocationSharingEnabled();
+        if (userMemoryCheckbox) userMemoryCheckbox.checked = isUserMemorySharingEnabled();
         openSettingsModal();
+        populateModelOptions();
+        refreshLocationStatus();
+        refreshUserMemoryStatus();
     }
 
     function resetSettingsForm() {
@@ -420,38 +634,41 @@ document.addEventListener('DOMContentLoaded', () => {
         localStorage.removeItem(STORAGE_KEYS.LOCATION_ENABLED);
         localStorage.removeItem(STORAGE_KEYS.LOCATION_CONTEXT);
         localStorage.removeItem(STORAGE_KEYS.USER_MEMORY_ENABLED);
-        if (window.chatManager) window.chatManager.clearUserMemoryStore();
-        systemPromptTextarea.value = PROMPTS.DEFAULT_SYSTEM;
-        modelSelectDropdown.innerHTML = `<option value="${window.AURA_CONFIG.defaultModel}">${window.AURA_CONFIG.defaultModel}</option>`;
+        localStorage.removeItem(STORAGE_KEYS.EXPERIENCE_STYLE);
+        localStorage.removeItem(STORAGE_KEYS.THINKING_MODE);
+        localStorage.removeItem(STORAGE_KEYS.PROMPT_OVERRIDE_ENABLED);
+        if (window.chatManager) {
+            window.chatManager.clearUserMemoryStore();
+            window.chatManager.updateResponsePreferences(DEFAULT_RESPONSE_PREFERENCES);
+        }
+        syncBehaviorControls();
+        modelSelectDropdown.innerHTML = `<option value="${escapeOptionValue(window.AURA_CONFIG.defaultModel)}">${escapeOptionValue(window.AURA_CONFIG.defaultModel)}</option>`;
         modelSelectDropdown.value = window.AURA_CONFIG.defaultModel;
-        locationAccessCheckbox.checked = false;
-        userMemoryCheckbox.checked = false;
+        syncThinkingModeControls('balanced');
+        if (locationAccessCheckbox) locationAccessCheckbox.checked = false;
+        if (userMemoryCheckbox) userMemoryCheckbox.checked = false;
         setLocationStatus('Location access is off.');
         refreshUserMemoryStatus();
     }
 
     async function saveSettings() {
-        const promptValue = systemPromptTextarea.value.trim();
         const selectedModel = modelSelectDropdown.value;
-
-        if (promptValue) {
-            localStorage.setItem(STORAGE_KEYS.PROMPT, promptValue);
-        } else {
-            localStorage.removeItem(STORAGE_KEYS.PROMPT);
-        }
 
         if (selectedModel) {
             localStorage.setItem(STORAGE_KEYS.MODEL, selectedModel);
         }
 
-        localStorage.setItem(STORAGE_KEYS.LOCATION_ENABLED, String(locationAccessCheckbox.checked));
-        if (!locationAccessCheckbox.checked) {
+        applyBehaviorControls();
+        setThinkingMode(thinkingModeDropdown?.value || composerThinkingMode?.value || 'balanced');
+
+        localStorage.setItem(STORAGE_KEYS.LOCATION_ENABLED, String(Boolean(locationAccessCheckbox?.checked)));
+        if (!locationAccessCheckbox?.checked) {
             localStorage.removeItem(STORAGE_KEYS.LOCATION_CONTEXT);
         } else {
             await requestCurrentLocation({ silent: false });
         }
 
-        localStorage.setItem(STORAGE_KEYS.USER_MEMORY_ENABLED, String(userMemoryCheckbox.checked));
+        localStorage.setItem(STORAGE_KEYS.USER_MEMORY_ENABLED, String(Boolean(userMemoryCheckbox?.checked)));
         refreshUserMemoryStatus();
 
         closeSettingsModal();
@@ -553,22 +770,27 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
-    toolsButton.addEventListener('click', () => {
+    if (toolsButton) toolsButton.addEventListener('click', () => {
         renderToolsInModal(chatManager.getActiveChatTools());
         openToolsModal();
     });
-    document.getElementById('closeToolsButton').addEventListener('click', closeToolsModal);
+    document.getElementById('closeToolsButton')?.addEventListener('click', closeToolsModal);
 
     if (insightsButton) insightsButton.addEventListener('click', openInsightsModal);
-    document.getElementById('closeInsightsButton').addEventListener('click', closeInsightsModal);
+    document.getElementById('closeInsightsButton')?.addEventListener('click', closeInsightsModal);
     if (themeToggleButton) themeToggleButton.addEventListener('click', toggleTheme);
     if (settingsButton) settingsButton.addEventListener('click', openSettingsPanel);
-    cancelSettingsButton.addEventListener('click', closeSettingsModal);
-    resetSettingsButton.addEventListener('click', resetSettingsForm);
-    saveSettingsButton.addEventListener('click', saveSettings);
-    locationAccessCheckbox.addEventListener('change', refreshLocationStatus);
-    refreshLocationButton.addEventListener('click', () => requestCurrentLocation({ silent: false }));
+    if (cancelSettingsButton) cancelSettingsButton.addEventListener('click', closeSettingsModal);
+    if (resetSettingsButton) resetSettingsButton.addEventListener('click', resetSettingsForm);
+    if (saveSettingsButton) saveSettingsButton.addEventListener('click', saveSettings);
+    if (exportDataButton) exportDataButton.addEventListener('click', exportAuraData);
+    if (clearMemoryButton) clearMemoryButton.addEventListener('click', clearAuraMemory);
+    if (deleteAllDataButton) deleteAllDataButton.addEventListener('click', deleteAllAuraData);
+    if (locationAccessCheckbox) locationAccessCheckbox.addEventListener('change', refreshLocationStatus);
+    if (refreshLocationButton) refreshLocationButton.addEventListener('click', () => requestCurrentLocation({ silent: false }));
     if (userMemoryCheckbox) userMemoryCheckbox.addEventListener('change', refreshUserMemoryStatus);
+    if (thinkingModeDropdown) thinkingModeDropdown.addEventListener('change', () => setThinkingMode(thinkingModeDropdown.value));
+    if (composerThinkingMode) composerThinkingMode.addEventListener('change', () => setThinkingMode(composerThinkingMode.value));
 
     toolsModalContent.addEventListener('click', async (event) => {
         const target = event.target.closest('[data-action]');
@@ -643,6 +865,19 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
 
+        const experienceTarget = event.target.closest('[data-experience-style]');
+        if (experienceTarget) {
+            const selectedStyle = experienceTarget.dataset.experienceStyle || 'balanced';
+            if (typeof window.applyExperienceStyle === 'function') {
+                window.applyExperienceStyle(selectedStyle);
+            }
+            document.querySelectorAll('[data-experience-style]').forEach((chip) => {
+                chip.classList.toggle('is-active', chip.dataset.experienceStyle === selectedStyle);
+            });
+            userInput.focus();
+            return;
+        }
+
         const target = event.target.closest('a.content-link');
         if (!target?.dataset.topic) return;
 
@@ -652,13 +887,14 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     normalizeStoredModel();
+    syncThinkingModeControls();
     applyTheme(getStoredTheme());
-    locationAccessCheckbox.checked = isLocationSharingEnabled();
+    if (locationAccessCheckbox) locationAccessCheckbox.checked = isLocationSharingEnabled();
     if (userMemoryCheckbox) userMemoryCheckbox.checked = isUserMemorySharingEnabled();
     refreshLocationStatus();
     refreshUserMemoryStatus();
     setupLiquidGlassInteractions();
-    chatMessagesSurface.addEventListener('scroll', syncChromeCompression, { passive: true });
+    if (chatMessagesSurface) chatMessagesSurface.addEventListener('scroll', syncChromeCompression, { passive: true });
     syncChromeCompression();
     refreshUI();
     checkAgents();

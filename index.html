@@ -94,6 +94,13 @@
                                 </label>
                                 <input type="file" id="fileInput" class="hidden" accept=".txt,.md" aria-label="Attach a text or markdown document" title="Attach a document">
 
+                                <label for="composerThinkingMode" class="sr-only">Thinking mode</label>
+                                <select id="composerThinkingMode" class="composer-thinking-select transition duration-200" aria-label="Thinking mode" title="Thinking mode">
+                                    <option value="fast">Fast</option>
+                                    <option value="balanced">Balanced</option>
+                                    <option value="deep">Deep</option>
+                                </select>
+
                                 <input id="userInput" type="text" placeholder="Ask Aura something..." aria-label="Type your message to Aura" title="Type your message" class="flex-1 p-3 bg-transparent text-gray-100 placeholder-gray-400 focus:outline-none transition duration-200">
 
                                 <button type="button" id="sendButton" class="liquid-send-button transition duration-200" aria-label="Send Message" title="Send Message">
@@ -111,8 +118,52 @@
         <div data-liquid class="relative liquid-glass liquid-panel rounded-3xl p-8 w-full max-w-lg shadow-2xl border border-white/10">
             <h3 class="text-2xl font-bold mb-6 text-gray-100">Settings</h3>
             <div class="space-y-6">
-                <div><label for="systemPromptTextarea" class="block text-sm font-medium text-gray-300">System Prompt</label><textarea id="systemPromptTextarea" rows="6" class="mt-1 block w-full p-3 bg-gray-900/50 rounded-xl focus:outline-none focus:ring-2 focus:ring-pink-500"></textarea></div>
+                <div class="space-y-3 rounded-2xl border border-white/10 p-4">
+                    <div>
+                        <h4 class="text-sm font-semibold text-gray-200">Aura Behavior</h4>
+                        <p class="text-xs text-gray-400 mt-1">Shape Aura safely without editing the hidden system instructions that keep replies consistent.</p>
+                    </div>
+                    <div class="grid gap-3 sm:grid-cols-2">
+                        <div>
+                            <label for="auraStyleSelect" class="block text-sm font-medium text-gray-300">Aura Style</label>
+                            <select id="auraStyleSelect" class="mt-1 block w-full p-3 bg-gray-900/50 rounded-xl focus:outline-none focus:ring-2 focus:ring-pink-500">
+                                <option value="balanced">Warm Professional</option>
+                                <option value="gentle">Gentle Companion</option>
+                                <option value="practical">Direct & Practical</option>
+                                <option value="research">Research-Focused</option>
+                                <option value="direct">Concise & Plain</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label for="responseDetailSelect" class="block text-sm font-medium text-gray-300">Response Detail</label>
+                            <select id="responseDetailSelect" class="mt-1 block w-full p-3 bg-gray-900/50 rounded-xl focus:outline-none focus:ring-2 focus:ring-pink-500">
+                                <option value="brief">Short</option>
+                                <option value="balanced">Balanced</option>
+                                <option value="detailed">Detailed</option>
+                            </select>
+                        </div>
+                    </div>
+                    <details id="advancedPromptDetails" class="advanced-prompt-panel">
+                        <summary>Advanced prompt override</summary>
+                        <p class="text-xs text-gray-400 mt-2">For development only. Aura still keeps its safety, tool, memory, and medical behavior contracts around this text.</p>
+                        <label class="advanced-prompt-toggle-row" for="advancedPromptToggle">
+                            <input id="advancedPromptToggle" type="checkbox" class="h-4 w-4 rounded border-gray-500 bg-gray-800 text-pink-600 focus:ring-pink-500">
+                            <span>Use custom base prompt</span>
+                        </label>
+                        <label for="advancedPromptTextarea" class="sr-only">Advanced prompt override</label>
+                        <textarea id="advancedPromptTextarea" rows="5" class="mt-3 block w-full p-3 bg-gray-900/50 rounded-xl focus:outline-none focus:ring-2 focus:ring-pink-500" placeholder="Optional developer override for Aura's base persona."></textarea>
+                    </details>
+                </div>
                 <div><label for="modelSelectDropdown" class="block text-sm font-medium text-gray-300">AI Model</label><select id="modelSelectDropdown" class="mt-1 block w-full p-3 bg-gray-900/50 rounded-xl focus:outline-none focus:ring-2 focus:ring-pink-500"></select></div>
+                <div>
+                    <label for="thinkingModeDropdown" class="block text-sm font-medium text-gray-300">Thinking Mode</label>
+                    <select id="thinkingModeDropdown" class="mt-1 block w-full p-3 bg-gray-900/50 rounded-xl focus:outline-none focus:ring-2 focus:ring-pink-500">
+                        <option value="fast">Fast - quicker everyday replies</option>
+                        <option value="balanced">Balanced - default effort</option>
+                        <option value="deep">Deep - more careful reasoning</option>
+                    </select>
+                    <p id="thinkingModeStatusText" class="text-xs text-gray-400 mt-2">Balanced gives Aura normal depth without slowing every answer down.</p>
+                </div>
                 <div class="space-y-3">
                     <div class="flex items-start justify-between gap-4">
                         <div>
@@ -133,6 +184,17 @@
                         <input id="userMemoryCheckbox" type="checkbox" class="mt-1 h-4 w-4 rounded border-gray-500 bg-gray-800 text-pink-600 focus:ring-pink-500">
                     </div>
                     <div id="userMemoryStatusText" class="text-xs text-gray-400">Cross-chat memory is off.</div>
+                </div>
+                <div class="space-y-3 rounded-2xl border border-white/10 p-4">
+                    <div>
+                        <h4 class="text-sm font-semibold text-gray-200">Privacy & Data</h4>
+                        <p class="text-xs text-gray-400 mt-1">Export your local Aura data, clear cross-chat memory, or wipe chats and settings from this browser.</p>
+                    </div>
+                    <div class="flex flex-wrap gap-2">
+                        <button id="exportDataButton" type="button" class="px-3 py-2 rounded-xl transition duration-200 text-sm">Export Data</button>
+                        <button id="clearMemoryButton" type="button" class="px-3 py-2 rounded-xl transition duration-200 text-sm">Forget Memory</button>
+                        <button id="deleteAllDataButton" type="button" class="px-3 py-2 rounded-xl transition duration-200 text-sm">Delete All Data</button>
+                    </div>
                 </div>
             </div>
             <div class="mt-8 flex justify-end space-x-4">

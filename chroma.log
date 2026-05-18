@@ -100,3 +100,4 @@ Getting started guide: https://docs.trychroma.com/docs/overview/getting-started
 - Copy your data to Cloud: chroma copy --to-cloud --all
 
 OpenTelemetry is not enabled because it is missing from the config.
+

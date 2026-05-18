@@ -537,10 +537,69 @@ body::before {
 
 .empty-state-subtitle {
     max-width: 560px;
-    margin: 0 auto 28px;
+    margin: 0 auto 22px;
     font-size: 1rem;
     line-height: 1.6;
     color: var(--text-muted);
+}
+
+.experience-style-panel {
+    max-width: 720px;
+    margin: 0 auto 26px;
+    padding: 16px;
+    border: 1px solid var(--surface-border);
+    border-radius: 20px;
+    background:
+        linear-gradient(135deg, var(--accent-faint), transparent 48%),
+        var(--surface-bg-raised);
+    text-align: left;
+}
+
+.experience-style-eyebrow {
+    margin-bottom: 4px;
+    color: var(--secondary-strong);
+    font-size: 0.78rem;
+    font-weight: 800;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+}
+
+.experience-style-copy {
+    margin: 0 0 14px;
+    color: var(--text-muted);
+    font-size: 0.92rem;
+    line-height: 1.45;
+}
+
+.experience-style-grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+}
+
+.experience-style-chip {
+    min-height: 38px;
+    padding: 0 14px;
+    border: 1px solid var(--surface-border);
+    border-radius: 999px;
+    background: var(--button-bg);
+    color: var(--text-main);
+    font-size: 0.88rem;
+    font-weight: 700;
+    transition: transform 0.16s ease, border-color 0.16s ease, background 0.16s ease;
+}
+
+.experience-style-chip:hover {
+    transform: translateY(-1px);
+    border-color: var(--surface-border-strong);
+    background: var(--button-bg-hover);
+}
+
+.experience-style-chip.is-active {
+    border-color: var(--accent-strong);
+    background: linear-gradient(135deg, var(--accent-soft), var(--secondary-faint));
+    color: var(--text-strong);
+    box-shadow: 0 10px 22px rgba(255, 143, 194, 0.14);
 }
 
 .prompt-label {
@@ -689,6 +748,9 @@ body::before {
 #refreshLocationButton,
 #cancelSettingsButton,
 #resetSettingsButton,
+#exportDataButton,
+#clearMemoryButton,
+#deleteAllDataButton,
 #closeToolsButton,
 #closeInsightsButton,
 #closeContentButton {
@@ -709,6 +771,9 @@ body::before {
 #refreshLocationButton:hover,
 #cancelSettingsButton:hover,
 #resetSettingsButton:hover,
+#exportDataButton:hover,
+#clearMemoryButton:hover,
+#deleteAllDataButton:hover,
 #closeToolsButton:hover,
 #closeInsightsButton:hover,
 #closeContentButton:hover {
@@ -724,6 +789,32 @@ body::before {
 #typingIndicator .chat-bubble {
     background: var(--button-bg);
     border-color: var(--surface-border);
+}
+
+.typing-content {
+    display: inline-flex;
+    align-items: center;
+    gap: 12px;
+    color: var(--text-muted);
+}
+
+.typing-dots {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.typing-dots span {
+    width: 10px;
+    height: 10px;
+    border-radius: 999px;
+    background: var(--text-muted);
+    animation: bounce 1s infinite;
+}
+
+.typing-status {
+    font-size: 0.92rem;
+    font-style: italic;
 }
 
 .floating-input-area {
@@ -767,8 +858,12 @@ body::before {
 }
 
 #userInput,
-#systemPromptTextarea,
+#advancedPromptTextarea,
 #modelSelectDropdown,
+#thinkingModeDropdown,
+#auraStyleSelect,
+#responseDetailSelect,
+.composer-thinking-select,
 .thought-record-card textarea {
     color: var(--text-main) !important;
     background: var(--input-bg) !important;
@@ -785,15 +880,28 @@ body::before {
 }
 
 #userInput::placeholder,
-#systemPromptTextarea::placeholder,
+#advancedPromptTextarea::placeholder,
 .thought-record-card textarea::placeholder {
     color: var(--placeholder);
 }
 
-#systemPromptTextarea,
+#advancedPromptTextarea,
 #modelSelectDropdown,
+#thinkingModeDropdown,
+#auraStyleSelect,
+#responseDetailSelect,
+.composer-thinking-select,
 .thought-record-card textarea {
     border-radius: 14px;
+}
+
+.composer-thinking-select {
+    min-height: 52px;
+    max-width: 118px;
+    padding: 0 12px;
+    flex-shrink: 0;
+    font-size: 0.86rem;
+    font-weight: 800;
 }
 
 .liquid-send-button {
@@ -938,9 +1046,36 @@ body::before {
     border-color: var(--surface-border-strong);
 }
 
+.advanced-prompt-panel {
+    padding: 12px 14px;
+    border: 1px solid var(--surface-border);
+    border-radius: 16px;
+    background: var(--surface-bg-raised);
+}
+
+.advanced-prompt-panel summary {
+    cursor: pointer;
+    color: var(--text-main);
+    font-size: 0.9rem;
+    font-weight: 800;
+}
+
+.advanced-prompt-toggle-row {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    margin-top: 12px;
+    color: var(--text-muted);
+    font-size: 0.88rem;
+}
+
 #userInput:focus-visible,
-#systemPromptTextarea:focus-visible,
+#advancedPromptTextarea:focus-visible,
 #modelSelectDropdown:focus-visible,
+#thinkingModeDropdown:focus-visible,
+#auraStyleSelect:focus-visible,
+#responseDetailSelect:focus-visible,
+.composer-thinking-select:focus-visible,
 .thought-record-card textarea:focus-visible,
 button:focus-visible,
 label[for="fileInput"]:focus-visible {
@@ -1096,6 +1231,13 @@ label[for="fileInput"]:focus-visible {
     #userInput {
         min-height: 46px;
         font-size: 0.96rem;
+    }
+
+    .composer-thinking-select {
+        min-height: 46px;
+        max-width: 92px;
+        padding: 0 8px;
+        font-size: 0.78rem;
     }
 
     .empty-state-panel {
