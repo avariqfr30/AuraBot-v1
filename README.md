@@ -200,6 +200,23 @@ Thinking Mode is model-aware:
 
 Reasoning traces are not displayed or stored. Medical responses remain informational and require appropriate professional verification.
 
+## Response Example RAG
+
+Aura keeps reusable response examples separate from personal context inside the same ChromaDB server:
+
+- `aura_long_term_memory` contains user-specific conversation memory.
+- `aura_response_examples_v1` contains approved synthetic response-pattern examples.
+
+Seed the example collection after ChromaDB and Ollama are running:
+
+```bash
+npm run examples:seed
+```
+
+The seed command validates and upserts the approved examples from `contents/examples/medical-response-examples.json`. It does not read or modify personal memory. Evaluation cases in `contents/examples/medical-evaluation-cases.json` are never seeded.
+
+For non-emergency medical turns, Aura retrieves up to three examples filtered by domain, task, risk, and model family. Example retrieval runs in parallel with personal-memory retrieval. Examples guide response structure and safety behavior only; they are explicitly separated from user facts and external evidence in the prompt. Acute emergency turns skip example retrieval.
+
 ## Notes
 
 - Full chat, memory, and search features depend on the Aura server. Opening `index.html` directly is no longer the recommended path.

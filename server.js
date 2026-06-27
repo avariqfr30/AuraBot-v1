@@ -6,6 +6,9 @@ const express = require('express');
 const cors = require('cors');
 const axios = require('axios');
 const { ChromaClient } = require('chromadb');
+const {
+    RESPONSE_EXAMPLE_COLLECTION
+} = require('./lib/response-examples');
 
 const app = express();
 
@@ -24,6 +27,7 @@ const chroma = new ChromaClient({
     ssl: chromaTarget.protocol === 'https:'
 });
 let memoryCollectionPromise = null;
+let responseExampleCollectionPromise = null;
 const TAGS_CACHE_TTL_MS = 60 * 1000;
 const OSINT_FRESH_CACHE_TTL_MS = 5 * 60 * 1000;
 const OSINT_STABLE_CACHE_TTL_MS = 30 * 60 * 1000;
@@ -55,6 +59,31 @@ function getMemoryCollection() {
         });
     }
     return memoryCollectionPromise;
+}
+
+function getResponseExampleCollection() {
+    if (!responseExampleCollectionPromise) {
+        responseExampleCollectionPromise = chroma.getOrCreateCollection({
+            name: RESPONSE_EXAMPLE_COLLECTION,
+            embeddingFunction: ollamaEmbeddingFunction
+        });
+    }
+    return responseExampleCollectionPromise;
+}
+
+function normalizeExampleLimit(value) {
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed)) return 3;
+    return Math.min(Math.max(Math.floor(parsed), 1), 4);
+}
+
+function parseStoredExample(metadata) {
+    try {
+        const parsed = JSON.parse(metadata?.storedDocument || '');
+        return parsed && typeof parsed === 'object' ? parsed : null;
+    } catch (_error) {
+        return null;
+    }
 }
 
 function cleanSearchQuery(value) {
@@ -402,6 +431,89 @@ app.post('/api/search_memory', async (req, res) => {
         }
 
         respondWithUpstreamError(res, 'Vector search', error);
+    }
+});
+
+app.post('/api/search_examples', async (req, res) => {
+    try {
+        const {
+            query,
+            domain = 'medical',
+            task = '',
+            risk = 'low',
+            modelFamily = 'either',
+            limit = 3
+        } = req.body || {};
+
+        if (!String(query || '').trim()) {
+            return res.status(400).json({ error: 'An example search query is required' });
+        }
+
+        if (risk === 'high') {
+            return res.json({ examples: [] });
+        }
+
+        const resultLimit = normalizeExampleLimit(limit);
+        const collection = await getResponseExampleCollection();
+        const collectionCount = await collection.count();
+        if (!collectionCount) {
+            return res.json({ examples: [] });
+        }
+        const results = await collection.query({
+            queryTexts: [String(query).slice(0, 4000)],
+            nResults: Math.min(40, collectionCount),
+            where: { status: 'approved' }
+        });
+        const ids = results.ids?.[0] || [];
+        const metadatas = results.metadatas?.[0] || [];
+        const distances = results.distances?.[0] || [];
+        const candidates = ids.map((id, index) => ({
+            id,
+            metadata: metadatas[index] || {},
+            distance: Number(distances[index] ?? Number.POSITIVE_INFINITY)
+        }));
+        const allowedRisks = risk === 'medium' ? new Set(['low', 'medium']) : new Set(['low']);
+        const compatible = candidates
+            .filter(({ metadata }) => metadata.domain === domain)
+            .filter(({ metadata }) => allowedRisks.has(metadata.risk))
+            .filter(({ metadata }) => (
+                metadata.preferredModel === 'either' ||
+                modelFamily === 'either' ||
+                metadata.preferredModel === modelFamily
+            ))
+            .map((candidate) => ({
+                ...candidate,
+                example: parseStoredExample(candidate.metadata),
+                taskRank: candidate.metadata.task === task ? 0 : 1,
+                riskRank: candidate.metadata.risk === risk ? 0 : 1
+            }))
+            .filter(({ example }) => Boolean(example))
+            .sort((left, right) => (
+                left.taskRank - right.taskRank ||
+                left.riskRank - right.riskRank ||
+                left.distance - right.distance
+            ))
+            .slice(0, resultLimit)
+            .map(({ id, metadata, example }) => ({
+                id,
+                domain: metadata.domain,
+                task: metadata.task,
+                risk: metadata.risk,
+                preferredModel: metadata.preferredModel,
+                ...example
+            }));
+
+        return res.json({ examples: compatible });
+    } catch (error) {
+        if (isChromaUnavailable(error)) {
+            console.error('[Response examples]', error.message);
+            return res.status(503).json({
+                error: 'Response example retrieval is unavailable',
+                details: 'Start ChromaDB and seed examples with `npm run examples:seed`.'
+            });
+        }
+
+        respondWithUpstreamError(res, 'Response example retrieval', error);
     }
 });
 
