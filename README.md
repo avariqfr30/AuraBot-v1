@@ -181,6 +181,25 @@ Aura’s search path now does more than a single query:
 4. Answer-box, knowledge-graph, local results, and cited sources are condensed into an OSINT brief.
 5. Aura answers using only that brief and includes source links.
 
+## Model Routing and Thinking Modes
+
+Aura defaults to automatic model routing:
+
+- GPT-OSS 120B Cloud handles general conversation, planning, tool use, search synthesis, and complex reasoning.
+- MedGemma 1.5 handles medical-document interpretation and can review complex or current non-emergency medical responses.
+- Complex medical turns may use both models. Auto routing can therefore send message content to GPT-OSS Cloud.
+- Acute emergency signals skip the reviewer so deterministic urgent guidance is not delayed.
+- Selecting a specific model in Settings disables automatic switching and cross-model review, except for the urgent safety fallback.
+
+Thinking Mode is model-aware:
+
+- Auto selects effort from task complexity and risk.
+- Fast, Balanced, and Deep map to GPT-OSS `low`, `medium`, and `high` native thinking.
+- MedGemma does not expose GPT-OSS-style thinking levels. Deep allows one bounded medical self-review pass instead.
+- Background JSON, analysis, and memory tasks stay at low effort to control latency.
+
+Reasoning traces are not displayed or stored. Medical responses remain informational and require appropriate professional verification.
+
 ## Notes
 
 - Full chat, memory, and search features depend on the Aura server. Opening `index.html` directly is no longer the recommended path.

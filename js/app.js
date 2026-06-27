@@ -34,6 +34,9 @@ document.addEventListener('DOMContentLoaded', () => {
     const TOOL_TAG_REGEX = /<tool_create[^>]*type=["']([^"']+)["'][^>]*(?:theme=["']([^"']+)["'])?[^>]*\/?>/gi;
     const LOCATION_MAX_AGE_MS = 10 * 60 * 1000;
     const LEGACY_DEFAULT_MODELS = new Set(['llama3:8b']);
+    const AUTO_MODEL_OPTION = 'auto';
+
+    window.AURA_AVAILABLE_MODELS = [];
 
     let attachedFile = null;
 
@@ -81,7 +84,10 @@ document.addEventListener('DOMContentLoaded', () => {
     function normalizeStoredModel() {
         const storedModel = localStorage.getItem(STORAGE_KEYS.MODEL);
         if (!storedModel || LEGACY_DEFAULT_MODELS.has(storedModel)) {
-            localStorage.setItem(STORAGE_KEYS.MODEL, window.AURA_CONFIG.defaultModel);
+            localStorage.setItem(
+                STORAGE_KEYS.MODEL,
+                window.AURA_CONFIG.defaultModelPreference || AUTO_MODEL_OPTION
+            );
         }
     }
 
@@ -121,6 +127,8 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function resolvePreferredStoredModel(storedModel, availableModels = []) {
+        if (storedModel === AUTO_MODEL_OPTION) return AUTO_MODEL_OPTION;
+
         const preferredModels = getPinnedModelNames();
         const availableSet = new Set(availableModels);
         const pinnedSet = new Set(preferredModels);
@@ -181,20 +189,21 @@ document.addEventListener('DOMContentLoaded', () => {
     function refreshThinkingModeStatus() {
         const mode = typeof window.getThinkingModeKey === 'function'
             ? window.getThinkingModeKey(thinkingModeDropdown?.value || composerThinkingMode?.value)
-            : (thinkingModeDropdown?.value || composerThinkingMode?.value || 'balanced');
+            : (thinkingModeDropdown?.value || composerThinkingMode?.value || 'auto');
         const copy = {
-            fast: 'Fast keeps simple chats snappy by using less internal context and shorter answer budgets.',
-            balanced: 'Balanced gives Aura normal depth without slowing every answer down.',
-            deep: 'Deep gives Aura more internal room for context, evidence checks, and careful synthesis.'
+            auto: 'Auto keeps background work low, increases effort for complex requests, and handles urgent safety signals without reviewer delay.',
+            fast: 'Fast uses GPT-OSS Low or one concise MedGemma pass.',
+            balanced: 'Balanced uses GPT-OSS Medium or one structured MedGemma pass.',
+            deep: 'Deep uses GPT-OSS High; MedGemma may use a second bounded review pass.'
         };
 
-        if (thinkingModeStatusText) thinkingModeStatusText.textContent = copy[mode] || copy.balanced;
+        if (thinkingModeStatusText) thinkingModeStatusText.textContent = copy[mode] || copy.auto;
     }
 
     function syncThinkingModeControls(mode = null) {
         const activeMode = typeof window.getThinkingModeKey === 'function'
             ? window.getThinkingModeKey(mode)
-            : (mode || 'balanced');
+            : (mode || 'auto');
 
         if (composerThinkingMode) composerThinkingMode.value = activeMode;
         if (thinkingModeDropdown) thinkingModeDropdown.value = activeMode;
@@ -204,7 +213,7 @@ document.addEventListener('DOMContentLoaded', () => {
     function setThinkingMode(mode) {
         const activeMode = typeof window.applyThinkingMode === 'function'
             ? window.applyThinkingMode(mode)
-            : (mode || 'balanced');
+            : (mode || 'auto');
         syncThinkingModeControls(activeMode);
     }
 
@@ -577,7 +586,9 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     async function populateModelOptions() {
-        const storedModel = localStorage.getItem(STORAGE_KEYS.MODEL) || window.AURA_CONFIG.defaultModel;
+        const storedModel = localStorage.getItem(STORAGE_KEYS.MODEL) ||
+            window.AURA_CONFIG.defaultModelPreference ||
+            AUTO_MODEL_OPTION;
         const controller = new AbortController();
         const timeoutId = window.setTimeout(() => controller.abort(), 3500);
 
@@ -590,26 +601,41 @@ document.addEventListener('DOMContentLoaded', () => {
                 signal: controller.signal
             });
             const models = (data.models || []).map((model) => model.name).filter(Boolean);
+            window.AURA_AVAILABLE_MODELS = [...models];
             const resolvedModel = resolvePreferredStoredModel(storedModel, models);
-            const uniqueModels = getPrioritizedModels([...new Set([resolvedModel, ...getPinnedModelNames(), ...models])]);
+            const uniqueModels = getPrioritizedModels([
+                ...new Set([
+                    ...(resolvedModel === AUTO_MODEL_OPTION ? [] : [resolvedModel]),
+                    ...getPinnedModelNames(),
+                    ...models
+                ])
+            ]);
 
             if (resolvedModel !== storedModel) {
                 localStorage.setItem(STORAGE_KEYS.MODEL, resolvedModel);
             }
 
-            modelSelectDropdown.innerHTML = uniqueModels
-                .map((modelName) => {
+            modelSelectDropdown.innerHTML = [
+                `<option value="${AUTO_MODEL_OPTION}">Auto (GPT-OSS + MedGemma)</option>`,
+                ...uniqueModels.map((modelName) => {
                     const isPreferred = getPinnedModelNames().includes(modelName);
                     const label = isPreferred ? `${modelName} (Preferred)` : modelName;
                     return `<option value="${escapeOptionValue(modelName)}">${escapeOptionValue(label)}</option>`;
                 })
-                .join('');
+            ].join('');
         } catch (error) {
             console.error('Failed to load models:', error);
-            const fallbackModels = getPrioritizedModels([...new Set([storedModel, ...getPinnedModelNames()])]);
-            modelSelectDropdown.innerHTML = fallbackModels
-                .map((modelName) => `<option value="${escapeOptionValue(modelName)}">${escapeOptionValue(modelName)}</option>`)
-                .join('');
+            window.AURA_AVAILABLE_MODELS = [];
+            const fallbackModels = getPrioritizedModels([
+                ...new Set([
+                    ...(storedModel === AUTO_MODEL_OPTION ? [] : [storedModel]),
+                    ...getPinnedModelNames()
+                ])
+            ]);
+            modelSelectDropdown.innerHTML = [
+                `<option value="${AUTO_MODEL_OPTION}">Auto (GPT-OSS + MedGemma)</option>`,
+                ...fallbackModels.map((modelName) => `<option value="${escapeOptionValue(modelName)}">${escapeOptionValue(modelName)}</option>`)
+            ].join('');
         } finally {
             window.clearTimeout(timeoutId);
         }
@@ -642,9 +668,11 @@ document.addEventListener('DOMContentLoaded', () => {
             window.chatManager.updateResponsePreferences(DEFAULT_RESPONSE_PREFERENCES);
         }
         syncBehaviorControls();
-        modelSelectDropdown.innerHTML = `<option value="${escapeOptionValue(window.AURA_CONFIG.defaultModel)}">${escapeOptionValue(window.AURA_CONFIG.defaultModel)}</option>`;
-        modelSelectDropdown.value = window.AURA_CONFIG.defaultModel;
-        syncThinkingModeControls('balanced');
+        const defaultPreference = window.AURA_CONFIG.defaultModelPreference || AUTO_MODEL_OPTION;
+        localStorage.setItem(STORAGE_KEYS.MODEL, defaultPreference);
+        modelSelectDropdown.innerHTML = `<option value="${AUTO_MODEL_OPTION}">Auto (GPT-OSS + MedGemma)</option>`;
+        modelSelectDropdown.value = defaultPreference;
+        syncThinkingModeControls('auto');
         if (locationAccessCheckbox) locationAccessCheckbox.checked = false;
         if (userMemoryCheckbox) userMemoryCheckbox.checked = false;
         setLocationStatus('Location access is off.');
@@ -659,7 +687,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         applyBehaviorControls();
-        setThinkingMode(thinkingModeDropdown?.value || composerThinkingMode?.value || 'balanced');
+        setThinkingMode(thinkingModeDropdown?.value || composerThinkingMode?.value || 'auto');
 
         localStorage.setItem(STORAGE_KEYS.LOCATION_ENABLED, String(Boolean(locationAccessCheckbox?.checked)));
         if (!locationAccessCheckbox?.checked) {

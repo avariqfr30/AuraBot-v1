@@ -8,6 +8,11 @@ window.AURA_CONFIG = {
     apiBaseUrl: `${ACTIVE_APP_ORIGIN}/api`,
     ollamaBaseUrl: `${ACTIVE_APP_ORIGIN}/api/ollama`,
     defaultModel: 'medgemma1.5:4b',
+    defaultModelPreference: 'auto',
+    modelRouting: {
+        gptModel: 'gpt-oss:120b-cloud',
+        medModel: 'medgemma1.5:4b'
+    },
     preferredModels: [
         'medgemma1.5:4b',
         'gpt-oss:120b-cloud',

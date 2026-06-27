@@ -121,6 +121,14 @@ const EXPERIENCE_STYLE_PRESETS = {
 };
 
 const THINKING_MODE_PRESETS = {
+    auto: {
+        label: 'Auto',
+        prompt: 'Match reasoning effort to task complexity and risk.',
+        defaultOptions: {},
+        analysisOptions: {},
+        cleanupOptions: {},
+        jsonOptions: {}
+    },
     fast: {
         label: 'Fast',
         prompt: 'Use a quick internal pass. Prefer speed for simple, low-risk questions.',
@@ -325,6 +333,23 @@ User message:
 
 Write only Aura's final reply to the user.`,
 
+    MEDICAL_RESPONSE_REVIEW: `You are reviewing a draft health response for safety and medical completeness.
+
+User message:
+%MESSAGE%
+
+Draft response:
+%DRAFT%
+
+Return ONLY valid JSON with this exact shape:
+{
+  "requiresRevision": false,
+  "issues": ["string"],
+  "revisionGuidance": "string"
+}
+
+Set requiresRevision to true only when the draft contains a material medical error, unsafe dosing or treatment advice, a missed urgent red flag, unsupported certainty, or a contradiction with the supplied user information. Do not rewrite for style. Do not diagnose the user. Do not add facts that require current external evidence.`,
+
     BEHAVIOR_ANALYZER: `You are Aura's background profiling agent.
 Update the user's behavioral profile based on the recent chat history.
 Focus on updating: communicationStyle, moodPatterns, potentialLapses, and behavioralFacts.
@@ -480,8 +505,29 @@ function buildSessionCacheKey(parts = []) {
         .slice(0, 4000);
 }
 
-function getSelectedModelName() {
-    return localStorage.getItem(STORAGE_KEYS.MODEL) || window.AURA_CONFIG.defaultModel;
+function getModelPreference() {
+    return localStorage.getItem(STORAGE_KEYS.MODEL) ||
+        window.AURA_CONFIG.defaultModelPreference ||
+        'auto';
+}
+
+function getConfiguredRoutingModels() {
+    return {
+        gptModel: window.AURA_CONFIG.modelRouting?.gptModel || 'gpt-oss:120b-cloud',
+        medModel: window.AURA_CONFIG.modelRouting?.medModel || window.AURA_CONFIG.defaultModel
+    };
+}
+
+function getAvailableModelNames() {
+    return Array.isArray(window.AURA_AVAILABLE_MODELS)
+        ? window.AURA_AVAILABLE_MODELS.filter(Boolean)
+        : [];
+}
+
+function getBackgroundModelName() {
+    const preference = getModelPreference();
+    if (preference !== 'auto') return preference;
+    return getConfiguredRoutingModels().gptModel;
 }
 
 function isMedGemmaModel(modelName = '') {
@@ -644,12 +690,12 @@ function getConfiguredOllamaOptions(format = null, callType = 'default') {
 }
 
 function getThinkingModeKey(value = null) {
-    const raw = String(value || localStorage.getItem(STORAGE_KEYS.THINKING_MODE) || 'balanced').trim();
-    return Object.prototype.hasOwnProperty.call(THINKING_MODE_PRESETS, raw) ? raw : 'balanced';
+    const raw = String(value || localStorage.getItem(STORAGE_KEYS.THINKING_MODE) || 'auto').trim();
+    return Object.prototype.hasOwnProperty.call(THINKING_MODE_PRESETS, raw) ? raw : 'auto';
 }
 
 function getThinkingModePreset(mode = null) {
-    return THINKING_MODE_PRESETS[getThinkingModeKey(mode)] || THINKING_MODE_PRESETS.balanced;
+    return THINKING_MODE_PRESETS[getThinkingModeKey(mode)] || THINKING_MODE_PRESETS.auto;
 }
 
 function getThinkingModeOptions(format = null, callType = 'default') {
@@ -2297,15 +2343,30 @@ async function postJson(url, body) {
     });
 }
 
-async function _callLLM(prompt, format = null, callType = 'default') {
-    const model = getSelectedModelName();
-    const options = getModelGenerationOptions(model, format, callType);
+async function _callLLM(prompt, {
+    modelName = getBackgroundModelName(),
+    format = null,
+    callType = 'default',
+    thinkingMode = getThinkingModeKey(),
+    routeDecision = null
+} = {}) {
+    const inferencePolicy = window.AURA_MODEL_ROUTING.resolveInferencePolicy({
+        modelName,
+        requestedMode: thinkingMode,
+        callType: format === 'json' ? 'json' : callType,
+        routeDecision
+    });
+    const options = {
+        ...getModelGenerationOptions(modelName, format, callType),
+        num_predict: inferencePolicy.maxTokens
+    };
 
     try {
         const data = await postJson(API_ENDPOINTS.ollamaGenerate, {
-            model,
+            model: modelName,
             prompt,
             stream: false,
+            ...(inferencePolicy.think ? { think: inferencePolicy.think } : {}),
             ...(Object.keys(options).length ? { options } : {}),
             ...(format ? { format } : {})
         });
@@ -2333,11 +2394,12 @@ async function _callLLM(prompt, format = null, callType = 'default') {
                 if (!shouldContinue) break;
 
                 const continuationData = await postJson(API_ENDPOINTS.ollamaGenerate, {
-                    model,
+                    model: modelName,
                     prompt: stillHiddenOnly
                         ? buildFinalAnswerRetryPrompt(prompt)
                         : buildContinuationPrompt(prompt, rawReply),
                     stream: false,
+                    ...(inferencePolicy.think ? { think: inferencePolicy.think } : {}),
                     ...(Object.keys(options).length ? { options } : {})
                 });
                 const continuation = continuationData.response?.trim() || '';
@@ -2526,7 +2588,7 @@ class ChatManager {
             .replace('%STORE%', JSON.stringify(this.getActiveContentStore()))
             .replace('%HISTORY%', historyStr);
 
-        const response = await _callLLM(prompt, 'json');
+        const response = await _callLLM(prompt, { format: 'json', callType: 'analysis' });
         const parsed = safeParseJson(response, null);
 
         if (parsed && typeof parsed === 'object') {
@@ -2544,8 +2606,7 @@ class ChatManager {
                         .replace('%STORE%', JSON.stringify(this.getUserMemoryStore(), null, 2))
                         .replace('%CHAT_PROFILE%', JSON.stringify(nextStore, null, 2))
                         .replace('%HISTORY%', historyStr),
-                    'json',
-                    'analysis'
+                    { format: 'json', callType: 'analysis' }
                 );
                 const durableParsed = safeParseJson(durableResponse, null);
                 if (durableParsed && typeof durableParsed === 'object') {
@@ -2657,8 +2718,7 @@ class ChatManager {
 
         const response = await _callLLM(
             PROMPTS.CONVERSATION_SUMMARIZER.replace('%HISTORY%', historyStr),
-            'json',
-            'analysis'
+            { format: 'json', callType: 'analysis' }
         );
         const parsed = safeParseJson(response, null);
         if (!parsed || typeof parsed !== 'object') return '';
@@ -2766,7 +2826,10 @@ class ChatManager {
 
     async preScreenMessage(message) {
         if (!this.state.chats[this.state.activeChatId]?.isHeightenedAwareness) return 'OK';
-        const response = await _callLLM(PROMPTS.CRISIS_DETECTION.replace('%MESSAGE%', message), null, 'analysis');
+        const response = await _callLLM(
+            PROMPTS.CRISIS_DETECTION.replace('%MESSAGE%', message),
+            { callType: 'analysis' }
+        );
         return response?.includes('CRISIS') ? 'CRISIS' : 'OK';
     }
 
@@ -2776,14 +2839,18 @@ class ChatManager {
             await createToolByType('breathing_exercise')
         );
 
-        const activeModel = getSelectedModelName();
+        const activeModel = getConfiguredRoutingModels().gptModel;
         const responseSystemPrompt = buildResponseSystemPrompt(
             getEffectiveSystemPrompt(),
             activeModel
         );
         const prompt = `${responseSystemPrompt}
         ${PROMPTS.CRISIS_SUPPORT_REPLY.replace('%MESSAGE%', message)}`;
-        const rawReply = await _callLLM(prompt);
+        const rawReply = await _callLLM(prompt, {
+            modelName: activeModel,
+            callType: 'default',
+            thinkingMode: 'balanced'
+        });
         const recommendations = inferHighRiskSafetyRecommendations(message);
         const finalized = (await finalizeAssistantReply(rawReply, message)) ||
             "I hear you. Let's do a short breathing reset now. If you want, I can also look up nearby crisis resources.";
@@ -2803,7 +2870,10 @@ class ChatManager {
             .replace('%DAYS%', pattern.days)
             .replace('%REASON%', pattern.reason);
 
-        const rawReply = await _callLLM(prompt);
+        const rawReply = await _callLLM(prompt, {
+            modelName: getBackgroundModelName(),
+            callType: 'default'
+        });
         const cleaned = await finalizeAssistantReply(rawReply, '');
         return cleaned;
     }
@@ -2828,7 +2898,7 @@ async function createToolByType(type, theme = '') {
     if (!templates[type]) return null;
 
     const prompt = `Output ONLY this exact JSON object structure, filling in realistic data for the theme "${safeTheme}": ${templates[type]}`;
-    const response = await _callLLM(prompt, 'json');
+    const response = await _callLLM(prompt, { format: 'json', callType: 'analysis' });
     const parsed = safeParseJson(response, null);
     const fallback = safeParseJson(templates[type], null);
 
@@ -2854,7 +2924,7 @@ async function buildSearchPlan(userMessage, profileStr, runtimeContext) {
             .replace('%RUNTIME%', runtimeContext)
             .replace('%CRISIS_LOOKUP_POLICY%', crisisLookupPolicy)
             .replace('%MESSAGE%', userMessage),
-        'json'
+        { format: 'json', callType: 'analysis' }
     );
 
     const sanitizedPlan = refineSearchPlanForMedicalQuestion(
@@ -3268,6 +3338,32 @@ function runSafetyAgent(userMessage) {
     };
 }
 
+function runModelRoutingAgent({
+    userMessage,
+    effectiveRoute,
+    sourceNeedDecision,
+    documentText,
+    highRiskRecommendations
+}) {
+    const { gptModel, medModel } = getConfiguredRoutingModels();
+    const modelDecision = window.AURA_MODEL_ROUTING.resolveModelRoute({
+        preference: getModelPreference(),
+        availableModels: getAvailableModelNames(),
+        gptModel,
+        medModel,
+        message: userMessage,
+        effectiveRoute,
+        sourceNeedDecision,
+        documentText,
+        highRiskRecommendations
+    });
+
+    return {
+        name: 'ModelRoutingAgent',
+        modelDecision
+    };
+}
+
 async function runToolUseAgent(userMessage, effectiveRoute, adaptivePreferences) {
     const proactiveRecommendation = await inferProactiveToolOpportunity(
         userMessage,
@@ -3328,8 +3424,6 @@ function runTurnProfileAgent({
 }
 
 async function buildAuraAgentContext(userMessage, documentText = null) {
-    const activeModel = getSelectedModelName();
-    const responseSystemPrompt = buildResponseSystemPrompt(getEffectiveSystemPrompt(), activeModel);
     const profileStr = JSON.stringify(chatManager.getCombinedContentStore(), null, 2);
     const runtimeContext = getRuntimeContextString();
     const chatHistory = chatManager.getActiveChatHistory();
@@ -3348,6 +3442,21 @@ async function buildAuraAgentContext(userMessage, documentText = null) {
 
     const safety = runSafetyAgent(userMessage);
     workflowStages.push(safety);
+
+    const modelRouting = runModelRoutingAgent({
+        userMessage: reception.contextualUserMessage,
+        effectiveRoute: evidence.effectiveRoute,
+        sourceNeedDecision: evidence.sourceNeedDecision,
+        documentText,
+        highRiskRecommendations: safety.highRiskRecommendations
+    });
+    workflowStages.push(modelRouting);
+
+    const activeModel = modelRouting.modelDecision.primaryModel;
+    const responseSystemPrompt = buildResponseSystemPrompt(
+        getEffectiveSystemPrompt(),
+        modelRouting.modelDecision.primaryModel
+    );
 
     const toolUse = await runToolUseAgent(
         userMessage,
@@ -3379,6 +3488,7 @@ async function buildAuraAgentContext(userMessage, documentText = null) {
 
     return {
         activeModel,
+        modelDecision: modelRouting.modelDecision,
         responseSystemPrompt,
         profileStr,
         runtimeContext,
@@ -3405,32 +3515,95 @@ async function buildAuraAgentContext(userMessage, documentText = null) {
     };
 }
 
+async function callPrimaryWithFallback(prompt, context, overrides = {}) {
+    const primaryReply = await _callLLM(prompt, {
+        modelName: context.activeModel,
+        routeDecision: context.modelDecision,
+        ...overrides
+    });
+    if (primaryReply) return primaryReply;
+
+    const fallbackModel = getConfiguredRoutingModels().gptModel;
+    if (fallbackModel === context.activeModel) return null;
+
+    return _callLLM(prompt, {
+        modelName: fallbackModel,
+        routeDecision: { ...context.modelDecision, reviewerModel: null },
+        ...overrides
+    });
+}
+
+async function reviewMedicalReplyIfNeeded({ context, prompt, draft }) {
+    const primaryPolicy = window.AURA_MODEL_ROUTING.resolveInferencePolicy({
+        modelName: context.activeModel,
+        requestedMode: getThinkingModeKey(),
+        callType: 'default',
+        routeDecision: context.modelDecision
+    });
+    const useMedGemmaSelfReview =
+        window.AURA_MODEL_ROUTING.getModelFamily(context.activeModel) === 'medgemma' &&
+        context.modelDecision?.classification?.domain === 'medical' &&
+        primaryPolicy.passes === 2;
+    const reviewerModel = context.modelDecision?.reviewerModel ||
+        (useMedGemmaSelfReview ? context.activeModel : null);
+    if (!draft || !reviewerModel) return draft;
+
+    const reviewRaw = await _callLLM(
+        PROMPTS.MEDICAL_RESPONSE_REVIEW
+            .replace('%MESSAGE%', context.originalUserMessage || context.contextualUserMessage)
+            .replace('%DRAFT%', draft),
+        {
+            modelName: reviewerModel,
+            format: 'json',
+            callType: 'analysis',
+            thinkingMode: 'fast',
+            routeDecision: context.modelDecision
+        }
+    );
+    const review = safeParseJson(reviewRaw, null);
+    if (!review?.requiresRevision || !review.revisionGuidance) return draft;
+
+    const revised = await _callLLM(
+        `${prompt}\n\n[Medical reviewer feedback]\n${String(review.revisionGuidance).slice(0, 1600)}\nRevise the draft to address only material safety or correctness issues. Return only the corrected user-facing answer.\n\n[Draft]\n${draft}`,
+        {
+            modelName: context.activeModel,
+            callType: 'default',
+            thinkingMode: 'deep',
+            routeDecision: context.modelDecision
+        }
+    );
+
+    return revised || draft;
+}
+
 async function runKnowledgeComposerAgent(context) {
     if (!context.effectiveRoute.includes('Knowledge')) return null;
 
     const key = await _callLLM(
         PROMPTS.KNOWLEDGE_MAPPER.replace('%MESSAGE%', context.contextualUserMessage),
-        null,
-        'analysis'
+        { callType: 'analysis' }
     );
 
     if (key && key !== 'NULL') {
         const content = await fetchMarkdownContent(key.toLowerCase());
         if (content) {
+            const prompt = buildAuraDirectPrompt({
+                systemPrompt: context.responseSystemPrompt,
+                turnProfile: context.turnProfile,
+                runtimeContext: context.runtimeContext,
+                memoryContext: `${context.memoryContext}\n\nKnowledge base material:\n${content}`,
+                continuityContext: context.continuityContext,
+                history: context.historyStr,
+                vectorContext: context.vectorContext,
+                toolGuidance: context.proactiveToolGuidance,
+                userMessage: context.contextualUserMessage,
+                documentText: context.documentText
+            });
+            const draft = await callPrimaryWithFallback(prompt, context);
+            const reviewedDraft = await reviewMedicalReplyIfNeeded({ context, prompt, draft });
             return (
                 (await finalizeAgenticReply(
-                    await _callLLM(buildAuraDirectPrompt({
-                        systemPrompt: context.responseSystemPrompt,
-                        turnProfile: context.turnProfile,
-                        runtimeContext: context.runtimeContext,
-                        memoryContext: `${context.memoryContext}\n\nKnowledge base material:\n${content}`,
-                        continuityContext: context.continuityContext,
-                        history: context.historyStr,
-                        vectorContext: context.vectorContext,
-                        toolGuidance: context.proactiveToolGuidance,
-                        userMessage: context.contextualUserMessage,
-                        documentText: context.documentText
-                    })),
+                    reviewedDraft,
                     context.originalUserMessage || context.contextualUserMessage,
                     context.proactiveRecommendation,
                     context.highRiskRecommendations,
@@ -3459,8 +3632,8 @@ async function runEvidenceComposerAgent(context) {
         );
         const osintReport = await postJson(API_ENDPOINTS.osint, searchPlan);
         const evidenceCatalog = buildEvidenceCatalog(osintReport);
-        const renderedReplyBody = evidenceCatalog.length
-            ? await _callLLM(buildAuraEvidencePrompt({
+        const evidencePrompt = evidenceCatalog.length
+            ? buildAuraEvidencePrompt({
                 systemPrompt: context.responseSystemPrompt,
                 turnProfile: context.turnProfile,
                 runtimeContext: context.runtimeContext,
@@ -3470,8 +3643,16 @@ async function runEvidenceComposerAgent(context) {
                 vectorContext: context.vectorContext,
                 evidenceCatalog,
                 userMessage: context.contextualUserMessage
-            }))
-            : buildDeterministicSearchFallback(
+            })
+            : null;
+        const draft = evidencePrompt
+            ? await callPrimaryWithFallback(evidencePrompt, context)
+            : null;
+        const reviewedDraft = evidencePrompt
+            ? await reviewMedicalReplyIfNeeded({ context, prompt: evidencePrompt, draft })
+            : null;
+        const renderedReplyBody = reviewedDraft ||
+            buildDeterministicSearchFallback(
                 context.contextualUserMessage,
                 evidenceCatalog,
                 context.adaptivePreferences
@@ -3523,9 +3704,15 @@ async function runDirectComposerAgent(context) {
         userMessage: context.contextualUserMessage || context.originalUserMessage,
         documentText: context.documentText
     });
+    const draft = await callPrimaryWithFallback(finalPrompt, context);
+    const reviewedDraft = await reviewMedicalReplyIfNeeded({
+        context,
+        prompt: finalPrompt,
+        draft
+    });
 
     return (await finalizeAgenticReply(
-        await _callLLM(finalPrompt),
+        reviewedDraft,
         context.originalUserMessage || context.contextualUserMessage,
         context.proactiveRecommendation,
         context.highRiskRecommendations,
@@ -3539,7 +3726,7 @@ async function runDirectComposerAgent(context) {
 }
 
 async function runToolFollowUpAgent(toolFollowUp) {
-    const activeModel = getSelectedModelName();
+    const activeModel = getBackgroundModelName();
     const responseSystemPrompt = buildResponseSystemPrompt(getEffectiveSystemPrompt(), activeModel);
     const profileStr = JSON.stringify(chatManager.getCombinedContentStore(), null, 2);
     const runtimeContext = getRuntimeContextString();
@@ -3575,7 +3762,10 @@ async function runToolFollowUpAgent(toolFollowUp) {
         documentText: null
     });
 
-    const rawReply = await _callLLM(prompt);
+    const rawReply = await _callLLM(prompt, {
+        modelName: activeModel,
+        callType: 'default'
+    });
     return (await finalizeReplyWithProactiveTool(
         rawReply,
         '',
