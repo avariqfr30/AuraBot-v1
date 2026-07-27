@@ -8,7 +8,8 @@ const STORAGE_KEYS = {
     LOCATION_CONTEXT: 'aura_location_context',
     USER_MEMORY_ENABLED: 'aura_user_memory_enabled',
     EXPERIENCE_STYLE: 'aura_experience_style',
-    THINKING_MODE: 'aura_thinking_mode'
+    THINKING_MODE: 'aura_thinking_mode',
+    FEEDBACK_PROFILE_ID: 'aura_feedback_profile_id'
 };
 
 const API_ENDPOINTS = {
@@ -16,6 +17,9 @@ const API_ENDPOINTS = {
     storeMemory: `${window.AURA_CONFIG.apiBaseUrl}/store_memory`,
     searchMemory: `${window.AURA_CONFIG.apiBaseUrl}/search_memory`,
     searchExamples: `${window.AURA_CONFIG.apiBaseUrl}/search_examples`,
+    searchPersonalExamples: `${window.AURA_CONFIG.apiBaseUrl}/personal_examples/search`,
+    upsertPersonalExample: `${window.AURA_CONFIG.apiBaseUrl}/personal_examples/upsert`,
+    deletePersonalExamples: `${window.AURA_CONFIG.apiBaseUrl}/personal_examples/delete`,
     osint: `${window.AURA_CONFIG.apiBaseUrl}/osint`
 };
 
@@ -2029,8 +2033,11 @@ async function inferProactiveToolOpportunity(
     if (!LOW_RISK_PROACTIVE_TYPES.has(candidate.type)) return null;
     if (route.includes('Crisis') && !CRISIS_ROUTE_PROACTIVE_TYPES.has(candidate.type)) return null;
     if (candidate.confidence < 0.65) return null;
+    const immediateGrounding = candidate.type === 'breathing_exercise' &&
+        window.AURA_TURN_POLICY.hasImmediateGroundingNeed(userMessage);
     if (
         !isExplicitToolCreationRequest(userMessage) &&
+        !immediateGrounding &&
         !chatManager.canUseProactiveTool(candidate.type, 90 * 1000, chatId)
     ) return null;
 
@@ -2444,8 +2451,14 @@ function buildResponseExampleContext(examples = []) {
         .slice(0, 3)
         .map((entry, index) => {
             const avoid = Array.isArray(entry.avoid) ? entry.avoid.filter(Boolean).slice(0, 4) : [];
+            const label = entry.source === 'personal_feedback'
+                ? `Personal example ${index + 1}`
+                : `Example ${index + 1}`;
             return [
-                `[Example ${index + 1}: ${entry.task || 'medical'}]`,
+                `[${label}: ${entry.task || 'conversation'}]`,
+                entry.source === 'personal_feedback'
+                    ? 'This response pattern was explicitly approved by this user on this device.'
+                    : '',
                 `Example user request: ${String(entry.userMessage || '').slice(0, 700)}`,
                 `Preferred response pattern: ${String(entry.idealResponse || '').slice(0, 1200)}`,
                 avoid.length ? `Avoid: ${avoid.join(' | ')}` : ''
@@ -2471,17 +2484,45 @@ async function searchResponseExamples({
         const task = isMedical
             ? deriveResponseExampleTask(message, classification, documentText)
             : deriveCompanionExampleTask(message, turnPolicy, proactiveRecommendation);
-        if (!task) return '';
         const modelFamily = window.AURA_MODEL_ROUTING.getModelFamily(modelDecision.primaryModel);
-        const data = await postJson(API_ENDPOINTS.searchExamples, {
-            query: message,
-            domain,
-            task,
-            risk: classification.risk,
-            modelFamily,
-            limit: isMedical ? 3 : 2
-        });
-        return buildResponseExampleContext(data.examples || []);
+        const activePersonalIds = isMedical
+            ? []
+            : chatManager.getActivePersonalExampleIds();
+        const curatedRequest = task
+            ? postJson(API_ENDPOINTS.searchExamples, {
+                query: message,
+                domain,
+                task,
+                risk: classification.risk,
+                modelFamily,
+                limit: isMedical ? 3 : 2
+            })
+            : Promise.resolve({ examples: [] });
+        const personalRequest = activePersonalIds.length
+            ? postJson(API_ENDPOINTS.searchPersonalExamples, {
+                profileId: chatManager.getFeedbackProfileId(),
+                query: message,
+                modelFamily,
+                limit: 2
+            })
+            : Promise.resolve({ examples: [] });
+        const [curatedResult, personalResult] = await Promise.allSettled([
+            curatedRequest,
+            personalRequest
+        ]);
+        const curatedExamples = curatedResult.status === 'fulfilled'
+            ? (curatedResult.value.examples || [])
+            : [];
+        const personalExamples = personalResult.status === 'fulfilled'
+            ? (personalResult.value.examples || []).filter((entry) => (
+                activePersonalIds.includes(entry.id)
+            ))
+            : [];
+        const combined = [...personalExamples, ...curatedExamples]
+            .filter((entry, index, entries) => (
+                entries.findIndex((candidate) => candidate.id === entry.id) === index
+            ));
+        return buildResponseExampleContext(combined);
     } catch (_error) {
         return '';
     }
@@ -2580,8 +2621,40 @@ async function fetchMarkdownContent(slug) {
     }
 }
 
+function createLocalIdentifier(prefix = 'local') {
+    const randomPart = globalThis.crypto?.randomUUID
+        ? globalThis.crypto.randomUUID()
+        : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`;
+    return `${prefix}-${randomPart}`;
+}
+
+function getOrCreateFeedbackProfileId() {
+    const stored = String(localStorage.getItem(STORAGE_KEYS.FEEDBACK_PROFILE_ID) || '').trim();
+    if (/^profile-[a-z0-9_-]{8,120}$/i.test(stored)) return stored;
+
+    const profileId = createLocalIdentifier('profile');
+    localStorage.setItem(STORAGE_KEYS.FEEDBACK_PROFILE_ID, profileId);
+    return profileId;
+}
+
+function buildInferenceRouteSnapshot(modelDecision, route) {
+    const classification = modelDecision?.classification || {};
+    return window.AURA_FEEDBACK.normalizeRouteSnapshot({
+        modelName: modelDecision?.primaryModel,
+        modelFamily: window.AURA_MODEL_ROUTING.getModelFamily(modelDecision?.primaryModel),
+        reviewerModel: modelDecision?.reviewerModel,
+        route,
+        task: classification.task,
+        domain: classification.domain,
+        risk: classification.risk,
+        thinkingMode: getThinkingModeKey(),
+        source: modelDecision?.source
+    });
+}
+
 class ChatManager {
     constructor() {
+        this.pendingResponseMetadata = new Map();
         this.state = this.ensureStateShape(this.loadState() || this.getInitialState());
         if (!this.state.activeChatId) this.createNewChat();
     }
@@ -2590,7 +2663,8 @@ class ChatManager {
         return {
             chats: {},
             activeChatId: null,
-            localContentStore: buildChatScopedProfile()
+            localContentStore: buildChatScopedProfile(),
+            feedbackLearning: window.AURA_FEEDBACK.createState()
         };
     }
 
@@ -2605,13 +2679,24 @@ class ChatManager {
             if (!chat || typeof chat !== 'object') return;
             chat.history = (Array.isArray(chat.history) ? chat.history : []).map((message) => {
                 if (!message || typeof message !== 'object') return message;
-                const toolOffer = window.AURA_TOOL_ARTIFACTS.normalizeToolOffer(message.toolOffer);
+                const normalizedMessage = {
+                    ...message,
+                    id: String(message.id || createLocalIdentifier('msg'))
+                };
+                if (message.routeSnapshot) {
+                    normalizedMessage.routeSnapshot = window.AURA_FEEDBACK.normalizeRouteSnapshot(
+                        message.routeSnapshot
+                    );
+                }
+                const toolOffer = window.AURA_TOOL_ARTIFACTS.normalizeToolOffer(
+                    normalizedMessage.toolOffer
+                );
                 if (!toolOffer) {
-                    const { toolOffer: _discardedOffer, ...cleanMessage } = message;
+                    const { toolOffer: _discardedOffer, ...cleanMessage } = normalizedMessage;
                     return cleanMessage;
                 }
                 return {
-                    ...message,
+                    ...normalizedMessage,
                     toolOffer: toolOffer.status === 'creating'
                         ? { ...toolOffer, status: 'pending' }
                         : toolOffer
@@ -2629,6 +2714,7 @@ class ChatManager {
             chat.contextSummaryAnchor = typeof chat.contextSummaryAnchor === 'string' ? chat.contextSummaryAnchor : '';
         });
         safeState.localContentStore = globalFallbackStore;
+        safeState.feedbackLearning = window.AURA_FEEDBACK.normalizeState(safeState.feedbackLearning);
 
         return safeState;
     }
@@ -2674,6 +2760,17 @@ class ChatManager {
     }
 
     deleteChat(id) {
+        const promotedExampleIds = Object.values(this.state.feedbackLearning.entries)
+            .filter((entry) => entry.chatId === id && entry.promotedExampleId)
+            .map((entry) => entry.promotedExampleId);
+        const remainingFeedback = Object.fromEntries(
+            Object.entries(this.state.feedbackLearning.entries)
+                .filter(([, entry]) => entry.chatId !== id)
+        );
+        this.state.feedbackLearning = window.AURA_FEEDBACK.normalizeState({
+            ...this.state.feedbackLearning,
+            entries: remainingFeedback
+        });
         delete this.state.chats[id];
 
         const remainingChatIds = Object.keys(this.state.chats);
@@ -2681,6 +2778,7 @@ class ChatManager {
 
         if (!this.state.activeChatId) this.createNewChat();
         this.saveState();
+        return promotedExampleIds;
     }
 
     addMessageToActiveChat(role, content, metadata = {}) {
@@ -2692,11 +2790,28 @@ class ChatManager {
         if (!chat) return -1;
 
         const timestamp = Date.now();
-        const message = { role, content, timestamp };
+        const message = {
+            id: createLocalIdentifier('msg'),
+            role,
+            content,
+            timestamp
+        };
         const toolOffer = role === 'ai'
             ? window.AURA_TOOL_ARTIFACTS.normalizeToolOffer(metadata.toolOffer)
             : null;
         if (toolOffer) message.toolOffer = toolOffer;
+        if (role === 'ai' && metadata.routeSnapshot) {
+            message.routeSnapshot = window.AURA_FEEDBACK.normalizeRouteSnapshot(
+                metadata.routeSnapshot
+            );
+        }
+        if (role === 'ai' && metadata.retryOfMessageId) {
+            message.retryOfMessageId = String(metadata.retryOfMessageId);
+        }
+        if (role === 'user' && metadata.feedbackRetryFor) {
+            message.feedbackRetryFor = String(metadata.feedbackRetryFor);
+            message.source = 'feedback_retry';
+        }
         chat.history.push(message);
         const messageIndex = chat.history.length - 1;
 
@@ -2704,7 +2819,7 @@ class ChatManager {
             chat.title = buildChatTitle(content);
         }
 
-        if (role === 'user') {
+        if (role === 'user' && !metadata.skipVectorization) {
             chat.lastUserMessageTimestamp = timestamp;
             this.vectorizeData(content, {
                 role: 'user',
@@ -2863,10 +2978,185 @@ class ChatManager {
         this.saveState();
     }
 
+    getFeedbackProfileId() {
+        return getOrCreateFeedbackProfileId();
+    }
+
+    setPendingResponseMetadata(chatId, metadata = {}) {
+        if (!chatId || !this.state.chats[chatId]) return;
+        this.pendingResponseMetadata.set(chatId, {
+            ...metadata,
+            routeSnapshot: metadata.routeSnapshot
+                ? window.AURA_FEEDBACK.normalizeRouteSnapshot(metadata.routeSnapshot)
+                : null
+        });
+    }
+
+    consumePendingResponseMetadata(chatId) {
+        const metadata = this.pendingResponseMetadata.get(chatId) || {};
+        this.pendingResponseMetadata.delete(chatId);
+        return metadata;
+    }
+
+    getResponseFeedback(chatId, messageId) {
+        const entry = this.state.feedbackLearning.entries[String(messageId || '')];
+        return entry?.chatId === chatId ? { ...entry } : null;
+    }
+
+    getFeedbackSummary() {
+        return { ...this.state.feedbackLearning.summary };
+    }
+
+    getFeedbackPreferenceOverrides() {
+        return { ...this.state.feedbackLearning.preferenceOverrides };
+    }
+
+    prefersFewerToolOffers() {
+        return this.state.feedbackLearning.toolOfferMode === 'explicit_only';
+    }
+
+    findRelatedUserMessage(chatId, assistantMessage) {
+        const chat = this.getChat(chatId);
+        if (!chat || !assistantMessage) return null;
+        const originalAssistant = assistantMessage.retryOfMessageId
+            ? chat.history.find((message) => message.id === assistantMessage.retryOfMessageId)
+            : assistantMessage;
+        const assistantIndex = chat.history.findIndex((message) => message.id === originalAssistant?.id);
+        if (assistantIndex < 0) return null;
+
+        for (let index = assistantIndex - 1; index >= 0; index -= 1) {
+            const message = chat.history[index];
+            if (message?.role === 'user' && message.source !== 'feedback_retry') return message;
+        }
+        return null;
+    }
+
+    saveResponseFeedback(chatId, messageId, patch = {}) {
+        const chat = this.getChat(chatId);
+        const assistantMessage = chat?.history?.find((message) => message.id === messageId);
+        if (!assistantMessage || assistantMessage.role !== 'ai') return null;
+        const existing = this.getResponseFeedback(chatId, messageId);
+        const userMessage = this.findRelatedUserMessage(chatId, assistantMessage);
+
+        this.state.feedbackLearning = window.AURA_FEEDBACK.upsertFeedback(
+            this.state.feedbackLearning,
+            {
+                ...existing,
+                ...patch,
+                chatId,
+                messageId,
+                userMessageId: userMessage?.id || existing?.userMessageId || '',
+                routeSnapshot: assistantMessage.routeSnapshot || existing?.routeSnapshot
+            }
+        );
+        this.saveState();
+        return this.getResponseFeedback(chatId, messageId);
+    }
+
+    deleteResponseFeedback(chatId, messageId) {
+        const existing = this.getResponseFeedback(chatId, messageId);
+        if (!existing) return '';
+        this.state.feedbackLearning = window.AURA_FEEDBACK.removeFeedback(
+            this.state.feedbackLearning,
+            messageId
+        );
+        this.saveState();
+        return existing.promotedExampleId || '';
+    }
+
+    getFeedbackRetryContext(chatId, messageId) {
+        const chat = this.getChat(chatId);
+        const assistantMessage = chat?.history?.find((message) => message.id === messageId);
+        const feedback = this.getResponseFeedback(chatId, messageId);
+        const userMessage = this.findRelatedUserMessage(chatId, assistantMessage);
+        const request = window.AURA_FEEDBACK.buildRetryRequest(feedback, userMessage?.content);
+        if (!assistantMessage || !feedback || !request) return null;
+
+        return {
+            assistantMessage,
+            feedback,
+            userMessage,
+            ...request
+        };
+    }
+
+    markFeedbackRetried(chatId, messageId, retryMessageId) {
+        if (!this.getResponseFeedback(chatId, messageId)) return;
+        this.state.feedbackLearning = window.AURA_FEEDBACK.markRetried(
+            this.state.feedbackLearning,
+            messageId,
+            retryMessageId
+        );
+        this.saveState();
+    }
+
+    getPersonalExampleCandidate(chatId, messageId) {
+        const chat = this.getChat(chatId);
+        const assistantMessage = chat?.history?.find((message) => message.id === messageId);
+        const feedback = this.getResponseFeedback(chatId, messageId);
+        const userMessage = this.findRelatedUserMessage(chatId, assistantMessage);
+        if (!window.AURA_FEEDBACK.canPromotePersonalExample({
+            feedback,
+            userMessage: userMessage?.content,
+            assistantMessage: assistantMessage?.content
+        })) return null;
+
+        return {
+            id: `personal-${messageId}`,
+            task: feedback.routeSnapshot.task || 'conversation',
+            route: feedback.routeSnapshot.route,
+            domain: 'companion',
+            risk: 'low',
+            preferredModel: 'either',
+            userMessage: String(userMessage.content || '').slice(0, 4000),
+            idealResponse: String(assistantMessage.content || '').slice(0, 8000)
+        };
+    }
+
+    canPromoteResponseFeedback(chatId, messageId) {
+        return Boolean(this.getPersonalExampleCandidate(chatId, messageId));
+    }
+
+    markFeedbackPromoted(chatId, messageId, exampleId) {
+        if (!this.getResponseFeedback(chatId, messageId)) return;
+        this.state.feedbackLearning = window.AURA_FEEDBACK.markPromoted(
+            this.state.feedbackLearning,
+            messageId,
+            exampleId
+        );
+        this.saveState();
+    }
+
+    markFeedbackUnpromoted(chatId, messageId) {
+        if (!this.getResponseFeedback(chatId, messageId)) return;
+        this.state.feedbackLearning = window.AURA_FEEDBACK.markUnpromoted(
+            this.state.feedbackLearning,
+            messageId
+        );
+        this.saveState();
+    }
+
+    getActivePersonalExampleIds() {
+        return Object.values(this.state.feedbackLearning.entries)
+            .map((entry) => entry.promotedExampleId)
+            .filter(Boolean);
+    }
+
+    isPersonalExampleActive(exampleId) {
+        return this.getActivePersonalExampleIds().includes(String(exampleId || ''));
+    }
+
+    clearFeedbackLearning() {
+        const promotedExampleIds = this.getActivePersonalExampleIds();
+        this.state.feedbackLearning = window.AURA_FEEDBACK.createState();
+        this.saveState();
+        return promotedExampleIds;
+    }
+
     exportLocalData() {
         return {
             exportedAt: new Date().toISOString(),
-            version: 'aura-local-export-v1',
+            version: 'aura-local-export-v2',
             state: this.state,
             settings: {
                 theme: localStorage.getItem(STORAGE_KEYS.THEME),
@@ -2874,21 +3164,33 @@ class ChatManager {
                 experienceStyle: localStorage.getItem(STORAGE_KEYS.EXPERIENCE_STYLE),
                 thinkingMode: localStorage.getItem(STORAGE_KEYS.THINKING_MODE),
                 locationEnabled: localStorage.getItem(STORAGE_KEYS.LOCATION_ENABLED) === 'true',
-                userMemoryEnabled: localStorage.getItem(STORAGE_KEYS.USER_MEMORY_ENABLED) === 'true'
+                userMemoryEnabled: localStorage.getItem(STORAGE_KEYS.USER_MEMORY_ENABLED) === 'true',
+                feedbackProfileId: localStorage.getItem(STORAGE_KEYS.FEEDBACK_PROFILE_ID)
             }
         };
     }
 
     deleteAllLocalData() {
         Object.values(STORAGE_KEYS).forEach((key) => localStorage.removeItem(key));
+        this.pendingResponseMetadata.clear();
         this.state = this.getInitialState();
         this.createNewChat();
         this.saveState();
     }
 
-    getResponsePreferencesForChat(chatId = this.state.activeChatId) {
+    getStoredResponsePreferencesForChat(chatId = this.state.activeChatId) {
         return sanitizeResponsePreferences(
             this.getContentStoreForChat(chatId).responsePreferences,
+            DEFAULT_RESPONSE_PREFERENCES
+        );
+    }
+
+    getResponsePreferencesForChat(chatId = this.state.activeChatId) {
+        return sanitizeResponsePreferences(
+            {
+                ...this.getStoredResponsePreferencesForChat(chatId),
+                ...this.getFeedbackPreferenceOverrides()
+            },
             DEFAULT_RESPONSE_PREFERENCES
         );
     }
@@ -2904,7 +3206,7 @@ class ChatManager {
             ...this.getContentStoreForChat(chatId),
             responsePreferences: sanitizeResponsePreferences(
                 nextPreferences,
-                this.getResponsePreferencesForChat(chatId)
+                this.getStoredResponsePreferencesForChat(chatId)
             )
         };
         this.saveState();
@@ -2949,6 +3251,7 @@ class ChatManager {
         if (!TOOL_TYPES.has(type)) return false;
         const chat = this.state.chats[chatId];
         if (!chat) return false;
+        if (this.prefersFewerToolOffers()) return false;
 
         const now = Date.now();
         if (chat.lastProactiveToolAt && (now - chat.lastProactiveToolAt) < minCooldownMs) return false;
@@ -3103,6 +3406,19 @@ class ChatManager {
         );
 
         const activeModel = getConfiguredRoutingModels().gptModel;
+        this.setPendingResponseMetadata(chatId, {
+            routeSnapshot: {
+                modelName: activeModel,
+                modelFamily: window.AURA_MODEL_ROUTING.getModelFamily(activeModel),
+                reviewerModel: '',
+                route: 'CrisisAgent',
+                task: 'safety_support',
+                domain: 'medical',
+                risk: 'high',
+                thinkingMode: 'balanced',
+                source: 'safety'
+            }
+        });
         const responseSystemPrompt = buildResponseSystemPrompt(
             getEffectiveSystemPrompt(),
             activeModel
@@ -3137,8 +3453,21 @@ class ChatManager {
             .replace('%DAYS%', pattern.days)
             .replace('%REASON%', pattern.reason);
 
+        const activeModel = getBackgroundModelName();
+        this.setPendingResponseMetadata(chatId, {
+            routeSnapshot: {
+                modelName: activeModel,
+                modelFamily: window.AURA_MODEL_ROUTING.getModelFamily(activeModel),
+                route: 'GeneralFriendAgent',
+                task: 'reengagement',
+                domain: 'general',
+                risk: 'low',
+                thinkingMode: getThinkingModeKey(),
+                source: 'background'
+            }
+        });
         const rawReply = await _callLLM(prompt, {
-            modelName: getBackgroundModelName(),
+            modelName: activeModel,
             callType: 'default'
         });
         const cleaned = normalizeReplyWhitespace(
@@ -3596,11 +3925,18 @@ function runReceptionAgent(userMessage, chatHistory) {
 }
 
 function runPreferenceAgent(contextualUserMessage, chatId = chatManager.getActiveChatId()) {
+    const storedPreferences = deriveHeuristicResponsePreferences(
+        contextualUserMessage,
+        chatManager.getStoredResponsePreferencesForChat(chatId)
+    );
+    chatManager.updateResponsePreferences(storedPreferences, chatId);
     const adaptivePreferences = deriveHeuristicResponsePreferences(
         contextualUserMessage,
-        chatManager.getResponsePreferencesForChat(chatId)
+        {
+            ...storedPreferences,
+            ...chatManager.getFeedbackPreferenceOverrides()
+        }
     );
-    chatManager.updateResponsePreferences(adaptivePreferences, chatId);
 
     return {
         name: 'PreferenceAgent',
@@ -3883,7 +4219,7 @@ async function buildAuraAgentContext(
     });
     workflowStages.push(profile);
 
-    return {
+    const context = {
         chatId,
         activeModel,
         modelDecision: modelRouting.modelDecision,
@@ -3913,6 +4249,13 @@ async function buildAuraAgentContext(
         documentText,
         workflowStages
     };
+    chatManager.setPendingResponseMetadata(chatId, {
+        routeSnapshot: buildInferenceRouteSnapshot(
+            modelRouting.modelDecision,
+            evidence.effectiveRoute
+        )
+    });
+    return context;
 }
 
 async function callPrimaryWithFallback(prompt, context, overrides = {}) {
@@ -4136,6 +4479,18 @@ async function runToolFollowUpAgent(
     chatId = chatManager.getActiveChatId()
 ) {
     const activeModel = getBackgroundModelName();
+    chatManager.setPendingResponseMetadata(chatId, {
+        routeSnapshot: {
+            modelName: activeModel,
+            modelFamily: window.AURA_MODEL_ROUTING.getModelFamily(activeModel),
+            route: 'GeneralFriendAgent',
+            task: 'tool_follow_up',
+            domain: 'general',
+            risk: 'low',
+            thinkingMode: getThinkingModeKey(),
+            source: 'tool_follow_up'
+        }
+    });
     const responseSystemPrompt = buildResponseSystemPrompt(getEffectiveSystemPrompt(), activeModel);
     const profileStr = JSON.stringify(chatManager.getCombinedContentStore(chatId), null, 2);
     const runtimeContext = getRuntimeContextString();

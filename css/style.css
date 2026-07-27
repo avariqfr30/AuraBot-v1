@@ -931,6 +931,160 @@ button:disabled {
     margin-top: 12px;
 }
 
+.response-feedback {
+    width: min(76%, 760px);
+    margin-left: 2px;
+    color: var(--text-muted);
+}
+
+.feedback-quick-row,
+.feedback-detail-actions,
+.feedback-reason-grid {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+}
+
+.feedback-quick-row {
+    min-height: 34px;
+}
+
+.feedback-question,
+.feedback-save-state {
+    font-size: 0.78rem;
+}
+
+.feedback-save-state {
+    color: var(--secondary-strong);
+}
+
+.feedback-rating-button,
+.feedback-detail-toggle,
+.feedback-primary-button,
+.feedback-secondary-button,
+.feedback-text-button {
+    min-height: 34px;
+    padding: 0 11px;
+    border: 1px solid var(--surface-border);
+    border-radius: 999px;
+    background: var(--surface-bg-raised);
+    color: var(--text-main);
+    font-size: 0.78rem;
+    font-weight: 700;
+}
+
+.feedback-rating-button:hover,
+.feedback-detail-toggle:hover,
+.feedback-primary-button:hover,
+.feedback-secondary-button:hover,
+.feedback-text-button:hover {
+    border-color: var(--surface-border-strong);
+    background: var(--button-bg-hover);
+}
+
+.feedback-rating-button[aria-pressed="true"] {
+    border-color: var(--accent-strong);
+    background: linear-gradient(135deg, var(--accent-faint), var(--secondary-faint));
+    color: var(--text-strong);
+}
+
+.feedback-detail-toggle,
+.feedback-text-button {
+    border-color: transparent;
+    background: transparent;
+    color: var(--text-muted);
+}
+
+.feedback-detail-panel {
+    width: 100%;
+    margin-top: 6px;
+    padding: 14px;
+    border: 1px solid var(--surface-border);
+    border-radius: 16px;
+    background: var(--surface-bg-soft);
+}
+
+.feedback-reason-grid {
+    margin-bottom: 12px;
+}
+
+.feedback-reason-chip {
+    position: relative;
+    cursor: pointer;
+}
+
+.feedback-reason-chip input {
+    position: absolute;
+    opacity: 0;
+    pointer-events: none;
+}
+
+.feedback-reason-chip span {
+    display: inline-flex;
+    align-items: center;
+    min-height: 34px;
+    padding: 0 11px;
+    border: 1px solid var(--surface-border);
+    border-radius: 999px;
+    background: var(--button-bg);
+    color: var(--text-main);
+    font-size: 0.78rem;
+    font-weight: 650;
+}
+
+.feedback-reason-chip input:checked + span {
+    border-color: var(--secondary-strong);
+    background: var(--secondary-faint);
+    color: var(--text-strong);
+}
+
+.feedback-reason-chip input:focus-visible + span {
+    outline: 2px solid var(--focus-ring);
+    outline-offset: 2px;
+}
+
+.feedback-comment-label {
+    display: grid;
+    gap: 7px;
+    color: var(--text-main);
+    font-size: 0.82rem;
+    font-weight: 700;
+}
+
+.feedback-comment-label textarea {
+    width: 100%;
+    padding: 11px 12px;
+    resize: vertical;
+    border: 1px solid var(--input-border);
+    border-radius: 12px;
+    background: var(--input-bg);
+    color: var(--text-main);
+    font-weight: 400;
+    line-height: 1.45;
+}
+
+.feedback-detail-actions {
+    margin-top: 12px;
+}
+
+.feedback-primary-button {
+    border-color: transparent;
+    background: linear-gradient(135deg, var(--accent), var(--secondary));
+    color: #141922;
+}
+
+.feedback-privacy-note,
+.feedback-action-status {
+    margin-top: 10px;
+    font-size: 0.74rem;
+    line-height: 1.45;
+}
+
+.feedback-action-status.is-error {
+    color: #ff9c9c;
+}
+
 .message-action-button,
 .tool-button,
 #refreshLocationButton,
@@ -938,6 +1092,7 @@ button:disabled {
 #resetSettingsButton,
 #exportDataButton,
 #clearMemoryButton,
+#clearFeedbackButton,
 #deleteAllDataButton,
 #closeToolsButton,
 #closeInsightsButton,
@@ -961,6 +1116,7 @@ button:disabled {
 #resetSettingsButton:hover,
 #exportDataButton:hover,
 #clearMemoryButton:hover,
+#clearFeedbackButton:hover,
 #deleteAllDataButton:hover,
 #closeToolsButton:hover,
 #closeInsightsButton:hover,
@@ -1375,6 +1531,14 @@ label[for="fileInput"]:focus-visible {
 }
 
 @media (max-width: 760px) {
+    .response-feedback {
+        width: 94%;
+    }
+
+    .feedback-save-state {
+        flex-basis: 100%;
+    }
+
     body {
         overflow: auto;
     }

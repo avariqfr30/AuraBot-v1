@@ -206,6 +206,7 @@ Aura keeps reusable response examples separate from personal context inside the 
 
 - `aura_long_term_memory` contains user-specific conversation memory.
 - `aura_response_examples_v1` contains approved synthetic medical and companion response-pattern examples.
+- `aura_personal_response_examples_v1` contains only low-risk companion responses that the local user explicitly approves as personal examples.
 
 Seed the example collection after ChromaDB and Ollama are running:
 
@@ -216,6 +217,19 @@ npm run examples:seed
 The seed command validates and upserts 68 approved examples from `contents/examples/medical-response-examples.json` and `contents/examples/companion-response-examples.json`. It does not read or modify personal memory. Evaluation cases in `contents/examples/medical-evaluation-cases.json` and `contents/examples/companion-evaluation-cases.json` are never seeded.
 
 For non-emergency medical turns, Aura retrieves up to three examples filtered by domain, task, risk, and model family. Selected companion turns retrieve up to two examples for emotional presence, supportive disagreement, clarification, topic transitions, repair, and good tool/no-tool behavior. Example retrieval runs in parallel with personal-memory retrieval. Examples guide response structure and safety behavior only; they are explicitly separated from user facts and external evidence in the prompt. High-risk turns skip example retrieval.
+
+## Local Feedback Learning
+
+Each Aura response can be marked Helpful or Needs work, tagged with structured reasons, and given an optional written note. This feedback stays in the browser's Aura state and is included in local data exports. A feedback-aware retry sends the applicable note to the selected model, and an explicitly approved personal example may be included in future prompts; automatic routing can therefore send that selected context to a configured cloud model.
+
+The feedback loop is deliberately bounded:
+
+1. A single rating is recorded but does not immediately rewrite Aura's behavior.
+2. Repeated explicit signals can adjust response length, directness, structure, or suppress optional tool offers. Explicit tool requests and immediate grounding needs are not suppressed.
+3. The user can retry a response with their feedback. The retry instruction is stored as conversation context but is not written into vector memory.
+4. A Helpful, low-risk, non-medical response can be explicitly promoted into the isolated personal-example collection. Raw feedback, comments, medical replies, and high-risk replies are never auto-promoted.
+
+Deleting a chat removes its local feedback authority, clearing Feedback Learning removes all active personal examples, and Delete All Data resets the local feedback profile. No feedback is sent to a shared dataset or used for automatic weight training.
 
 ## Notes
 

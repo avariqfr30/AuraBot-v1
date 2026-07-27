@@ -7,7 +7,10 @@ const cors = require('cors');
 const axios = require('axios');
 const { ChromaClient } = require('chromadb');
 const {
-    RESPONSE_EXAMPLE_COLLECTION
+    RESPONSE_EXAMPLE_COLLECTION,
+    PERSONAL_RESPONSE_EXAMPLE_COLLECTION,
+    buildPersonalEmbeddingDocument,
+    buildPersonalMetadata
 } = require('./lib/response-examples');
 const { buildMemoryMatches } = require('./lib/memory-results');
 
@@ -29,6 +32,7 @@ const chroma = new ChromaClient({
 });
 let memoryCollectionPromise = null;
 let responseExampleCollectionPromise = null;
+let personalResponseExampleCollectionPromise = null;
 const TAGS_CACHE_TTL_MS = 60 * 1000;
 const OSINT_FRESH_CACHE_TTL_MS = 5 * 60 * 1000;
 const OSINT_STABLE_CACHE_TTL_MS = 30 * 60 * 1000;
@@ -72,10 +76,64 @@ function getResponseExampleCollection() {
     return responseExampleCollectionPromise;
 }
 
+function getPersonalResponseExampleCollection() {
+    if (!personalResponseExampleCollectionPromise) {
+        personalResponseExampleCollectionPromise = chroma.getOrCreateCollection({
+            name: PERSONAL_RESPONSE_EXAMPLE_COLLECTION,
+            embeddingFunction: ollamaEmbeddingFunction
+        });
+    }
+    return personalResponseExampleCollectionPromise;
+}
+
 function normalizeExampleLimit(value) {
     const parsed = Number(value);
     if (!Number.isFinite(parsed)) return 3;
     return Math.min(Math.max(Math.floor(parsed), 1), 4);
+}
+
+function normalizeLocalProfileId(value) {
+    const profileId = String(value || '').trim();
+    return /^[a-z0-9_-]{8,120}$/i.test(profileId) ? profileId : '';
+}
+
+function normalizePersonalExample(value, profileId) {
+    const safe = value && typeof value === 'object' ? value : {};
+    const allowedRoutes = new Set([
+        'GeneralFriendAgent',
+        'CbtAnalystAgent',
+        'PlannerAgent'
+    ]);
+    const id = String(safe.id || '').trim();
+    const route = String(safe.route || '').trim();
+    const userMessage = String(safe.userMessage || '').trim().slice(0, 4000);
+    const idealResponse = String(safe.idealResponse || '').trim().slice(0, 8000);
+    const preferredModel = ['gpt-oss', 'medgemma', 'either'].includes(safe.preferredModel)
+        ? safe.preferredModel
+        : 'either';
+
+    if (
+        !/^personal-[a-z0-9_-]{8,160}$/i.test(id) ||
+        safe.domain !== 'companion' ||
+        safe.risk !== 'low' ||
+        !allowedRoutes.has(route) ||
+        safe.task !== 'conversation' ||
+        !userMessage ||
+        !idealResponse
+    ) {
+        return null;
+    }
+
+    return {
+        id,
+        profileId,
+        route,
+        task: String(safe.task || 'conversation').trim().slice(0, 80) || 'conversation',
+        preferredModel,
+        userMessage,
+        idealResponse,
+        updatedAt: Date.now()
+    };
 }
 
 function parseStoredExample(metadata) {
@@ -526,6 +584,133 @@ app.post('/api/search_examples', async (req, res) => {
         }
 
         respondWithUpstreamError(res, 'Response example retrieval', error);
+    }
+});
+
+app.post('/api/personal_examples/search', async (req, res) => {
+    try {
+        const {
+            profileId: rawProfileId,
+            query,
+            modelFamily = 'either',
+            limit = 2
+        } = req.body || {};
+        const profileId = normalizeLocalProfileId(rawProfileId);
+
+        if (!profileId || !String(query || '').trim()) {
+            return res.status(400).json({ error: 'A local profile and search query are required' });
+        }
+
+        const collection = await getPersonalResponseExampleCollection();
+        const collectionCount = await collection.count();
+        if (!collectionCount) return res.json({ examples: [] });
+
+        const results = await collection.query({
+            queryTexts: [String(query).slice(0, 4000)],
+            nResults: Math.min(20, collectionCount),
+            where: {
+                $and: [
+                    { status: { $eq: 'approved' } },
+                    { source: { $eq: 'local_feedback' } },
+                    { profileId: { $eq: profileId } }
+                ]
+            }
+        });
+        const ids = results.ids?.[0] || [];
+        const metadatas = results.metadatas?.[0] || [];
+        const distances = results.distances?.[0] || [];
+        const examples = ids
+            .map((id, index) => ({
+                id,
+                metadata: metadatas[index] || {},
+                distance: Number(distances[index] ?? Number.POSITIVE_INFINITY)
+            }))
+            .filter(({ metadata }) => (
+                metadata.preferredModel === 'either' ||
+                modelFamily === 'either' ||
+                metadata.preferredModel === modelFamily
+            ))
+            .map((candidate) => ({
+                ...candidate,
+                example: parseStoredExample(candidate.metadata)
+            }))
+            .filter(({ example }) => Boolean(example))
+            .sort((left, right) => left.distance - right.distance)
+            .slice(0, normalizeExampleLimit(limit))
+            .map(({ id, metadata, example }) => ({
+                id,
+                source: 'personal_feedback',
+                domain: 'companion',
+                task: metadata.task || 'conversation',
+                risk: 'low',
+                preferredModel: metadata.preferredModel || 'either',
+                ...example
+            }));
+
+        return res.json({ examples });
+    } catch (error) {
+        if (isChromaUnavailable(error)) {
+            return res.status(503).json({
+                error: 'Personal response example retrieval is unavailable',
+                details: 'Start ChromaDB to use local feedback examples.'
+            });
+        }
+        respondWithUpstreamError(res, 'Personal response example retrieval', error);
+    }
+});
+
+app.post('/api/personal_examples/upsert', async (req, res) => {
+    try {
+        const profileId = normalizeLocalProfileId(req.body?.profileId);
+        const example = normalizePersonalExample(req.body?.example, profileId);
+        if (!profileId || !example) {
+            return res.status(400).json({
+                error: 'A valid low-risk local response example is required'
+            });
+        }
+
+        const collection = await getPersonalResponseExampleCollection();
+        await collection.upsert({
+            ids: [example.id],
+            documents: [buildPersonalEmbeddingDocument(example)],
+            metadatas: [buildPersonalMetadata(example)]
+        });
+        return res.json({ stored: true, id: example.id });
+    } catch (error) {
+        if (isChromaUnavailable(error)) {
+            return res.status(503).json({
+                error: 'Personal response example storage is unavailable',
+                details: 'Start ChromaDB to save local feedback examples.'
+            });
+        }
+        respondWithUpstreamError(res, 'Personal response example storage', error);
+    }
+});
+
+app.post('/api/personal_examples/delete', async (req, res) => {
+    try {
+        const profileId = normalizeLocalProfileId(req.body?.profileId);
+        const ids = [...new Set((Array.isArray(req.body?.ids) ? req.body.ids : [])
+            .map((id) => String(id || '').trim())
+            .filter((id) => /^personal-[a-z0-9_-]{8,160}$/i.test(id)))];
+        if (!profileId) {
+            return res.status(400).json({ error: 'A valid local profile is required' });
+        }
+
+        const collection = await getPersonalResponseExampleCollection();
+        await collection.delete({
+            ...(ids.length ? { ids } : {}),
+            where: { profileId: { $eq: profileId } }
+        });
+        return res.json({ deleted: true, count: ids.length || null });
+    } catch (error) {
+        if (isChromaUnavailable(error)) {
+            return res.status(503).json({
+                error: 'Personal response example deletion is unavailable',
+                details: 'Start ChromaDB to remove stored local examples.'
+            });
+        }
+        respondWithUpstreamError(res, 'Personal response example deletion', error);
     }
 });
 

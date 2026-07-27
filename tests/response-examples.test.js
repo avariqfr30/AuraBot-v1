@@ -9,6 +9,23 @@ assert.equal(
     'loadAllApprovedExamples must be implemented'
 );
 assert.equal(responseExamples.RESPONSE_EXAMPLE_FILES.length, 2);
+assert.equal(
+    responseExamples.PERSONAL_RESPONSE_EXAMPLE_COLLECTION,
+    'aura_personal_response_examples_v1'
+);
+
+const personalMetadata = responseExamples.buildPersonalMetadata({
+    profileId: 'profile-test-12345678',
+    task: 'conversation',
+    route: 'GeneralFriendAgent',
+    preferredModel: 'gpt-oss',
+    userMessage: 'Help me make this clearer.',
+    idealResponse: 'Start with the decision, then give the reason.',
+    updatedAt: 100
+});
+assert.equal(personalMetadata.source, 'local_feedback');
+assert.equal(personalMetadata.profileId, 'profile-test-12345678');
+assert.equal(personalMetadata.risk, 'low');
 
 const examples = responseExamples.loadAllApprovedExamples();
 assert.equal(examples.length, 68);

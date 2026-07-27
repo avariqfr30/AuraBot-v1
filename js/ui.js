@@ -436,6 +436,63 @@ function renderToolOffer(offer, options = {}) {
     return card;
 }
 
+function renderResponseFeedback(options = {}) {
+    const chatId = String(options.chatId || '');
+    const messageId = String(options.messageId || '');
+    if (!chatId || !messageId || !window.AURA_FEEDBACK) return null;
+
+    const feedback = options.feedback || null;
+    const rating = feedback?.rating || 'unrated';
+    const root = document.createElement('section');
+    root.className = 'response-feedback';
+    root.dataset.chatId = chatId;
+    root.dataset.messageId = messageId;
+    root.dataset.rating = rating;
+    root.setAttribute('aria-label', 'Response feedback');
+
+    const reasonInputs = window.AURA_FEEDBACK.REASON_DEFINITIONS.map((reason) => {
+        const checked = feedback?.reasons?.includes(reason.id) ? 'checked' : '';
+        return `
+            <label class="feedback-reason-chip">
+                <input type="checkbox" data-feedback-reason="${escapeHTML(reason.id)}" ${checked}>
+                <span>${escapeHTML(reason.label)}</span>
+            </label>`;
+    }).join('');
+    const feedbackStatus = feedback
+        ? (rating === 'helpful' ? 'Saved as helpful on this device.' : 'Feedback saved on this device.')
+        : '';
+    const promotionAction = feedback?.promotedExampleId
+        ? `<button type="button" class="feedback-secondary-button" data-action="remove_personal_example">Stop using as an example</button>`
+        : (options.canPromote
+            ? `<button type="button" class="feedback-secondary-button" data-action="promote_personal_example">Use as my personal example</button>`
+            : '');
+
+    root.innerHTML = `
+        <div class="feedback-quick-row">
+            <span class="feedback-question">Was this useful?</span>
+            <button type="button" class="feedback-rating-button" data-action="rate_response" data-rating="helpful" aria-pressed="${rating === 'helpful'}">Helpful</button>
+            <button type="button" class="feedback-rating-button" data-action="rate_response" data-rating="not_helpful" aria-pressed="${rating === 'not_helpful'}">Needs work</button>
+            <button type="button" class="feedback-detail-toggle" data-action="toggle_feedback_details">${feedback ? 'Edit feedback' : 'Add details'}</button>
+            <span class="feedback-save-state" role="status">${escapeHTML(feedbackStatus)}</span>
+        </div>
+        <div class="feedback-detail-panel hidden">
+            <div class="feedback-reason-grid" aria-label="Feedback reasons">${reasonInputs}</div>
+            <label class="feedback-comment-label">
+                <span>What should Aura keep or change?</span>
+                <textarea data-feedback-comment rows="3" maxlength="1200" placeholder="Optional. Stored locally unless you use it for a retry.">${escapeHTML(feedback?.comment || '')}</textarea>
+            </label>
+            <div class="feedback-detail-actions">
+                <button type="button" class="feedback-primary-button" data-action="save_response_feedback">Save feedback</button>
+                ${feedback ? `<button type="button" class="feedback-secondary-button" data-action="retry_with_feedback">Try again using this feedback</button>` : ''}
+                ${promotionAction}
+                ${feedback ? `<button type="button" class="feedback-text-button" data-action="remove_response_feedback">Remove feedback</button>` : ''}
+            </div>
+            <p class="feedback-privacy-note">Raw feedback stays separate from personal memory. A retry sends that feedback to the selected model; approved examples may be included in future model prompts.</p>
+            <div class="feedback-action-status" role="status" aria-live="polite"></div>
+        </div>`;
+    return root;
+}
+
 function addMessage(sender, content, options = {}) {
     chatMessages.querySelector('.empty-state-panel')?.remove();
     chatMessages.classList.remove('is-empty');
@@ -524,12 +581,17 @@ function addMessage(sender, content, options = {}) {
 
             messageDiv.appendChild(chatBubble);
             messageDiv.appendChild(sourceRow);
-            chatMessages.appendChild(messageDiv);
-            chatMessages.scrollTo({ top: chatMessages.scrollHeight, behavior: 'smooth' });
-            return;
         }
     }
-    messageDiv.appendChild(chatBubble); chatMessages.appendChild(messageDiv);
+    if (!messageDiv.contains(chatBubble)) messageDiv.appendChild(chatBubble);
+    if (!isUser) {
+        const feedbackControls = renderResponseFeedback(options);
+        if (feedbackControls) {
+            messageDiv.className = 'flex flex-col items-start mb-4 gap-2';
+            messageDiv.appendChild(feedbackControls);
+        }
+    }
+    chatMessages.appendChild(messageDiv);
     chatMessages.scrollTo({ top: chatMessages.scrollHeight, behavior: 'smooth' });
 }
 
@@ -575,8 +637,15 @@ function displayChat(history) {
     (history || []).forEach((message, index) => {
         addMessage(message.role, message.content, {
             messageIndex: index,
+            messageId: message.id,
             chatId,
-            toolOffer: message.toolOffer
+            toolOffer: message.toolOffer,
+            feedback: message.role === 'ai'
+                ? window.chatManager?.getResponseFeedback(chatId, message.id)
+                : null,
+            canPromote: message.role === 'ai'
+                ? window.chatManager?.canPromoteResponseFeedback(chatId, message.id)
+                : false
         });
     });
     processContentLinks();
@@ -649,7 +718,9 @@ function openInsightsModal() {
     const store = window.chatManager ? window.chatManager.getActiveContentStore() : {};
     const userStore = window.chatManager ? window.chatManager.getUserMemoryStore() : {};
     const userMemoryEnabled = localStorage.getItem(STORAGE_KEYS.USER_MEMORY_ENABLED) === 'true';
-    const prefs = store.responsePreferences || {};
+    const prefs = window.chatManager
+        ? window.chatManager.getActiveResponsePreferences()
+        : (store.responsePreferences || {});
 
     const renderList = (arr, emptyMsg) => {
         if (!arr || arr.length === 0) {

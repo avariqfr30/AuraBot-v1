@@ -13,7 +13,7 @@
     "chroma:up:docker": "docker compose up -d chromadb",
     "chroma:down:docker": "docker compose stop chromadb",
     "chroma:logs:docker": "docker compose logs -f chromadb",
-    "check": "node --check server.js && node --check lib/memory-results.js && node --check lib/response-examples.js && node --check scripts/seed-examples.js && node --check js/app.js && node --check js/chat-logic.js && node --check js/config.js && node --check js/model-routing.js && node --check js/turn-policy.js && node --check js/tool-artifacts.js && node --check js/ui.js && node tests/memory-results.test.js && node tests/model-routing.test.js && node tests/turn-policy.test.js && node tests/tool-artifacts.test.js && node tests/response-examples.test.js && node tests/settings-regression.test.js",
+    "check": "node --check server.js && node --check lib/memory-results.js && node --check lib/response-examples.js && node --check scripts/seed-examples.js && node --check js/app.js && node --check js/chat-logic.js && node --check js/config.js && node --check js/model-routing.js && node --check js/turn-policy.js && node --check js/tool-artifacts.js && node --check js/feedback-learning.js && node --check js/ui.js && node tests/memory-results.test.js && node tests/model-routing.test.js && node tests/turn-policy.test.js && node tests/tool-artifacts.test.js && node tests/response-examples.test.js && node tests/feedback-learning.test.js && node tests/settings-regression.test.js",
     "test": "npm run check"
   },
   "repository": {

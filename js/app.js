@@ -25,6 +25,8 @@ document.addEventListener('DOMContentLoaded', () => {
     const refreshLocationButton = document.getElementById('refreshLocationButton');
     const userMemoryCheckbox = document.getElementById('userMemoryCheckbox');
     const userMemoryStatusText = document.getElementById('userMemoryStatusText');
+    const feedbackLearningStatusText = document.getElementById('feedbackLearningStatusText');
+    const clearFeedbackButton = document.getElementById('clearFeedbackButton');
     const cancelSettingsButton = document.getElementById('cancelSettingsButton');
     const resetSettingsButton = document.getElementById('resetSettingsButton');
     const saveSettingsButton = document.getElementById('saveSettingsButton');
@@ -54,6 +56,10 @@ document.addEventListener('DOMContentLoaded', () => {
                     button.disabled = responseInFlight;
                 });
         }
+        document.querySelectorAll('.response-feedback button, .response-feedback textarea, .response-feedback input')
+            .forEach((control) => {
+                control.disabled = responseInFlight;
+            });
         document.body.classList.toggle('response-in-flight', responseInFlight);
     }
 
@@ -214,6 +220,40 @@ document.addEventListener('DOMContentLoaded', () => {
         userMemoryStatusText.textContent = rememberedCount > 0
             ? `Cross-chat memory is on. Aura is carrying ${rememberedCount} durable memory items across chats on this device.`
             : 'Cross-chat memory is on. Aura will start building durable memory across chats on this device.';
+    }
+
+    function refreshFeedbackLearningStatus() {
+        if (!feedbackLearningStatusText || !window.chatManager) return;
+        const summary = chatManager.getFeedbackSummary();
+        if (!summary.total) {
+            feedbackLearningStatusText.textContent = 'No response feedback saved yet.';
+            return;
+        }
+
+        const parts = [
+            `${summary.total} response${summary.total === 1 ? '' : 's'} reviewed`
+        ];
+        if (summary.promoted) {
+            parts.push(`${summary.promoted} personal example${summary.promoted === 1 ? '' : 's'}`);
+        }
+        feedbackLearningStatusText.textContent = `${parts.join(' · ')}. Learning remains local to this device.`;
+    }
+
+    async function deletePersonalExamples(exampleIds = [], { all = false } = {}) {
+        if (!window.chatManager) return false;
+        const ids = [...new Set((exampleIds || []).filter(Boolean))];
+        if (!all && !ids.length) return true;
+
+        try {
+            await postJson(API_ENDPOINTS.deletePersonalExamples, {
+                profileId: chatManager.getFeedbackProfileId(),
+                ids: all ? [] : ids
+            });
+            return true;
+        } catch (error) {
+            console.error('Personal response example deletion failed:', error);
+            return false;
+        }
     }
 
     function refreshThinkingModeStatus() {
@@ -492,9 +532,19 @@ document.addEventListener('DOMContentLoaded', () => {
         refreshUI();
     }
 
-    function deleteAllAuraData() {
+    async function clearFeedbackLearning() {
+        if (!window.chatManager) return;
+        if (!confirm('Clear local response feedback and all personal response examples? Your chats and companion memory will stay.')) return;
+        await deletePersonalExamples(chatManager.getActivePersonalExampleIds(), { all: true });
+        chatManager.clearFeedbackLearning();
+        refreshFeedbackLearningStatus();
+        refreshUI();
+    }
+
+    async function deleteAllAuraData() {
         if (!window.chatManager) return;
         if (!confirm('Delete all Aura chats, tools, memory, and settings from this browser?')) return;
+        await deletePersonalExamples(chatManager.getActivePersonalExampleIds(), { all: true });
         chatManager.deleteAllLocalData();
         normalizeStoredModel();
         applyTheme(getStoredTheme());
@@ -503,6 +553,7 @@ document.addEventListener('DOMContentLoaded', () => {
         syncThinkingModeControls('balanced');
         refreshLocationStatus();
         refreshUserMemoryStatus();
+        refreshFeedbackLearningStatus();
         closeSettingsModal();
         refreshUI();
     }
@@ -533,22 +584,34 @@ document.addEventListener('DOMContentLoaded', () => {
     function addAssistantArtifact(
         artifact,
         fallback = '',
-        chatId = chatManager.getActiveChatId()
+        chatId = chatManager.getActiveChatId(),
+        metadata = {}
     ) {
         const content = artifact?.content || fallback;
         if (!content) return false;
 
+        const pendingMetadata = chatManager.consumePendingResponseMetadata(chatId);
         const messageIndex = chatManager.addMessageToChat(chatId, 'ai', content, {
+            ...pendingMetadata,
+            ...metadata,
             toolOffer: artifact?.toolOffer || null
         });
+        const storedMessage = chatManager.getChatHistory(chatId)[messageIndex];
         if (chatManager.getActiveChatId() === chatId) {
             addMessage('ai', content, {
                 messageIndex,
+                messageId: storedMessage?.id,
                 chatId,
-                toolOffer: artifact?.toolOffer || null
+                toolOffer: artifact?.toolOffer || null,
+                feedback: storedMessage
+                    ? chatManager.getResponseFeedback(chatId, storedMessage.id)
+                    : null,
+                canPromote: storedMessage
+                    ? chatManager.canPromoteResponseFeedback(chatId, storedMessage.id)
+                    : false
             });
         }
-        return true;
+        return storedMessage || false;
     }
 
     function refreshUI() {
@@ -556,6 +619,7 @@ document.addEventListener('DOMContentLoaded', () => {
         displayChat(chatManager.getActiveChatHistory());
         const tools = chatManager.getActiveChatTools();
         toggleToolsButton(Object.values(tools).some((entries) => entries && entries.length > 0));
+        refreshFeedbackLearningStatus();
         setupLiquidGlassInteractions();
         syncResponseInFlightControls();
     }
@@ -666,6 +730,184 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
+    function getFeedbackFormValue(root) {
+        return {
+            rating: root.dataset.rating || 'unrated',
+            reasons: [...root.querySelectorAll('[data-feedback-reason]:checked')]
+                .map((input) => input.dataset.feedbackReason)
+                .filter(Boolean),
+            comment: root.querySelector('[data-feedback-comment]')?.value || ''
+        };
+    }
+
+    function renderUpdatedFeedback(root, { open = false, status = '', isError = false } = {}) {
+        const chatId = root.dataset.chatId;
+        const messageId = root.dataset.messageId;
+        const replacement = renderResponseFeedback({
+            chatId,
+            messageId,
+            feedback: chatManager.getResponseFeedback(chatId, messageId),
+            canPromote: chatManager.canPromoteResponseFeedback(chatId, messageId)
+        });
+        if (!replacement) return null;
+        root.replaceWith(replacement);
+        if (open) replacement.querySelector('.feedback-detail-panel')?.classList.remove('hidden');
+        const statusTarget = replacement.querySelector('.feedback-action-status');
+        if (statusTarget && status) {
+            statusTarget.textContent = status;
+            statusTarget.classList.toggle('is-error', isError);
+        }
+        syncResponseInFlightControls();
+        refreshFeedbackLearningStatus();
+        return replacement;
+    }
+
+    async function rateResponse(root, rating) {
+        const existing = chatManager.getResponseFeedback(root.dataset.chatId, root.dataset.messageId);
+        if (existing?.promotedExampleId && rating !== 'helpful') {
+            await deletePersonalExamples([existing.promotedExampleId]);
+        }
+        chatManager.saveResponseFeedback(root.dataset.chatId, root.dataset.messageId, {
+            ...getFeedbackFormValue(root),
+            rating
+        });
+        renderUpdatedFeedback(root, {
+            open: rating === 'not_helpful',
+            status: 'Saved locally. Aura will use repeated, explicit patterns without changing safety rules.'
+        });
+    }
+
+    function saveResponseFeedbackFromRoot(root) {
+        chatManager.saveResponseFeedback(
+            root.dataset.chatId,
+            root.dataset.messageId,
+            getFeedbackFormValue(root)
+        );
+        return renderUpdatedFeedback(root, {
+            open: true,
+            status: 'Feedback saved locally.'
+        });
+    }
+
+    async function promotePersonalExample(root) {
+        const chatId = root.dataset.chatId;
+        const messageId = root.dataset.messageId;
+        const candidate = chatManager.getPersonalExampleCandidate(chatId, messageId);
+        if (!candidate) {
+            renderUpdatedFeedback(root, {
+                open: true,
+                status: 'Only explicitly helpful, low-risk companion replies can become personal examples.',
+                isError: true
+            });
+            return;
+        }
+
+        try {
+            const result = await postJson(API_ENDPOINTS.upsertPersonalExample, {
+                profileId: chatManager.getFeedbackProfileId(),
+                example: candidate
+            });
+            chatManager.markFeedbackPromoted(chatId, messageId, result.id || candidate.id);
+            renderUpdatedFeedback(root, {
+                open: true,
+                status: 'Saved as a local response example. It may be included in future model prompts.'
+            });
+        } catch (error) {
+            console.error('Personal response example storage failed:', error);
+            renderUpdatedFeedback(root, {
+                open: true,
+                status: 'Could not save the personal example. Make sure ChromaDB is running.',
+                isError: true
+            });
+        }
+    }
+
+    async function removePersonalExample(root) {
+        const feedback = chatManager.getResponseFeedback(
+            root.dataset.chatId,
+            root.dataset.messageId
+        );
+        if (feedback?.promotedExampleId) {
+            await deletePersonalExamples([feedback.promotedExampleId]);
+        }
+        chatManager.markFeedbackUnpromoted(root.dataset.chatId, root.dataset.messageId);
+        renderUpdatedFeedback(root, {
+            open: true,
+            status: 'This response is no longer used as a personal example.'
+        });
+    }
+
+    async function removeResponseFeedback(root) {
+        const promotedExampleId = chatManager.deleteResponseFeedback(
+            root.dataset.chatId,
+            root.dataset.messageId
+        );
+        if (promotedExampleId) await deletePersonalExamples([promotedExampleId]);
+        renderUpdatedFeedback(root, {
+            open: false,
+            status: 'Feedback removed.'
+        });
+    }
+
+    async function retryWithFeedback(root) {
+        if (responseInFlight) return;
+        const savedRoot = saveResponseFeedbackFromRoot(root) || root;
+        const chatId = savedRoot.dataset.chatId;
+        const messageId = savedRoot.dataset.messageId;
+        const retryContext = chatManager.getFeedbackRetryContext(chatId, messageId);
+        if (!retryContext) {
+            renderUpdatedFeedback(savedRoot, {
+                open: true,
+                status: 'Add feedback before asking Aura to retry.',
+                isError: true
+            });
+            return;
+        }
+
+        setResponseInFlight(true);
+        if (chatManager.getActiveChatId() === chatId) {
+            addMessage('user', retryContext.displayMessage);
+        }
+        chatManager.addMessageToChat(chatId, 'user', retryContext.prompt, {
+            feedbackRetryFor: messageId,
+            skipVectorization: true
+        });
+        showTypingIndicator('Aura is applying your feedback.');
+
+        try {
+            const rawResponse = await getOllamaResponse(
+                retryContext.prompt,
+                null,
+                null,
+                chatId
+            );
+            const artifact = await processToolTags(rawResponse, chatId);
+            const retryMessage = addAssistantArtifact(
+                artifact,
+                "I couldn't complete that retry. Your feedback is still saved.",
+                chatId,
+                { retryOfMessageId: messageId }
+            );
+            if (retryMessage?.id) {
+                chatManager.markFeedbackRetried(chatId, messageId, retryMessage.id);
+            }
+            refreshUI();
+        } catch (error) {
+            console.error('Feedback retry failed:', error);
+            addAssistantArtifact(
+                { content: "I couldn't complete that retry. Your feedback is still saved locally." },
+                '',
+                chatId,
+                { retryOfMessageId: messageId }
+            );
+            refreshUI();
+        } finally {
+            hideTypingIndicator();
+            removeToolStatusMessages();
+            setResponseInFlight(false);
+        }
+    }
+
     async function populateModelOptions() {
         const storedModel = localStorage.getItem(STORAGE_KEYS.MODEL) ||
             window.AURA_CONFIG.defaultModelPreference ||
@@ -733,6 +975,7 @@ document.addEventListener('DOMContentLoaded', () => {
         populateModelOptions();
         refreshLocationStatus();
         refreshUserMemoryStatus();
+        refreshFeedbackLearningStatus();
     }
 
     function resetSettingsForm() {
@@ -867,14 +1110,15 @@ document.addEventListener('DOMContentLoaded', () => {
         if (file) setAttachment(file);
     });
 
-    chatListContainer.addEventListener('click', (event) => {
+    chatListContainer.addEventListener('click', async (event) => {
         if (responseInFlight) return;
         const deleteButton = event.target.closest('.delete-chat-button');
         const chatTab = event.target.closest('[data-chat-id]');
 
         if (deleteButton) {
             if (confirm('Delete chat?')) {
-                chatManager.deleteChat(deleteButton.dataset.chatId);
+                const promotedExampleIds = chatManager.deleteChat(deleteButton.dataset.chatId);
+                await deletePersonalExamples(promotedExampleIds);
                 refreshUI();
             }
             return;
@@ -923,6 +1167,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (saveSettingsButton) saveSettingsButton.addEventListener('click', saveSettings);
     if (exportDataButton) exportDataButton.addEventListener('click', exportAuraData);
     if (clearMemoryButton) clearMemoryButton.addEventListener('click', clearAuraMemory);
+    if (clearFeedbackButton) clearFeedbackButton.addEventListener('click', clearFeedbackLearning);
     if (deleteAllDataButton) deleteAllDataButton.addEventListener('click', deleteAllAuraData);
     if (locationAccessCheckbox) locationAccessCheckbox.addEventListener('change', refreshLocationStatus);
     if (refreshLocationButton) refreshLocationButton.addEventListener('click', () => requestCurrentLocation({ silent: false }));
@@ -989,6 +1234,46 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     document.body.addEventListener('click', async (event) => {
+        const feedbackTarget = event.target.closest('.response-feedback [data-action]');
+        if (feedbackTarget) {
+            const root = feedbackTarget.closest('.response-feedback');
+            const action = feedbackTarget.dataset.action;
+            if (!root) return;
+
+            if (action === 'toggle_feedback_details') {
+                const panel = root.querySelector('.feedback-detail-panel');
+                panel?.classList.toggle('hidden');
+                if (panel && !panel.classList.contains('hidden')) {
+                    panel.querySelector('[data-feedback-comment]')?.focus();
+                }
+                return;
+            }
+            if (action === 'rate_response') {
+                await rateResponse(root, feedbackTarget.dataset.rating);
+                return;
+            }
+            if (action === 'save_response_feedback') {
+                saveResponseFeedbackFromRoot(root);
+                return;
+            }
+            if (action === 'retry_with_feedback') {
+                await retryWithFeedback(root);
+                return;
+            }
+            if (action === 'promote_personal_example') {
+                await promotePersonalExample(root);
+                return;
+            }
+            if (action === 'remove_personal_example') {
+                await removePersonalExample(root);
+                return;
+            }
+            if (action === 'remove_response_feedback') {
+                await removeResponseFeedback(root);
+                return;
+            }
+        }
+
         const toolOfferTarget = event.target.closest(
             '[data-action="create_tool_offer"], [data-action="dismiss_tool_offer"], [data-action="open_tools"]'
         );
@@ -1082,6 +1367,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (userMemoryCheckbox) userMemoryCheckbox.checked = isUserMemorySharingEnabled();
     refreshLocationStatus();
     refreshUserMemoryStatus();
+    refreshFeedbackLearningStatus();
     setupLiquidGlassInteractions();
     resizeComposer();
     if (chatMessagesSurface) chatMessagesSurface.addEventListener('scroll', syncChromeCompression, { passive: true });
