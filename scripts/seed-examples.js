@@ -8,7 +8,7 @@ const {
     RESPONSE_EXAMPLE_COLLECTION,
     buildEmbeddingDocument,
     buildMetadata,
-    loadApprovedExamples
+    loadAllApprovedExamples
 } = require('../lib/response-examples');
 
 const CHROMA_URL = process.env.CHROMA_URL || 'http://127.0.0.1:8000';
@@ -34,7 +34,7 @@ const embeddingFunction = {
 };
 
 async function main() {
-    const examples = loadApprovedExamples();
+    const examples = loadAllApprovedExamples();
     const collection = await chroma.getOrCreateCollection({
         name: RESPONSE_EXAMPLE_COLLECTION,
         embeddingFunction

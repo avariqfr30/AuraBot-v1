@@ -6,6 +6,73 @@ const toolsModal = document.getElementById('toolsModal');
 const toolsModalContent = document.getElementById('toolsModalContent');
 const toolsButton = document.getElementById('toolsButton');
 let contentModalElement = null;
+let activeModalElement = null;
+let modalReturnFocus = null;
+
+function activateModal(modal) {
+    if (!modal) return;
+    activeModalElement = modal;
+    modalReturnFocus = document.activeElement;
+    modal.classList.remove('hidden');
+    const dialog = modal.querySelector('[role="dialog"]') || modal;
+    window.requestAnimationFrame(() => dialog.focus());
+}
+
+function deactivateModal(modal) {
+    if (!modal) return;
+    if (modal !== contentModalElement) modal.classList.add('hidden');
+    if (activeModalElement === modal) activeModalElement = null;
+    const returnTarget = modalReturnFocus;
+    modalReturnFocus = null;
+    if (returnTarget && document.contains(returnTarget)) returnTarget.focus();
+}
+
+function getFocusableElements(modal) {
+    return [...modal.querySelectorAll(
+        'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+    )].filter((element) => !element.closest('.hidden'));
+}
+
+function closeActiveModal() {
+    if (!activeModalElement) return;
+    if (activeModalElement === contentModalElement) return closeContentModal();
+    if (activeModalElement === settingsModal) return closeSettingsModal();
+    if (activeModalElement === toolsModal) return closeToolsModal();
+    if (activeModalElement.id === 'insightsModal') return closeInsightsModal();
+}
+
+document.addEventListener('keydown', (event) => {
+    if (!activeModalElement) return;
+    if (event.key === 'Escape') {
+        event.preventDefault();
+        closeActiveModal();
+        return;
+    }
+    if (event.key !== 'Tab') return;
+
+    const focusable = getFocusableElements(activeModalElement);
+    if (!focusable.length) {
+        event.preventDefault();
+        return;
+    }
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    const dialog = activeModalElement.querySelector('[role="dialog"]') || activeModalElement;
+    if (!activeModalElement.contains(document.activeElement)) {
+        event.preventDefault();
+        first.focus();
+    } else if (event.shiftKey && (document.activeElement === first || document.activeElement === dialog)) {
+        event.preventDefault();
+        last.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+    }
+});
+
+document.addEventListener('click', (event) => {
+    if (activeModalElement && event.target === activeModalElement) closeActiveModal();
+});
 
 function clearChatMessages() {
     chatMessages.innerHTML = '';
@@ -33,6 +100,10 @@ function showSourcesModal(links = []) {
     const modalContent = document.createElement('div');
     modalContent.className = 'relative liquid-glass liquid-panel rounded-3xl p-6 w-full max-w-2xl shadow-2xl max-h-[80vh] overflow-y-auto';
     modalContent.setAttribute('data-liquid', '');
+    modalContent.setAttribute('role', 'dialog');
+    modalContent.setAttribute('aria-modal', 'true');
+    modalContent.setAttribute('aria-labelledby', 'contentTitle');
+    modalContent.tabIndex = -1;
 
     const sourceItemsHtml = validLinks.map((link, index) => `
         <li class="source-modal-item">
@@ -44,23 +115,21 @@ function showSourcesModal(links = []) {
     `).join('');
 
     modalContent.innerHTML = `
-        <h3 class="text-2xl font-bold mb-4 text-gray-100">Sources</h3>
+        <h3 id="contentTitle" class="text-2xl font-bold mb-4 text-gray-100">Sources</h3>
         <div class="source-modal-copy">Open any source below if you want to inspect the underlying material.</div>
         <ol class="source-modal-list">${sourceItemsHtml}</ol>
         <div class="mt-6 flex justify-end">
-            <button id="closeContentButton" class="px-4 py-2 rounded-xl transition duration-200">Close</button>
+            <button type="button" id="closeContentButton" class="px-4 py-2 rounded-xl transition duration-200">Close</button>
         </div>`;
 
     contentModalElement.appendChild(modalContent);
     document.body.appendChild(contentModalElement);
+    activateModal(contentModalElement);
     if (window.setupLiquidGlassInteractions) window.setupLiquidGlassInteractions();
     document.getElementById('closeContentButton').addEventListener('click', closeContentModal);
 }
 
 function renderEmptyState() {
-    const activeStyle = typeof window.getExperienceStyleKey === 'function'
-        ? window.getExperienceStyleKey()
-        : 'balanced';
     chatMessages.classList.add('is-empty');
     chatMessages.innerHTML = `
         <section class="empty-state-panel" aria-label="Start a new conversation">
@@ -76,27 +145,11 @@ function renderEmptyState() {
                 </svg>
             </div>
             <h2 class="empty-state-title">What do you want to work through?</h2>
-            <p class="empty-state-subtitle">Aura can chat, reason through health questions, look things up, and help you sort out your next step without changing how the app already works.</p>
-            <div class="experience-style-panel" aria-label="Choose Aura response style">
-                <div>
-                    <div class="experience-style-eyebrow">Aura style</div>
-                    <p class="experience-style-copy">Pick how you want Aura to feel in this chat. You can still ask for anything normally.</p>
-                </div>
-                <div class="experience-style-grid">
-                    <button type="button" class="experience-style-chip ${activeStyle === 'balanced' ? 'is-active' : ''}" data-experience-style="balanced">Balanced</button>
-                    <button type="button" class="experience-style-chip ${activeStyle === 'gentle' ? 'is-active' : ''}" data-experience-style="gentle">Gentle</button>
-                    <button type="button" class="experience-style-chip ${activeStyle === 'practical' ? 'is-active' : ''}" data-experience-style="practical">Step-by-step</button>
-                    <button type="button" class="experience-style-chip ${activeStyle === 'research' ? 'is-active' : ''}" data-experience-style="research">Research-minded</button>
-                    <button type="button" class="experience-style-chip ${activeStyle === 'direct' ? 'is-active' : ''}" data-experience-style="direct">Direct</button>
-                </div>
-            </div>
-            <div class="prompt-label">Try one of these</div>
+            <p class="empty-state-subtitle">Talk naturally. Aura will stay with the current topic, use personal context only when it fits, and offer practical help without pushing it.</p>
             <div class="prompt-chip-grid">
-                <button type="button" class="prompt-chip" data-prompt-suggestion="Help me understand a symptom in plain English.">Help me understand a symptom</button>
-                <button type="button" class="prompt-chip" data-prompt-suggestion="Walk me through what details matter before I panic.">Help me sort out what matters</button>
-                <button type="button" class="prompt-chip" data-prompt-suggestion="Research this medical topic and give me source-backed takeaways.">Research a medical topic</button>
-                <button type="button" class="prompt-chip" data-prompt-suggestion="Give me a calm, practical next step for what I am dealing with.">Give me a calm next step</button>
-                <button type="button" class="prompt-chip" data-prompt-suggestion="Help me build a personal safety plan I can follow if I spiral.">Build a personal safety plan</button>
+                <button type="button" class="prompt-chip" data-prompt-suggestion="I want to talk through something that has been on my mind.">Talk something through</button>
+                <button type="button" class="prompt-chip" data-prompt-suggestion="Help me make a calm, realistic plan for what I need to do.">Make a calm plan</button>
+                <button type="button" class="prompt-chip" data-prompt-suggestion="Help me understand a health question in clear, careful language.">Understand a health question</button>
             </div>
         </section>`;
 }
@@ -332,6 +385,57 @@ function renderToolsInModal(tools) {
 }
 
 // --- Chat Messages ---
+function renderToolOffer(offer, options = {}) {
+    const normalized = window.AURA_TOOL_ARTIFACTS?.normalizeToolOffer(offer);
+    if (!normalized) return null;
+
+    const labels = {
+        mood_tracker: 'mood tracker',
+        checklist: 'checklist',
+        thought_record: 'thought record',
+        affirmation_card: 'grounding card',
+        breathing_exercise: 'breathing reset',
+        safety_plan: 'safety plan',
+        medication_checklist: 'medication checklist',
+        appointment_prep: 'appointment prep card',
+        follow_up_plan: 'follow-up plan'
+    };
+    const card = document.createElement('section');
+    card.className = `tool-offer-card is-${normalized.status}`;
+    card.setAttribute('aria-label', `Optional ${labels[normalized.type] || 'support tool'}`);
+
+    const heading = document.createElement('div');
+    heading.className = 'tool-offer-heading';
+    heading.textContent = `Would a ${labels[normalized.type] || 'support tool'} help?`;
+    card.appendChild(heading);
+
+    const description = document.createElement('p');
+    description.className = 'tool-offer-description';
+    description.textContent = normalized.theme;
+    card.appendChild(description);
+
+    const actionRow = document.createElement('div');
+    actionRow.className = 'tool-offer-actions';
+    if (normalized.status === 'pending') {
+        actionRow.innerHTML = `
+            <button type="button" class="tool-offer-button primary" data-action="create_tool_offer">Create</button>
+            <button type="button" class="tool-offer-button secondary" data-action="dismiss_tool_offer">Not now</button>`;
+    } else if (normalized.status === 'creating') {
+        actionRow.innerHTML = '<span class="tool-offer-status" role="status">Creating…</span>';
+    } else if (normalized.status === 'created') {
+        actionRow.innerHTML = '<button type="button" class="tool-offer-button secondary" data-action="open_tools">Created · Open Toolbox</button>';
+    } else {
+        actionRow.innerHTML = '<span class="tool-offer-status">Not now</span>';
+    }
+
+    actionRow.querySelectorAll('[data-action]').forEach((button) => {
+        button.dataset.chatId = String(options.chatId || '');
+        button.dataset.messageIndex = String(options.messageIndex ?? '');
+    });
+    card.appendChild(actionRow);
+    return card;
+}
+
 function addMessage(sender, content, options = {}) {
     chatMessages.querySelector('.empty-state-panel')?.remove();
     chatMessages.classList.remove('is-empty');
@@ -403,6 +507,8 @@ function addMessage(sender, content, options = {}) {
         chatBubble.innerHTML = DOMPurify.sanitize(
             marked.parse(body || "That came through a little messy. Ask again and I'll clean it up.")
         );
+        const toolOfferCard = renderToolOffer(options.toolOffer, options);
+        if (toolOfferCard) chatBubble.appendChild(toolOfferCard);
 
         if (links.length > 0) {
             messageDiv.className = 'flex flex-col items-start mb-4 gap-2';
@@ -457,13 +563,24 @@ function addToolStatusMessage(toolType) {
 function removeToolStatusMessages() { document.querySelectorAll('.tool-status-message').forEach(msg => msg.remove()); }
 
 function displayChat(history) {
+    const liveMode = chatMessages.getAttribute('aria-live') || 'polite';
+    chatMessages.setAttribute('aria-live', 'off');
     clearChatMessages();
     if (!history || history.length === 0) {
         renderEmptyState();
+        window.requestAnimationFrame(() => chatMessages.setAttribute('aria-live', liveMode));
         return;
     }
-    (history || []).forEach((message, index) => { addMessage(message.role, message.content, { messageIndex: index }); });
+    const chatId = window.chatManager?.getActiveChatId?.() || '';
+    (history || []).forEach((message, index) => {
+        addMessage(message.role, message.content, {
+            messageIndex: index,
+            chatId,
+            toolOffer: message.toolOffer
+        });
+    });
     processContentLinks();
+    window.requestAnimationFrame(() => chatMessages.setAttribute('aria-live', liveMode));
 }
 
 function renderChatList(chats, activeChatId) {
@@ -471,21 +588,31 @@ function renderChatList(chats, activeChatId) {
     const sortedChats = Object.values(chats || {}).filter(c => c?.id).sort((a, b) => b.id - a.id);
     sortedChats.forEach(chat => {
         const chatTab = document.createElement('div');
-        chatTab.className = `chat-tab cursor-pointer ${chat.id === activeChatId ? 'bg-gray-700 text-white' : 'text-gray-300 hover:bg-gray-800'}`;
-        chatTab.dataset.chatId = chat.id;
-        chatTab.setAttribute('role', 'tab');
-        chatTab.setAttribute('aria-selected', chat.id === activeChatId ? 'true' : 'false');
-        
+        chatTab.className = `chat-tab ${chat.id === activeChatId ? 'bg-gray-700 text-white' : 'text-gray-300'}`;
+
+        const selectButton = document.createElement('button');
+        selectButton.type = 'button';
+        selectButton.className = 'chat-tab-select';
+        selectButton.dataset.chatId = chat.id;
+        selectButton.setAttribute('role', 'tab');
+        selectButton.setAttribute('aria-selected', chat.id === activeChatId ? 'true' : 'false');
+        selectButton.setAttribute('aria-controls', 'chatMessages');
+        selectButton.tabIndex = chat.id === activeChatId ? 0 : -1;
+
         const chatTitle = document.createElement('span');
         chatTitle.textContent = chat.title;
         chatTitle.className = 'chat-tab-title';
-        
+        selectButton.appendChild(chatTitle);
+
         const deleteBtn = document.createElement('button');
+        deleteBtn.type = 'button';
         deleteBtn.className = 'delete-chat-button ml-1';
         deleteBtn.dataset.chatId = chat.id;
+        deleteBtn.setAttribute('aria-label', `Delete ${chat.title}`);
         deleteBtn.innerHTML = `<svg class="h-4 w-4" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clip-rule="evenodd" /></svg>`;
-        
-        chatTab.appendChild(chatTitle); chatTab.appendChild(deleteBtn);
+
+        chatTab.appendChild(selectButton);
+        chatTab.appendChild(deleteBtn);
         chatList.appendChild(chatTab);
     });
 }
@@ -493,6 +620,7 @@ function renderChatList(chats, activeChatId) {
 function toggleToolsButton(hasTools) { toolsButton.classList.toggle('hidden', !hasTools); }
 function showTypingIndicator(message = 'Aura is thinking this through.') {
     if (document.getElementById('typingIndicator')) return;
+    chatMessages.setAttribute('aria-busy', 'true');
     chatMessages.querySelector('.empty-state-panel')?.remove();
     chatMessages.classList.remove('is-empty');
     const typingDiv = document.createElement('div'); typingDiv.id = 'typingIndicator'; typingDiv.className = 'flex justify-start mb-4';
@@ -503,13 +631,16 @@ function updateTypingIndicator(message) {
     const target = document.querySelector('#typingIndicator .typing-status');
     if (target) target.textContent = message;
 }
-function hideTypingIndicator() { document.getElementById('typingIndicator')?.remove(); }
+function hideTypingIndicator() {
+    document.getElementById('typingIndicator')?.remove();
+    chatMessages.setAttribute('aria-busy', 'false');
+}
 
 // --- Modals ---
-function openToolsModal() { toolsModal.classList.remove('hidden'); }
-function closeToolsModal() { toolsModal.classList.add('hidden'); }
-function openSettingsModal() { settingsModal.classList.remove('hidden'); }
-function closeSettingsModal() { settingsModal.classList.add('hidden'); }
+function openToolsModal() { activateModal(toolsModal); }
+function closeToolsModal() { deactivateModal(toolsModal); }
+function openSettingsModal() { activateModal(settingsModal); }
+function closeSettingsModal() { deactivateModal(settingsModal); }
 
 // Insights Modal Render
 function openInsightsModal() {
@@ -521,36 +652,38 @@ function openInsightsModal() {
     const prefs = store.responsePreferences || {};
 
     const renderList = (arr, emptyMsg) => {
-        if (!arr || arr.length === 0) return `<p class="text-gray-500 italic">${emptyMsg}</p>`;
-        return `<ul class="list-disc list-inside space-y-1">${arr.map(i => `<li>${i}</li>`).join('')}</ul>`;
+        if (!arr || arr.length === 0) {
+            return `<p class="text-gray-500 italic">${escapeHTML(emptyMsg)}</p>`;
+        }
+        return `<ul class="list-disc list-inside space-y-1">${arr.map((item) => `<li>${escapeHTML(item)}</li>`).join('')}</ul>`;
     };
 
     container.innerHTML = `
         <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div class="bg-gray-800 p-4 rounded-lg">
                 <h4 class="text-pink-400 font-semibold mb-2">Communication Style</h4>
-                <p>${store.communicationStyle || "Not established."}</p>
+                <p>${escapeHTML(store.communicationStyle || "Not established.")}</p>
             </div>
             <div class="bg-gray-800 p-4 rounded-lg">
-                <h4 class="text-pink-400 font-semibold mb-2">Behavioral Facts</h4>
-                ${renderList(store.behavioralFacts, "No facts learned yet.")}
+                <h4 class="text-pink-400 font-semibold mb-2">Relevant Context</h4>
+                ${renderList(store.behavioralFacts, "No personal context noted yet.")}
             </div>
             <div class="bg-gray-800 p-4 rounded-lg">
                 <h4 class="text-pink-400 font-semibold mb-2">Mood Patterns</h4>
                 ${renderList(store.moodPatterns, "No strong patterns detected.")}
             </div>
-            <div class="bg-gray-800 p-4 rounded-lg border border-red-900">
-                <h4 class="text-red-400 font-semibold mb-2">Potential Lapses to Watch</h4>
-                ${renderList(store.potentialLapses, "No immediate risks detected.")}
+            <div class="bg-gray-800 p-4 rounded-lg border border-white/10">
+                <h4 class="text-pink-400 font-semibold mb-2">Patterns Worth Noticing</h4>
+                ${renderList(store.potentialLapses, "No recurring caution patterns noted.")}
             </div>
             <div class="bg-gray-800 p-4 rounded-lg border border-blue-900">
-                <h4 class="text-blue-300 font-semibold mb-2">Adaptive Reply Profile</h4>
-                <p class="text-sm">Tone: ${prefs.likelyTone || 'neutral'}</p>
-                <p class="text-sm">Detail: ${prefs.detailLevel || 'balanced'}</p>
-                <p class="text-sm">Reassurance: ${prefs.reassuranceLevel || 'medium'}</p>
-                <p class="text-sm">Technical depth: ${prefs.technicalLevel || 'plain'}</p>
-                <p class="text-sm">Structure: ${prefs.structureLevel || 'paragraphs'}</p>
-                <p class="text-sm">Directness: ${prefs.directnessLevel || 'balanced'}</p>
+                <h4 class="text-blue-300 font-semibold mb-2">Response Preferences</h4>
+                <p class="text-sm">Tone: ${escapeHTML(prefs.likelyTone || 'neutral')}</p>
+                <p class="text-sm">Detail: ${escapeHTML(prefs.detailLevel || 'balanced')}</p>
+                <p class="text-sm">Reassurance: ${escapeHTML(prefs.reassuranceLevel || 'medium')}</p>
+                <p class="text-sm">Technical depth: ${escapeHTML(prefs.technicalLevel || 'plain')}</p>
+                <p class="text-sm">Structure: ${escapeHTML(prefs.structureLevel || 'paragraphs')}</p>
+                <p class="text-sm">Directness: ${escapeHTML(prefs.directnessLevel || 'balanced')}</p>
             </div>
             <div class="bg-gray-800 p-4 rounded-lg border border-cyan-900">
                 <h4 class="text-cyan-300 font-semibold mb-2">Persistent Companion Memory</h4>
@@ -559,25 +692,32 @@ function openInsightsModal() {
             </div>
         </div>
     `;
-    modal.classList.remove('hidden');
+    activateModal(modal);
 }
-function closeInsightsModal() { document.getElementById('insightsModal').classList.add('hidden'); }
+function closeInsightsModal() { deactivateModal(document.getElementById('insightsModal')); }
 
 function showContentModal(title, markdownContent) {
     closeContentModal();
     contentModalElement = document.createElement('div'); contentModalElement.id = 'contentModal'; contentModalElement.className = 'fixed inset-0 z-[60] overflow-y-auto bg-black bg-opacity-75 flex items-center justify-center p-4';
-    const modalContent = document.createElement('div'); modalContent.className = 'relative liquid-glass liquid-panel rounded-3xl p-6 w-full max-w-2xl shadow-2xl max-h-[80vh] overflow-y-auto'; modalContent.setAttribute('data-liquid', '');
+    const modalContent = document.createElement('div'); modalContent.className = 'relative liquid-glass liquid-panel rounded-3xl p-6 w-full max-w-2xl shadow-2xl max-h-[80vh] overflow-y-auto'; modalContent.setAttribute('data-liquid', ''); modalContent.setAttribute('role', 'dialog'); modalContent.setAttribute('aria-modal', 'true'); modalContent.setAttribute('aria-labelledby', 'contentTitle'); modalContent.tabIndex = -1;
     modalContent.innerHTML = `
-        <h3 class="text-2xl font-bold mb-4 text-gray-100">${title}</h3>
+        <h3 id="contentTitle" class="text-2xl font-bold mb-4 text-gray-100">${escapeHTML(title)}</h3>
         <div class="prose prose-invert max-w-none text-gray-300">${DOMPurify.sanitize(marked.parse(markdownContent))}</div>
         <div class="mt-6 flex justify-end">
-            <button id="closeContentButton" class="px-4 py-2 rounded-xl transition duration-200">Close</button>
+            <button type="button" id="closeContentButton" class="px-4 py-2 rounded-xl transition duration-200">Close</button>
         </div>`;
     contentModalElement.appendChild(modalContent); document.body.appendChild(contentModalElement);
+    activateModal(contentModalElement);
     if (window.setupLiquidGlassInteractions) window.setupLiquidGlassInteractions();
     document.getElementById('closeContentButton').addEventListener('click', closeContentModal);
 }
-function closeContentModal() { if (contentModalElement) { contentModalElement.remove(); contentModalElement = null; } }
+function closeContentModal() {
+    if (!contentModalElement) return;
+    const modal = contentModalElement;
+    deactivateModal(modal);
+    modal.remove();
+    contentModalElement = null;
+}
 
 function processContentLinks() {
     const lastMessageBubble = chatMessages.querySelector('.chat-bubble.ai:last-of-type');

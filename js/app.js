@@ -6,6 +6,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const chatMessagesSurface = document.getElementById('chatMessages');
     const toolsButton = document.getElementById('toolsButton');
     const fileInput = document.getElementById('fileInput');
+    const fileUploadButton = document.getElementById('fileUploadButton');
     const editMessageIndicator = document.getElementById('editMessageIndicator');
     const fileAttachmentIndicator = document.getElementById('fileAttachmentIndicator');
     const insightsButton = document.getElementById('insightsButton');
@@ -31,7 +32,6 @@ document.addEventListener('DOMContentLoaded', () => {
     const clearMemoryButton = document.getElementById('clearMemoryButton');
     const deleteAllDataButton = document.getElementById('deleteAllDataButton');
     const toolsModalContent = document.getElementById('toolsModalContent');
-    const TOOL_TAG_REGEX = /<tool_create[^>]*type=["']([^"']+)["'][^>]*(?:theme=["']([^"']+)["'])?[^>]*\/?>/gi;
     const LOCATION_MAX_AGE_MS = 10 * 60 * 1000;
     const LEGACY_DEFAULT_MODELS = new Set(['llama3:8b']);
     const AUTO_MODEL_OPTION = 'auto';
@@ -39,6 +39,36 @@ document.addEventListener('DOMContentLoaded', () => {
     window.AURA_AVAILABLE_MODELS = [];
 
     let attachedFile = null;
+    let responseInFlight = false;
+
+    function syncResponseInFlightControls() {
+        if (sendButton) sendButton.disabled = responseInFlight;
+        if (newChatButton) newChatButton.disabled = responseInFlight;
+        if (settingsButton) settingsButton.disabled = responseInFlight;
+        if (fileUploadButton) fileUploadButton.disabled = responseInFlight;
+        if (chatListContainer) {
+            chatListContainer.setAttribute('aria-busy', String(responseInFlight));
+            chatListContainer
+                .querySelectorAll('[role="tab"], .delete-chat-button')
+                .forEach((button) => {
+                    button.disabled = responseInFlight;
+                });
+        }
+        document.body.classList.toggle('response-in-flight', responseInFlight);
+    }
+
+    function setResponseInFlight(value) {
+        responseInFlight = Boolean(value);
+        syncResponseInFlightControls();
+    }
+
+    function resizeComposer() {
+        if (!userInput) return;
+        userInput.style.height = 'auto';
+        const nextHeight = Math.min(Math.max(userInput.scrollHeight, 50), 168);
+        userInput.style.height = `${nextHeight}px`;
+        userInput.style.overflowY = userInput.scrollHeight > 168 ? 'auto' : 'hidden';
+    }
 
     function setupLiquidGlassInteractions() {
         return;
@@ -362,6 +392,7 @@ document.addEventListener('DOMContentLoaded', () => {
         editMessageIndicator.innerHTML = `Editing an earlier message. Sending will resend it as a new message.<button id="cancelEditResendButton" class="ml-3 text-pink-400 hover:text-pink-300">Cancel</button>`;
         editMessageIndicator.classList.remove('hidden');
         userInput.value = message.content;
+        resizeComposer();
         userInput.focus();
         userInput.setSelectionRange(userInput.value.length, userInput.value.length);
         document.getElementById('cancelEditResendButton').onclick = clearResendDraft;
@@ -476,22 +507,48 @@ document.addEventListener('DOMContentLoaded', () => {
         refreshUI();
     }
 
-    async function processToolTags(rawResponse) {
-        let cleanedResponse = rawResponse || '';
-        const matchedTags = [...cleanedResponse.matchAll(TOOL_TAG_REGEX)];
+    async function processToolTags(rawResponse, chatId = chatManager.getActiveChatId()) {
+        const artifacts = window.AURA_TOOL_ARTIFACTS.parseToolArtifacts(rawResponse);
 
-        if (matchedTags.length > 0) {
-            matchedTags.forEach((match) => addToolStatusMessage(match[1]));
+        if (artifacts.creates.length > 0) {
+            artifacts.creates.forEach((entry) => addToolStatusMessage(entry.type));
         }
 
-        for (const match of matchedTags) {
-            const toolData = await createToolByType(match[1], match[2] || '');
-            if (toolData) chatManager.addOrUpdateToolInActiveChat(match[1], toolData);
-            cleanedResponse = cleanedResponse.replace(match[0], '').trim();
+        for (const entry of artifacts.creates) {
+            const toolData = await createToolByType(entry.type, entry.theme);
+            if (toolData) chatManager.addOrUpdateToolInChat(chatId, entry.type, toolData);
         }
 
         removeToolStatusMessages();
-        return cleanedResponse;
+        return {
+            content: artifacts.content,
+            toolOffer: artifacts.offer
+                ? window.AURA_TOOL_ARTIFACTS.createToolOffer(artifacts.offer, {
+                    id: `offer-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+                })
+                : null
+        };
+    }
+
+    function addAssistantArtifact(
+        artifact,
+        fallback = '',
+        chatId = chatManager.getActiveChatId()
+    ) {
+        const content = artifact?.content || fallback;
+        if (!content) return false;
+
+        const messageIndex = chatManager.addMessageToChat(chatId, 'ai', content, {
+            toolOffer: artifact?.toolOffer || null
+        });
+        if (chatManager.getActiveChatId() === chatId) {
+            addMessage('ai', content, {
+                messageIndex,
+                chatId,
+                toolOffer: artifact?.toolOffer || null
+            });
+        }
+        return true;
     }
 
     function refreshUI() {
@@ -500,35 +557,40 @@ document.addEventListener('DOMContentLoaded', () => {
         const tools = chatManager.getActiveChatTools();
         toggleToolsButton(Object.values(tools).some((entries) => entries && entries.length > 0));
         setupLiquidGlassInteractions();
+        syncResponseInFlightControls();
     }
 
     async function triggerAIFollowUp(followUp) {
+        if (responseInFlight) return;
+        const requestChatId = chatManager.getActiveChatId();
+        setResponseInFlight(true);
         showTypingIndicator();
 
         try {
-            const response = await getOllamaResponse('', followUp);
-            const cleanedResponse = await processToolTags(response);
+            const response = await getOllamaResponse('', followUp, null, requestChatId);
+            const artifact = await processToolTags(response, requestChatId);
 
-            if (cleanedResponse) {
-                addMessage('ai', cleanedResponse);
-                chatManager.addMessageToActiveChat('ai', cleanedResponse);
-            }
+            addAssistantArtifact(artifact, '', requestChatId);
             refreshUI();
         } finally {
             hideTypingIndicator();
+            setResponseInFlight(false);
         }
     }
 
     async function handleSendMessage() {
+        if (responseInFlight) return;
         const message = userInput.value.trim();
         if (!message && !attachedFile) return;
 
+        const requestChatId = chatManager.getActiveChatId();
         const currentAttachment = attachedFile;
         const displayMessage = buildDisplayedUserMessage(message, currentAttachment);
         addMessage('user', displayMessage);
-        chatManager.addMessageToActiveChat('user', message || displayMessage);
+        chatManager.addMessageToChat(requestChatId, 'user', message || displayMessage);
 
         userInput.value = '';
+        resizeComposer();
         clearResendDraft();
         resetAttachment();
         const manualMemoryCommand = parseManualMemoryCommand(message);
@@ -536,7 +598,7 @@ document.addEventListener('DOMContentLoaded', () => {
             chatManager.rememberUserFact(manualMemoryCommand.value);
             const reply = 'I’ll remember that for future chats on this device. You can turn memory off or clear it anytime in Settings.';
             addMessage('ai', reply);
-            chatManager.addMessageToActiveChat('ai', reply);
+            chatManager.addMessageToChat(requestChatId, 'ai', reply);
             refreshUI();
             return;
         }
@@ -546,42 +608,61 @@ document.addEventListener('DOMContentLoaded', () => {
             localStorage.setItem(STORAGE_KEYS.USER_MEMORY_ENABLED, 'false');
             const reply = 'I forgot the cross-chat memory stored on this device. Your current chat is still here unless you delete it in Settings.';
             addMessage('ai', reply);
-            chatManager.addMessageToActiveChat('ai', reply);
+            chatManager.addMessageToChat(requestChatId, 'ai', reply);
             refreshUserMemoryStatus();
             refreshUI();
             return;
         }
 
+        setResponseInFlight(true);
         showTypingIndicator(getProgressMessage(message, Boolean(currentAttachment)));
 
         try {
             const documentText = currentAttachment ? await readAttachedFile(currentAttachment) : null;
             updateTypingIndicator(getProgressMessage(message, false));
             await ensureRuntimeLocationFresh();
-            const screenResult = await chatManager.preScreenMessage(message);
+            const screenResult = await chatManager.preScreenMessage(message, requestChatId);
 
             if (screenResult === 'CRISIS') {
                 updateTypingIndicator('Aura is focusing on immediate safety.');
-                const safeMessage = await chatManager.triggerSafetyIntervention(message);
-                addMessage('ai', safeMessage);
+                const safeMessage = await chatManager.triggerSafetyIntervention(
+                    message,
+                    requestChatId
+                );
+                addAssistantArtifact({ content: safeMessage }, '', requestChatId);
                 refreshUI();
                 return;
             }
 
             updateTypingIndicator(getProgressMessage(message, Boolean(documentText)));
-            const rawResponse = await getOllamaResponse(message, null, documentText);
+            const rawResponse = await getOllamaResponse(
+                message,
+                null,
+                documentText,
+                requestChatId
+            );
             updateTypingIndicator('Aura is shaping the reply.');
-            const cleanedResponse = await processToolTags(rawResponse);
-
-            addMessage('ai', cleanedResponse || "I'm here. I just didn't manage to form a full reply that time.");
-            chatManager.addMessageToActiveChat('ai', cleanedResponse || "I'm here. I just didn't manage to form a full reply that time.");
+            const artifact = await processToolTags(rawResponse, requestChatId);
+            addAssistantArtifact(
+                artifact,
+                "I'm here. I just didn't manage to form a full reply that time.",
+                requestChatId
+            );
             refreshUI();
         } catch (error) {
             console.error('Message handling failed:', error);
-            addMessage('ai', "I hit a snag while working on that. Try again in a second and I'll take another pass.");
+            addAssistantArtifact(
+                {
+                    content: "I hit a snag while working on that. Try again in a second and I'll take another pass."
+                },
+                '',
+                requestChatId
+            );
+            refreshUI();
         } finally {
             hideTypingIndicator();
             removeToolStatusMessages();
+            setResponseInFlight(false);
         }
     }
 
@@ -703,21 +784,22 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     async function checkAgents() {
-        const pattern = chatManager.checkForWithdrawalPattern();
+        if (responseInFlight) return;
+        const requestChatId = chatManager.getActiveChatId();
+        const pattern = chatManager.checkForWithdrawalPattern(requestChatId);
         if (!pattern) return;
 
+        setResponseInFlight(true);
         showTypingIndicator();
 
         try {
-            const message = await chatManager.triggerReEngagement(pattern);
-            const cleanedMessage = await processToolTags(message);
-            if (cleanedMessage) {
-                addMessage('ai', cleanedMessage);
-                chatManager.addMessageToActiveChat('ai', cleanedMessage);
-            }
+            const message = await chatManager.triggerReEngagement(pattern, requestChatId);
+            const artifact = await processToolTags(message, requestChatId);
+            addAssistantArtifact(artifact, '', requestChatId);
             refreshUI();
         } finally {
             hideTypingIndicator();
+            setResponseInFlight(false);
         }
     }
 
@@ -765,21 +847,28 @@ document.addEventListener('DOMContentLoaded', () => {
         runPhase();
     }
 
-    userInput.addEventListener('keypress', (event) => {
-        if (event.key === 'Enter') handleSendMessage();
+    userInput.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) {
+            event.preventDefault();
+            handleSendMessage();
+        }
     });
+    userInput.addEventListener('input', resizeComposer);
     sendButton.addEventListener('click', handleSendMessage);
     newChatButton.addEventListener('click', () => {
+        if (responseInFlight) return;
         chatManager.createNewChat();
         refreshUI();
     });
 
+    if (fileUploadButton) fileUploadButton.addEventListener('click', () => fileInput.click());
     fileInput.addEventListener('change', (event) => {
         const file = event.target.files[0];
         if (file) setAttachment(file);
     });
 
     chatListContainer.addEventListener('click', (event) => {
+        if (responseInFlight) return;
         const deleteButton = event.target.closest('.delete-chat-button');
         const chatTab = event.target.closest('[data-chat-id]');
 
@@ -796,6 +885,27 @@ document.addEventListener('DOMContentLoaded', () => {
             refreshUI();
             checkAgents();
         }
+    });
+    chatListContainer.addEventListener('keydown', (event) => {
+        if (responseInFlight) return;
+        if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+        const tabs = [...chatListContainer.querySelectorAll('[role="tab"]')];
+        const currentIndex = tabs.indexOf(event.target.closest('[role="tab"]'));
+        if (currentIndex === -1 || tabs.length < 2) return;
+
+        event.preventDefault();
+        const nextIndex = event.key === 'Home'
+            ? 0
+            : (event.key === 'End'
+                ? tabs.length - 1
+                : (currentIndex + (event.key === 'ArrowRight' ? 1 : -1) + tabs.length) % tabs.length);
+        const nextChatId = tabs[nextIndex].dataset.chatId;
+        chatManager.setActiveChat(nextChatId);
+        refreshUI();
+        checkAgents();
+        window.requestAnimationFrame(() => {
+            chatListContainer.querySelector(`[role="tab"][data-chat-id="${nextChatId}"]`)?.focus();
+        });
     });
 
     if (toolsButton) toolsButton.addEventListener('click', () => {
@@ -879,6 +989,56 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     document.body.addEventListener('click', async (event) => {
+        const toolOfferTarget = event.target.closest(
+            '[data-action="create_tool_offer"], [data-action="dismiss_tool_offer"], [data-action="open_tools"]'
+        );
+        if (toolOfferTarget) {
+            const action = toolOfferTarget.dataset.action;
+            if (action === 'open_tools') {
+                renderToolsInModal(chatManager.getActiveChatTools());
+                openToolsModal();
+                return;
+            }
+
+            const chatId = toolOfferTarget.dataset.chatId;
+            const messageIndex = Number.parseInt(toolOfferTarget.dataset.messageIndex, 10);
+            if (!chatId || !Number.isInteger(messageIndex)) return;
+
+            if (action === 'dismiss_tool_offer') {
+                chatManager.transitionToolOffer(chatId, messageIndex, 'dismiss');
+                refreshUI();
+                return;
+            }
+
+            const claimedOffer = chatManager.transitionToolOffer(chatId, messageIndex, 'create');
+            if (!claimedOffer) return;
+            refreshUI();
+            addToolStatusMessage(claimedOffer.type);
+
+            try {
+                const toolData = await createToolByType(claimedOffer.type, claimedOffer.theme);
+                if (!toolData) {
+                    chatManager.transitionToolOffer(chatId, messageIndex, 'retry');
+                    return;
+                }
+
+                chatManager.addOrUpdateToolInChat(chatId, claimedOffer.type, toolData);
+                chatManager.transitionToolOffer(
+                    chatId,
+                    messageIndex,
+                    'created',
+                    toolData.id || null
+                );
+            } catch (error) {
+                console.error('Tool offer creation failed:', error);
+                chatManager.transitionToolOffer(chatId, messageIndex, 'retry');
+            } finally {
+                removeToolStatusMessages();
+                refreshUI();
+            }
+            return;
+        }
+
         const resendTarget = event.target.closest('[data-action="edit_resend_message"]');
         if (resendTarget) {
             queueMessageForEditAndResend(parseInt(resendTarget.dataset.messageIndex, 10));
@@ -888,6 +1048,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const suggestionTarget = event.target.closest('[data-prompt-suggestion]');
         if (suggestionTarget) {
             userInput.value = suggestionTarget.dataset.promptSuggestion || '';
+            resizeComposer();
             userInput.focus();
             userInput.setSelectionRange(userInput.value.length, userInput.value.length);
             return;
@@ -922,6 +1083,7 @@ document.addEventListener('DOMContentLoaded', () => {
     refreshLocationStatus();
     refreshUserMemoryStatus();
     setupLiquidGlassInteractions();
+    resizeComposer();
     if (chatMessagesSurface) chatMessagesSurface.addEventListener('scroll', syncChromeCompression, { passive: true });
     syncChromeCompression();
     refreshUI();

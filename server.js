@@ -9,6 +9,7 @@ const { ChromaClient } = require('chromadb');
 const {
     RESPONSE_EXAMPLE_COLLECTION
 } = require('./lib/response-examples');
+const { buildMemoryMatches } = require('./lib/memory-results');
 
 const app = express();
 
@@ -420,7 +421,10 @@ app.post('/api/search_memory', async (req, res) => {
 
         const results = await collection.query(queryPayload);
 
-        res.json({ results });
+        res.json({
+            results,
+            matches: buildMemoryMatches(results)
+        });
     } catch (error) {
         if (isChromaUnavailable(error)) {
             console.error('[Vector search]', error.message);
@@ -452,6 +456,9 @@ app.post('/api/search_examples', async (req, res) => {
         if (risk === 'high') {
             return res.json({ examples: [] });
         }
+        if (!['medical', 'companion'].includes(domain)) {
+            return res.json({ examples: [] });
+        }
 
         const resultLimit = normalizeExampleLimit(limit);
         const collection = await getResponseExampleCollection();
@@ -462,7 +469,12 @@ app.post('/api/search_examples', async (req, res) => {
         const results = await collection.query({
             queryTexts: [String(query).slice(0, 4000)],
             nResults: Math.min(40, collectionCount),
-            where: { status: 'approved' }
+            where: {
+                $and: [
+                    { status: { $eq: 'approved' } },
+                    { domain: { $eq: domain } }
+                ]
+            }
         });
         const ids = results.ids?.[0] || [];
         const metadatas = results.metadatas?.[0] || [];

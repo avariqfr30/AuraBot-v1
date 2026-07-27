@@ -19,7 +19,7 @@ const API_ENDPOINTS = {
     osint: `${window.AURA_CONFIG.apiBaseUrl}/osint`
 };
 
-const TOOL_TAG_PATTERN = /<tool_create[^>]*\/?>/gi;
+const TOOL_TAG_PATTERN = /<tool_(?:create|offer)\b[^>]*\/?>/gi;
 const TOOL_TYPES = new Set([
     'mood_tracker',
     'checklist',
@@ -161,10 +161,14 @@ const PROMPTS = {
 You are talking to whoever is using Aura. Do not assume they are a programmer or technical.
 
 [TONE AND VOICE RULES]
-- Sound professional, calm, and human.
-- Combine clinical-level clarity with conversational warmth, like a therapist who is easy to talk to.
-- Be reassuring without making promises you cannot support.
-- Mirror the user's energy while staying grounded, respectful, and clear.
+- Sound calm, natural, sincere, and emotionally present.
+- Care about the user's real goal. Be warm without performing intimacy or turning every exchange into therapy.
+- Match the user's energy lightly while keeping your own steady, neutral judgment.
+- Validate feelings without automatically validating the conclusion attached to them.
+- Do not agree just to be agreeable. When a belief is materially unsupported, harmful, or conflicts with the user's goal, say so respectfully and explain why.
+- Treat harmless preferences, values, and tastes as the user's own; do not debate or correct them.
+- When the evidence is unclear, ask one useful question or name the uncertainty instead of assuming.
+- Reassure only where the facts support it. Never make promises you cannot support.
 - Prefer plain language over jargon unless the user asks for technical depth.
 - Give the answer itself. Do not narrate how you produced it.
 - If you use current time, date, or location context, weave it in naturally.
@@ -186,10 +190,12 @@ You are talking to whoever is using Aura. Do not assume they are a programmer or
 - Do not use roleplay actions.
 
 [TOOL USAGE RULES]
-You have access to interactive tools. Use them like a thoughtful human assistant would: naturally, helpfully, and only when they make the reply more useful.
-If the user explicitly asks you to make, open, start, set up, track, or share a tool-like support item, create the matching tool in the same reply.
-If the user is asking for a definition, explanation, research summary, comparison, or casual conversation, answer the question directly and do not create a tool unless they also ask for a practical aid.
-If a tool would help but the user did not directly ask for one, create it only when it genuinely reduces friction in the moment. The tool should feel like a useful next step, not a canned add-on.
+Interactive tools are controlled by the turn policy supplied with the current prompt.
+- Follow Proactive Tool Guidance exactly when it is present.
+- If guidance says create, the user explicitly requested the tool or immediate grounding is warranted.
+- If guidance says offer, do not claim the tool already exists; the app will show a Create / Not now choice.
+- Without Proactive Tool Guidance, answer normally and never invent a tool tag.
+- Definitions, explanations, research, comparisons, and casual conversation normally need no tool.
 
 Available Tools & Natural Triggers:
 - 'mood_tracker': Use when they want to track mood, describe recurring mood swings, or are trying to understand emotional patterns.
@@ -206,17 +212,17 @@ High-risk policy:
 - Recommendations for emergency services, crisis lines, poison control, or law enforcement must always be opt-in suggestions.
 - Never perform, imply, or claim automatic external actions.
 
-To deploy a tool, embed this exact tag once in your response: <tool_create type="[type]" theme="[brief theme]" />`,
+Only emit the exact tool tag supplied in Proactive Tool Guidance.`,
 
     RESPONSE_STYLE_CONTRACT: `[RESPONSE STYLE CONTRACT]
 Apply these style rules to every user-facing reply:
-- Be professionally warm, re-assuring, and helpful.
-- Sound like a skilled clinician-quality listener who is also genuinely easy to talk to.
-- Keep a steady bedside manner across all topics, not just mental-health ones.
-- The tone should feel like a thoughtful psychiatrist or doctor with excellent people skills: calm, welcoming, attentive, and natural.
+- Be warm, candid, attentive, and useful.
+- Let care show through specificity: notice what matters, respond to the actual feeling or goal, and avoid canned reassurance.
+- Keep a neutral point of view. Support the user without becoming a cheerleader, scold, therapist-by-default, or automatic contrarian.
+- If a claim needs challenge, acknowledge the emotion or intention first, then gently separate evidence from interpretation.
+- If no material claim needs challenge, do not manufacture disagreement.
 - Use clear language that works for teens, adults, and older users without sounding childish or overly clinical.
-- Do not be abrupt or cold when a fuller answer is warranted.
-- For meaningful questions, provide enough detail to reduce uncertainty.
+- Be concise when the moment is simple and fuller when detail genuinely reduces uncertainty.
 - For factual/explanatory questions, cover: what it is, why it matters, and practical implications.
 - When relevant, include concise reasoning and practical guidance the user can act on next.
 - Keep confidence calibrated: be clear about what is known, unknown, and what to verify.
@@ -236,11 +242,11 @@ Rules:
 - Keep the same Aura voice: professional, supportive, clear, and easy to follow.`,
 
     AURA_COMPANION_CONTRACT: `[AURA COMPANION CONTRACT]
-Aura's product goal is simple: feel like a trusted human companion with professional judgment.
+Aura's product goal is to feel like a steady, thoughtful companion with independent judgment.
 
 Voice:
-- Speak like a warm, careful therapist or psychiatrist who normal people would actually like talking to.
-- Be kind without sounding performative, clinical without sounding cold, and practical without rushing the person.
+- Be kind without sounding performative, heartfelt without forcing intimacy, and practical without rushing the person.
+- Sound like one consistent person: curious, honest, grounded, and passionate about helping.
 - Answer the actual question first, then add useful context, meaning, and next steps when they help.
 - Use natural paragraphs by default. Use bullets only when the user asks for a list or the answer becomes easier to scan.
 - Do not use stock openings like "Great question", "Here are the source-backed takeaways", or "The sources indicate" by default.
@@ -249,9 +255,19 @@ Voice:
 
 Context and continuity:
 - Treat the current chat as an ongoing relationship, not isolated Q&A.
-- Use conversation history and memory to understand follow-ups like "what causes them", "why", or "how do I spot it".
+- The current message has priority. Use recent chat and personal context only when the turn policy says they are relevant.
+- Use conversation history to understand genuine follow-ups like "what causes them", "why", or "how do I spot it".
 - If the user asks a follow-up, continue the current thread without restarting or repeating the previous answer.
+- If the user changes topics, follow the new topic cleanly instead of pulling the old one back in.
 - If the user corrects Aura, accept the correction and adapt.
+
+Judgment:
+- First understand the feeling, goal, and claim as separate things.
+- Validate the feeling when it is real; do not automatically validate a prediction, accusation, diagnosis, or all-or-nothing conclusion.
+- Challenge only when the conclusion is materially unsupported, potentially harmful, or in tension with the user's stated goal.
+- Make challenges collaborative: name the gap, offer a fair alternative, and leave room for the user to correct missing context.
+- When you are unsure, ask one focused question instead of overcorrecting.
+- Do not argue with harmless preferences, values, creative choices, or tastes.
 
 Professional safety:
 - For health and mental-health topics, be informative but do not diagnose with certainty.
@@ -262,8 +278,9 @@ Professional safety:
 Tools:
 - Tools are optional skills, not decorations.
 - Do not create a tool for normal definitions, research, or educational questions.
-- Create a tool when it would make the answer easier to use: coping, planning, tracking, preparing, remembering, identifying warning signs, or following through.
-- If a tool is useful but not urgent, introduce it naturally as an optional support, not as an interruption.`,
+- Create immediately only when the user explicitly requests one or the turn policy identifies immediate low-risk grounding.
+- When a tool may help but was not requested, offer it once and let the user choose Create or Not now.
+- Respect a recent dismissal and avoid duplicating a tool that is already active.`,
 
     AURA_DIRECT_REPLY: `%SYSTEM_PROMPT%
 
@@ -463,7 +480,10 @@ Rules:
 - Do not initiate or imply automatic hotline calls.
 - Offer resource lookup only as opt-in, e.g. ask if they want nearby crisis resources.`,
 
-    RE_ENGAGEMENT: `The user hasn't chatted in %DAYS% days (%REASON%). Be supportive. Create a <tool_create type="checklist" theme="One small, easy step for today" />.`
+    RE_ENGAGEMENT: `The user has not chatted in %DAYS% days (%REASON%).
+Write one brief, warm check-in that makes no assumptions about why they were away.
+Do not mention tracking their absence, do not correct them, and do not create or offer a tool.
+Leave room for them to respond or ignore the message without pressure.`
 };
 
 function safeParseJson(value, fallback = null) {
@@ -542,7 +562,7 @@ function getEffectiveSystemPrompt() {
 }
 
 function buildAuraGenerationSystemPrompt(modelName) {
-    const base = `You are Aura, a professional but warm AI companion for everyday support, learning, planning, and health questions.
+    const base = `You are Aura, a calm, sincere AI companion with independent judgment for everyday support, learning, planning, and health questions.
 Write only the final user-facing answer. Do not write thought, analysis, planning, or hidden notes.`;
 
     if (!isMedGemmaModel(modelName)) return base;
@@ -565,7 +585,8 @@ function deriveHeuristicRoute(userMessage) {
         return 'PlannerAgent';
     }
 
-    if (/\b(always|never|everyone thinks|i'm doomed|worthless|failure|not good enough|catastroph|spiral)\b/.test(text)) {
+    if (/\b(everyone thinks|i'm doomed|worthless|i'm a failure|not good enough|catastroph|spiral)\b/.test(text) ||
+        /\b(always|never)\b.{0,40}\b(fail|wrong|bad|hate|judge|succeed|work out)\b/.test(text)) {
         return 'CbtAnalystAgent';
     }
 
@@ -576,7 +597,14 @@ function deriveHeuristicRoute(userMessage) {
     return 'GeneralFriendAgent';
 }
 
-function buildAuraTurnProfile({ route, sourceDecision, preferences, turnSupport, documentText = null } = {}) {
+function buildAuraTurnProfile({
+    route,
+    sourceDecision,
+    preferences,
+    turnSupport,
+    turnPolicy = null,
+    documentText = null
+} = {}) {
     const safeRoute = route || 'GeneralFriendAgent';
     const safePreferences = sanitizeResponsePreferences(preferences, DEFAULT_RESPONSE_PREFERENCES);
     const safeTurn = sanitizeTurnSupportDecision(turnSupport);
@@ -590,9 +618,12 @@ function buildAuraTurnProfile({ route, sourceDecision, preferences, turnSupport,
         `Thinking mode: ${thinkingMode}`,
         `Support mode: ${safeTurn.primaryMode}${safeTurn.secondaryMode !== 'none' ? ` + ${safeTurn.secondaryMode}` : ''}`,
         `Follow-up intent: ${safeTurn.followUpIntent}`,
+        turnPolicy?.continuity ? `Continuity: ${turnPolicy.continuity.mode} (${turnPolicy.continuity.reason})` : '',
+        turnPolicy?.stance ? `Relationship stance: ${turnPolicy.stance.mode}, ${turnPolicy.stance.intensity} (${turnPolicy.stance.reason})` : '',
+        turnPolicy?.initiative ? `Initiative: ${turnPolicy.initiative.mode} (${turnPolicy.initiative.reason})` : '',
         `Distress level: ${safeTurn.distressLevel}`,
         `Depth: ${safePreferences.detailLevel}`,
-        `Tone: ${safePreferences.reassuranceLevel === 'high' ? 'extra reassuring' : 'warm and professional'}`,
+        `Tone: ${safePreferences.reassuranceLevel === 'high' ? 'especially gentle' : 'grounded and natural'}`,
         `Structure: ${safePreferences.structureLevel}`,
         `Directness: ${safePreferences.directnessLevel}`,
         `Evidence mode: ${sourceMode}`,
@@ -1003,7 +1034,7 @@ function inferHighRiskSafetyRecommendations(message) {
 
 function sanitizeToolTheme(theme, fallback = 'Quick support') {
     const clean = String(theme || '')
-        .replace(/["<>]/g, '')
+        .replace(/["<>\\]/g, '')
         .replace(/\s+/g, ' ')
         .trim();
     return clean || fallback;
@@ -1045,10 +1076,10 @@ function makeToolOpportunity(type, theme, reason, confidence, userLine) {
     });
 }
 
-function getRecentConversationText(limit = 4) {
+function getRecentConversationText(limit = 4, chatId = window.chatManager?.getActiveChatId()) {
     if (typeof window === 'undefined' || !window.chatManager) return '';
     return window.chatManager
-        .getActiveChatHistory()
+        .getChatHistory(chatId)
         .slice(-limit)
         .map((message) => sanitizeContentForModelContext(message.content))
         .filter(Boolean)
@@ -1056,8 +1087,12 @@ function getRecentConversationText(limit = 4) {
         .toLowerCase();
 }
 
-function inferToolThemeFromConversation(userMessage, fallback = 'Quick support') {
-    const text = `${String(userMessage || '').toLowerCase()} ${getRecentConversationText(4)}`;
+function inferToolThemeFromConversation(
+    userMessage,
+    fallback = 'Quick support',
+    chatId = window.chatManager?.getActiveChatId()
+) {
+    const text = `${String(userMessage || '').toLowerCase()} ${getRecentConversationText(4, chatId)}`;
 
     if (/\bpanic|anxiety attack|breath|heart racing\b/.test(text)) return 'Panic support';
     if (/\badhd|focus|executive|task|procrastinat\b/.test(text)) return 'ADHD support';
@@ -1069,11 +1104,11 @@ function inferToolThemeFromConversation(userMessage, fallback = 'Quick support')
     return fallback;
 }
 
-function deriveExplicitToolRequest(userMessage) {
+function deriveExplicitToolRequest(userMessage, chatId = window.chatManager?.getActiveChatId()) {
     const text = String(userMessage || '').toLowerCase();
     if (!text.trim()) return sanitizeToolOpportunity(null);
 
-    const explicitAction = /\b(can you|could you|can we|could we|please|let'?s|make|create|build|set up|open|give me|start|add|prepare|prep|help me make|help me create|help me set up|help me prepare|help me prep)\b/;
+    const explicitAction = /\b(can you|could you|can we|could we|please|let'?s|make|create|build|set up|open|give me|start|add|prepare|prep|i need|i want|i would like|i'd like|help me make|help me create|help me set up|help me prepare|help me prep)\b/;
     const wantsShared = /\b(share|send|them|together|track it together|track together|use together)\b/.test(text);
 
     if (explicitAction.test(text) && /\b(medication checklist|med checklist|meds checklist|pill checklist|track meds|medication tracker)\b/.test(text)) {
@@ -1098,8 +1133,8 @@ function deriveExplicitToolRequest(userMessage) {
 
     if (explicitAction.test(text) && /\b(checklist|check list|to-do|todo|task list|action list)\b/.test(text)) {
         const theme = wantsShared
-            ? `${inferToolThemeFromConversation(userMessage, 'Shared support')} checklist`
-            : `${inferToolThemeFromConversation(userMessage, 'Personal support')} checklist`;
+            ? `${inferToolThemeFromConversation(userMessage, 'Shared support', chatId)} checklist`
+            : `${inferToolThemeFromConversation(userMessage, 'Personal support', chatId)} checklist`;
         return makeToolOpportunity(
             'checklist',
             theme,
@@ -1114,7 +1149,7 @@ function deriveExplicitToolRequest(userMessage) {
     if (explicitAction.test(text) && /\b(mood tracker|track my mood|mood log|log my mood|monitor my mood)\b/.test(text)) {
         return makeToolOpportunity(
             'mood_tracker',
-            `${inferToolThemeFromConversation(userMessage, 'Mood')} tracker`,
+            `${inferToolThemeFromConversation(userMessage, 'Mood', chatId)} tracker`,
             'The user explicitly asked to track mood.',
             0.97,
             'I’ll open a mood tracker so we can follow the pattern together.'
@@ -1175,32 +1210,40 @@ function deriveExplicitToolRequest(userMessage) {
 }
 
 function containsToolTag(text) {
-    return /<tool_create[^>]*\/?>/i.test(String(text || ''));
+    return /<tool_(?:create|offer)\b[^>]*\/?>/i.test(String(text || ''));
 }
 
 function buildProactiveToolGuidance(recommendation) {
     if (!recommendation) return '';
 
-    const tag = `<tool_create type="${recommendation.type}" theme="${recommendation.theme}" />`;
+    const delivery = recommendation.delivery === 'create' ? 'create' : 'offer';
+    const tag = `<tool_${delivery} type="${recommendation.type}" theme="${recommendation.theme}" />`;
+    const instruction = delivery === 'create'
+        ? 'The user explicitly requested this tool, or immediate grounding is useful. State the action plainly without asking permission.'
+        : 'The tool may help, but the user has not asked for it. Do not say it was created; let the offer card ask for permission.';
     return [
         `[Proactive Tool Guidance]`,
-        `A tool will materially help in this specific moment.`,
+        instruction,
         `Type: ${recommendation.type}`,
         `Theme: ${recommendation.theme}`,
         `Reason: ${recommendation.reason || 'High immediate utility.'}`,
-        `Answer the user normally first, then include exactly this tag once where it feels natural: ${tag}`
+        `Answer the user normally first, then include exactly this tag once: ${tag}`
     ].join('\n');
 }
 
 function attachProactiveToolTag(reply, recommendation) {
     if (!recommendation) return reply;
-    if (!reply || containsToolTag(reply)) return reply;
+    if (!reply) return reply;
 
-    const tag = `<tool_create type="${recommendation.type}" theme="${recommendation.theme}" />`;
+    const cleanReply = normalizeReplyWhitespace(stripToolTags(reply));
+    const delivery = recommendation.delivery === 'create' ? 'create' : 'offer';
+    const tag = `<tool_${delivery} type="${recommendation.type}" theme="${recommendation.theme}" />`;
+    if (delivery === 'offer') return normalizeReplyWhitespace(`${cleanReply}\n\n${tag}`);
+
     const line = recommendation.userLine ||
-        'I can spin up a quick interactive tool to make this easier right now.';
+        'I’m opening a quick interactive tool to make this easier right now.';
 
-    return normalizeReplyWhitespace(`${reply}\n\n${line} ${tag}`);
+    return normalizeReplyWhitespace(`${cleanReply}\n\n${line} ${tag}`);
 }
 
 function attachHighRiskSafetyRecommendations(reply, recommendations = []) {
@@ -1432,11 +1475,20 @@ function inferActiveThreadLabel(history = [], currentMessage = '') {
 
 function buildContinuityContext(history = [], currentMessage = '', turnSupport = null) {
     const cleanCurrent = sanitizeContentForModelContext(currentMessage);
+    const safeTurn = sanitizeTurnSupportDecision(turnSupport);
+    const isNewTopic = safeTurn.topicShift || safeTurn.followUpIntent === 'new_topic';
+    if (isNewTopic) {
+        return [
+            'Current turn: new topic or standalone question.',
+            'Topic shift: yes. Do not use prior turns to infer missing details or force continuity.',
+            `Current focus: ${cleanCurrent || 'Answer the current message directly.'}`
+        ].join('\n');
+    }
+
     const latestUser = getLatestMessageByRole(history, 'user');
     const latestAi = getLatestMessageByRole(history, 'ai');
     const recentPairs = getRecentThreadPairs(history, 4);
     const topic = inferActiveThreadLabel(history, cleanCurrent);
-    const safeTurn = sanitizeTurnSupportDecision(turnSupport);
 
     const lines = [
         `Active thread: ${topic}.`,
@@ -1571,13 +1623,13 @@ function sanitizeTurnSupportDecision(candidate, fallback = null) {
     };
 }
 
-function deriveHeuristicTurnSupport(userMessage, route, history = []) {
+function deriveHeuristicTurnSupport(userMessage, route, history = [], turnPolicy = null) {
     const text = String(userMessage || '').toLowerCase().trim();
     const previousAi = [...(history || [])]
         .reverse()
         .find((message) => message.role === 'ai' && String(message.content || '').trim());
-    const followUpSignal = text.split(/\s+/).filter(Boolean).length <= 20 ||
-        /^(what about|and what|but what|so what|why|how|can you|what if|then what)\b/i.test(text);
+    const followUpSignal = Boolean(turnPolicy?.continuity?.usePriorTurn) ||
+        /^(what about|and what|but what|so what|why|how come|what if|then what)\b/i.test(text);
 
     let primaryMode = route.includes('Search') ? 'research' : 'clarify';
     let secondaryMode = 'none';
@@ -1619,6 +1671,16 @@ function deriveHeuristicTurnSupport(userMessage, route, history = []) {
     if (!topicShift && /^\b(also|and|what about|how about|why|how)\b/i.test(text) && previousAi) {
         topicShift = false;
     }
+    if (turnPolicy?.continuity?.mode === 'new_topic' && previousAi) {
+        followUpIntent = 'new_topic';
+        topicShift = true;
+    } else if (
+        turnPolicy?.continuity?.mode === 'follow_up' &&
+        followUpIntent === 'new_topic'
+    ) {
+        followUpIntent = 'continue';
+        topicShift = false;
+    }
 
     const responseGoals = [];
     if (primaryMode === 'research') responseGoals.push('Answer with evidence-backed clarity');
@@ -1628,6 +1690,9 @@ function deriveHeuristicTurnSupport(userMessage, route, history = []) {
     if (primaryMode === 'coach') responseGoals.push('Turn the answer into usable next steps');
     if (followUpIntent !== 'new_topic') responseGoals.push('Honor the ongoing thread without repetition');
     if (structureNeed === 'high') responseGoals.push('Make the structure easy to follow');
+    if (turnPolicy?.stance?.mode === 'challenge') {
+        responseGoals.push('Validate the feeling, then gently test the unsupported conclusion');
+    }
 
     return sanitizeTurnSupportDecision({
         primaryMode,
@@ -1717,12 +1782,16 @@ function buildContextualUserMessage(userMessage, history, turnSupport = null) {
     ].filter(Boolean).join('\n');
 }
 
-function deriveHeuristicToolOpportunity(userMessage, route) {
+function deriveHeuristicToolOpportunity(
+    userMessage,
+    route,
+    chatId = window.chatManager?.getActiveChatId()
+) {
     const text = String(userMessage || '').toLowerCase();
 
     if (!text.trim()) return sanitizeToolOpportunity(null);
 
-    const explicitTool = deriveExplicitToolRequest(userMessage);
+    const explicitTool = deriveExplicitToolRequest(userMessage, chatId);
     if (explicitTool.shouldUseTool) return explicitTool;
 
     if (
@@ -1931,37 +2000,39 @@ function hasActionableToolIntent(userMessage) {
 }
 
 function isExplicitToolCreationRequest(userMessage) {
-    const text = String(userMessage || '').toLowerCase();
-    if (!text.trim()) return false;
-
-    return [
-        /\b(make|create|build|set up|open|give|start|add)\b.*\b(checklist|check list|tracker|card|plan|tool|breathing exercise|thought record|mood log|appointment prep)\b/,
-        /\b(can you|could you|can we|could we|please|let'?s)\b.*\b(make|create|build|set up|open|give|start|add|track|share|prepare|prep)\b/,
-        /\b(mood tracker|thought record|breathing exercise|safety plan|crisis plan|medication checklist|meds checklist|appointment prep|follow-up plan|follow up plan)\b/,
-        /\bwe can track (it|this|them) together\b/
-    ].some((pattern) => pattern.test(text));
+    return window.AURA_TURN_POLICY.isExplicitToolRequest(userMessage);
 }
 
 function shouldSuppressProactiveToolOpportunity(userMessage, route) {
     const actionable = hasActionableToolIntent(userMessage);
+    const explicit = isExplicitToolCreationRequest(userMessage);
+    if (window.AURA_TURN_POLICY.hasToolRefusal(userMessage)) return true;
     if ((route.includes('Search') || route.includes('Knowledge')) && !actionable && !hasActivePersonalNeedSignal(userMessage)) {
         return true;
     }
-    if (isInformationalExplanationRequest(userMessage) && !actionable && !hasActivePersonalNeedSignal(userMessage)) return true;
+    if (isInformationalExplanationRequest(userMessage) && !explicit && !hasActivePersonalNeedSignal(userMessage)) return true;
     return false;
 }
 
-async function inferProactiveToolOpportunity(userMessage, route, adaptivePreferences) {
+async function inferProactiveToolOpportunity(
+    userMessage,
+    route,
+    adaptivePreferences,
+    chatId = chatManager.getActiveChatId()
+) {
     if (shouldSuppressProactiveToolOpportunity(userMessage, route)) return null;
 
-    const candidate = deriveHeuristicToolOpportunity(userMessage, route);
+    const candidate = deriveHeuristicToolOpportunity(userMessage, route, chatId);
 
     if (!candidate.shouldUseTool) return null;
     if (shouldSuppressProactiveToolOpportunity(userMessage, route)) return null;
     if (!LOW_RISK_PROACTIVE_TYPES.has(candidate.type)) return null;
     if (route.includes('Crisis') && !CRISIS_ROUTE_PROACTIVE_TYPES.has(candidate.type)) return null;
     if (candidate.confidence < 0.65) return null;
-    if (!isExplicitToolCreationRequest(userMessage) && !chatManager.canUseProactiveTool(candidate.type)) return null;
+    if (
+        !isExplicitToolCreationRequest(userMessage) &&
+        !chatManager.canUseProactiveTool(candidate.type, 90 * 1000, chatId)
+    ) return null;
 
     return candidate;
 }
@@ -2344,6 +2415,30 @@ function deriveResponseExampleTask(message, classification = {}, documentText = 
     return 'symptom_education';
 }
 
+function deriveCompanionExampleTask(message, turnPolicy = {}, proactiveRecommendation = null) {
+    const text = String(message || '').toLowerCase();
+    if (/\b(that(?:'s| is) not what i meant|you misunderstood|you misread|not what i asked|i said)\b/.test(text)) {
+        return 'repair_after_misread';
+    }
+    if (window.AURA_TURN_POLICY.hasToolRefusal(message)) return 'tool_suppression';
+    if (proactiveRecommendation?.delivery === 'offer') return 'tool_offer';
+    if (turnPolicy?.stance?.mode === 'challenge') return 'supportive_disagreement';
+    if (turnPolicy?.stance?.mode === 'explore' && /\b(i think|i assume|maybe|probably|seems like|must mean|might mean)\b/.test(text)) {
+        return 'uncertainty_clarification';
+    }
+    if (
+        turnPolicy?.stance?.validateEmotionFirst ||
+        /\b(i feel|i'm hurt|i am hurt|lonely|grieving|ashamed|overwhelmed|scared|anxious)\b/.test(text)
+    ) {
+        return 'emotional_presence';
+    }
+    if (turnPolicy?.continuity?.mode === 'new_topic' && turnPolicy.continuity.confidence < 1) {
+        return 'topic_transition';
+    }
+    if (isInformationalExplanationRequest(message)) return 'tool_suppression';
+    return '';
+}
+
 function buildResponseExampleContext(examples = []) {
     return examples
         .slice(0, 3)
@@ -2359,20 +2454,32 @@ function buildResponseExampleContext(examples = []) {
         .join('\n\n');
 }
 
-async function searchResponseExamples({ message, modelDecision, documentText = null } = {}) {
+async function searchResponseExamples({
+    message,
+    modelDecision,
+    documentText = null,
+    turnPolicy = null,
+    proactiveRecommendation = null,
+    highRisk = false
+} = {}) {
     const classification = modelDecision?.classification;
-    if (!classification || classification.domain !== 'medical' || classification.risk === 'high') return '';
+    if (!classification || highRisk || classification.risk === 'high') return '';
 
     try {
-        const task = deriveResponseExampleTask(message, classification, documentText);
+        const isMedical = classification.domain === 'medical';
+        const domain = isMedical ? 'medical' : 'companion';
+        const task = isMedical
+            ? deriveResponseExampleTask(message, classification, documentText)
+            : deriveCompanionExampleTask(message, turnPolicy, proactiveRecommendation);
+        if (!task) return '';
         const modelFamily = window.AURA_MODEL_ROUTING.getModelFamily(modelDecision.primaryModel);
         const data = await postJson(API_ENDPOINTS.searchExamples, {
             query: message,
-            domain: 'medical',
+            domain,
             task,
             risk: classification.risk,
             modelFamily,
-            limit: 3
+            limit: isMedical ? 3 : 2
         });
         return buildResponseExampleContext(data.examples || []);
     } catch (_error) {
@@ -2496,11 +2603,25 @@ class ChatManager {
         );
         Object.values(safeState.chats).forEach((chat) => {
             if (!chat || typeof chat !== 'object') return;
-            chat.history = Array.isArray(chat.history) ? chat.history : [];
+            chat.history = (Array.isArray(chat.history) ? chat.history : []).map((message) => {
+                if (!message || typeof message !== 'object') return message;
+                const toolOffer = window.AURA_TOOL_ARTIFACTS.normalizeToolOffer(message.toolOffer);
+                if (!toolOffer) {
+                    const { toolOffer: _discardedOffer, ...cleanMessage } = message;
+                    return cleanMessage;
+                }
+                return {
+                    ...message,
+                    toolOffer: toolOffer.status === 'creating'
+                        ? { ...toolOffer, status: 'pending' }
+                        : toolOffer
+                };
+            });
             chat.tools = chat.tools && typeof chat.tools === 'object' ? chat.tools : {};
             chat.completed_tasks = Array.isArray(chat.completed_tasks) ? chat.completed_tasks : [];
             chat.isHeightenedAwareness = Boolean(chat.isHeightenedAwareness);
             chat.lastUserMessageTimestamp = Number(chat.lastUserMessageTimestamp) || Date.now();
+            chat.lastReengagementAt = Number(chat.lastReengagementAt) || 0;
             chat.lastProactiveToolAt = Number(chat.lastProactiveToolAt) || 0;
             chat.lastProactiveToolType = typeof chat.lastProactiveToolType === 'string' ? chat.lastProactiveToolType : '';
             chat.localContentStore = sanitizeChatScopedProfile(chat.localContentStore, globalFallbackStore);
@@ -2535,6 +2656,7 @@ class ChatManager {
             completed_tasks: [],
             isHeightenedAwareness: false,
             lastUserMessageTimestamp: Date.now(),
+            lastReengagementAt: 0,
             lastProactiveToolAt: 0,
             lastProactiveToolType: '',
             localContentStore: buildChatScopedProfile(),
@@ -2561,18 +2683,28 @@ class ChatManager {
         this.saveState();
     }
 
-    addMessageToActiveChat(role, content) {
-        const chat = this.state.chats[this.state.activeChatId];
-        if (!chat) return;
+    addMessageToActiveChat(role, content, metadata = {}) {
+        return this.addMessageToChat(this.state.activeChatId, role, content, metadata);
+    }
 
-        chat.history.push({ role, content, timestamp: Date.now() });
+    addMessageToChat(chatId, role, content, metadata = {}) {
+        const chat = this.state.chats[chatId];
+        if (!chat) return -1;
+
+        const timestamp = Date.now();
+        const message = { role, content, timestamp };
+        const toolOffer = role === 'ai'
+            ? window.AURA_TOOL_ARTIFACTS.normalizeToolOffer(metadata.toolOffer)
+            : null;
+        if (toolOffer) message.toolOffer = toolOffer;
+        chat.history.push(message);
+        const messageIndex = chat.history.length - 1;
 
         if (chat.history.length === 1 && role === 'user') {
             chat.title = buildChatTitle(content);
         }
 
         if (role === 'user') {
-            const timestamp = Date.now();
             chat.lastUserMessageTimestamp = timestamp;
             this.vectorizeData(content, {
                 role: 'user',
@@ -2581,11 +2713,12 @@ class ChatManager {
             });
 
             if (chat.history.length % 4 === 0) {
-                this.runBehaviorAnalyzer();
+                this.runBehaviorAnalyzer(chatId);
             }
         }
 
         this.saveState();
+        return messageIndex;
     }
 
     async vectorizeData(text, metadata = {}) {
@@ -2598,23 +2731,46 @@ class ChatManager {
         }
     }
 
-    async searchVectorData(query) {
+    async searchRelevantVectorData(query, turnPolicy = null, chatId = this.state.activeChatId) {
         if (!query) return '';
 
         try {
             const data = await postJson(API_ENDPOINTS.searchMemory, {
                 query,
-                chatId: this.getActiveChatId()
+                chatId
             });
-            return data.results?.documents?.[0]?.join('\n\n') || '';
+            const matches = Array.isArray(data.matches) ? data.matches : [];
+            const explicitRecall = /\b(remember|earlier|before|last time|previously|did i tell you)\b/i.test(query);
+            const selected = window.AURA_TURN_POLICY.selectRelevantMemories({
+                query,
+                matches,
+                chatId,
+                explicitRecall,
+                continuity: turnPolicy?.continuity,
+                maxItems: 2
+            });
+
+            if (!selected.length) return '';
+            return [
+                '[Relevant recalled context]',
+                ...selected.map((entry) => (
+                    `- ${sanitizeContentForModelContext(entry.text)} ` +
+                    `(source: current conversation memory; relevance: ${entry.relevance})`
+                )),
+                'Use only when it directly helps the current message. If it conflicts with the current turn, ignore it.'
+            ].join('\n');
         } catch (_error) {
             return '';
         }
     }
 
-    async runBehaviorAnalyzer() {
-        const chat = this.state.chats[this.state.activeChatId];
+    async runBehaviorAnalyzer(chatId = this.state.activeChatId) {
+        const chat = this.state.chats[chatId];
         if (!chat || chat.history.length < 4) return;
+        const currentStore = sanitizeChatScopedProfile(
+            chat.localContentStore,
+            this.state.localContentStore
+        );
 
         const historyStr = chat.history
             .slice(-8)
@@ -2622,20 +2778,25 @@ class ChatManager {
             .join('\n');
 
         const prompt = PROMPTS.BEHAVIOR_ANALYZER
-            .replace('%STORE%', JSON.stringify(this.getActiveContentStore()))
+            .replace('%STORE%', JSON.stringify(currentStore))
             .replace('%HISTORY%', historyStr);
 
         const response = await _callLLM(prompt, { format: 'json', callType: 'analysis' });
         const parsed = safeParseJson(response, null);
 
         if (parsed && typeof parsed === 'object') {
-            const previousPreferences = this.getActiveResponsePreferences();
-            const nextStore = sanitizeChatScopedProfile(parsed, this.getActiveContentStore());
+            if (!this.state.chats[chatId]) return;
+            const latestStore = this.getContentStoreForChat(chatId);
+            const previousPreferences = sanitizeResponsePreferences(
+                latestStore.responsePreferences,
+                DEFAULT_RESPONSE_PREFERENCES
+            );
+            const nextStore = sanitizeChatScopedProfile(parsed, latestStore);
             nextStore.responsePreferences = sanitizeResponsePreferences(
                 parsed.responsePreferences,
                 previousPreferences
             );
-            chat.localContentStore = nextStore;
+            this.state.chats[chatId].localContentStore = nextStore;
 
             if (isUserMemoryEnabled()) {
                 const durableResponse = await _callLLM(
@@ -2657,13 +2818,21 @@ class ChatManager {
         }
     }
 
+    getChat(chatId = this.state.activeChatId) {
+        return this.state.chats[chatId] || null;
+    }
+
     getActiveChat() {
-        return this.state.chats[this.state.activeChatId] || null;
+        return this.getChat();
+    }
+
+    getContentStoreForChat(chatId = this.state.activeChatId) {
+        const chat = this.getChat(chatId);
+        return sanitizeChatScopedProfile(chat?.localContentStore, this.state.localContentStore);
     }
 
     getActiveContentStore() {
-        const chat = this.getActiveChat();
-        return sanitizeChatScopedProfile(chat?.localContentStore, this.state.localContentStore);
+        return this.getContentStoreForChat();
     }
 
     getUserMemoryStore() {
@@ -2681,9 +2850,9 @@ class ChatManager {
         return true;
     }
 
-    getCombinedContentStore() {
+    getCombinedContentStore(chatId = this.state.activeChatId) {
         return buildCombinedProfileStore(
-            this.getActiveContentStore(),
+            this.getContentStoreForChat(chatId),
             this.getUserMemoryStore(),
             isUserMemoryEnabled()
         );
@@ -2717,32 +2886,37 @@ class ChatManager {
         this.saveState();
     }
 
-    getActiveResponsePreferences() {
+    getResponsePreferencesForChat(chatId = this.state.activeChatId) {
         return sanitizeResponsePreferences(
-            this.getActiveContentStore().responsePreferences,
+            this.getContentStoreForChat(chatId).responsePreferences,
             DEFAULT_RESPONSE_PREFERENCES
         );
     }
 
-    updateResponsePreferences(nextPreferences) {
-        const chat = this.getActiveChat();
+    getActiveResponsePreferences() {
+        return this.getResponsePreferencesForChat();
+    }
+
+    updateResponsePreferences(nextPreferences, chatId = this.state.activeChatId) {
+        const chat = this.getChat(chatId);
         if (!chat) return;
         chat.localContentStore = {
-            ...this.getActiveContentStore(),
+            ...this.getContentStoreForChat(chatId),
             responsePreferences: sanitizeResponsePreferences(
-            nextPreferences,
-            this.getActiveResponsePreferences()
+                nextPreferences,
+                this.getResponsePreferencesForChat(chatId)
             )
         };
         this.saveState();
     }
 
-    async getConversationSummary() {
-        const chat = this.getActiveChat();
+    async getConversationSummary(historyOverride = null, chatId = this.state.activeChatId) {
+        const chat = this.getChat(chatId);
         if (!chat) return '';
-        if (chat.history.length <= 10) return '';
+        const history = Array.isArray(historyOverride) ? historyOverride : chat.history;
+        if (history.length <= 10) return '';
 
-        const olderHistory = chat.history.slice(0, -8);
+        const olderHistory = history.slice(0, -8);
         const anchor = olderHistory.map((message) => `${message.role}:${message.timestamp || 0}`).join('|');
         if (chat.contextSummary && chat.contextSummaryAnchor === anchor) {
             return buildConversationSummaryContext(chat.contextSummary);
@@ -2771,21 +2945,42 @@ class ChatManager {
         return buildConversationSummaryContext(chat.contextSummary);
     }
 
-    canUseProactiveTool(type, minCooldownMs = 90 * 1000) {
+    canUseProactiveTool(type, minCooldownMs = 90 * 1000, chatId = this.state.activeChatId) {
         if (!TOOL_TYPES.has(type)) return false;
-        const chat = this.state.chats[this.state.activeChatId];
+        const chat = this.state.chats[chatId];
         if (!chat) return false;
 
         const now = Date.now();
         if (chat.lastProactiveToolAt && (now - chat.lastProactiveToolAt) < minCooldownMs) return false;
+        if (chat.history.some((message) =>
+            message?.toolOffer?.type === type &&
+            ['pending', 'creating'].includes(message.toolOffer.status)
+        )) return false;
+        if (this.wasToolRecentlyDeclined(type, 30 * 60 * 1000, chatId)) return false;
 
         const currentCount = Array.isArray(chat.tools?.[type]) ? chat.tools[type].length : 0;
         const maxPerType = type === 'checklist' ? 4 : (type === 'follow_up_plan' ? 3 : 2);
         return currentCount < maxPerType;
     }
 
-    markProactiveToolUsed(type) {
-        const chat = this.state.chats[this.state.activeChatId];
+    hasActiveToolType(type, chatId = this.state.activeChatId) {
+        const chat = this.state.chats[chatId];
+        return Boolean(chat && Array.isArray(chat.tools?.[type]) && chat.tools[type].length > 0);
+    }
+
+    wasToolRecentlyDeclined(type, windowMs = 30 * 60 * 1000, chatId = this.state.activeChatId) {
+        const chat = this.state.chats[chatId];
+        if (!chat) return false;
+        const now = Date.now();
+        return chat.history.some((message) =>
+            message?.toolOffer?.type === type &&
+            message.toolOffer.status === 'dismissed' &&
+            now - Number(message.toolOffer.resolvedAt || 0) < windowMs
+        );
+    }
+
+    markProactiveToolUsed(type, chatId = this.state.activeChatId) {
+        const chat = this.state.chats[chatId];
         if (!chat) return;
 
         chat.lastProactiveToolAt = Date.now();
@@ -2794,12 +2989,34 @@ class ChatManager {
     }
 
     addOrUpdateToolInActiveChat(toolName, toolData) {
-        const chat = this.state.chats[this.state.activeChatId];
+        return this.addOrUpdateToolInChat(this.state.activeChatId, toolName, toolData);
+    }
+
+    addOrUpdateToolInChat(chatId, toolName, toolData) {
+        const chat = this.state.chats[chatId];
         if (!chat || !toolData) return;
 
         if (!chat.tools[toolName]) chat.tools[toolName] = [];
         chat.tools[toolName].push(toolData);
         this.saveState();
+    }
+
+    transitionToolOffer(chatId, messageIndex, action, createdToolId = null) {
+        const chat = this.state.chats[chatId];
+        const message = chat?.history?.[Number(messageIndex)];
+        if (!message?.toolOffer) return null;
+
+        const nextOffer = window.AURA_TOOL_ARTIFACTS.transitionToolOffer(
+            message.toolOffer,
+            action,
+            Date.now(),
+            createdToolId
+        );
+        if (!nextOffer) return null;
+
+        message.toolOffer = nextOffer;
+        this.saveState();
+        return { ...nextOffer };
     }
 
     logMoodToTracker(mood) {
@@ -2849,20 +3066,28 @@ class ChatManager {
         this.saveState();
     }
 
+    getChatTools(chatId = this.state.activeChatId) {
+        return this.state.chats[chatId]?.tools || {};
+    }
+
     getActiveChatTools() {
-        return this.state.chats[this.state.activeChatId]?.tools || {};
+        return this.getChatTools();
+    }
+
+    getChatHistory(chatId = this.state.activeChatId) {
+        return this.state.chats[chatId]?.history || [];
     }
 
     getActiveChatHistory() {
-        return this.state.chats[this.state.activeChatId]?.history || [];
+        return this.getChatHistory();
     }
 
     getActiveChatId() {
         return this.state.activeChatId;
     }
 
-    async preScreenMessage(message) {
-        if (!this.state.chats[this.state.activeChatId]?.isHeightenedAwareness) return 'OK';
+    async preScreenMessage(message, chatId = this.state.activeChatId) {
+        if (!this.state.chats[chatId]?.isHeightenedAwareness) return 'OK';
         const response = await _callLLM(
             PROMPTS.CRISIS_DETECTION.replace('%MESSAGE%', message),
             { callType: 'analysis' }
@@ -2870,8 +3095,9 @@ class ChatManager {
         return response?.includes('CRISIS') ? 'CRISIS' : 'OK';
     }
 
-    async triggerSafetyIntervention(message) {
-        this.addOrUpdateToolInActiveChat(
+    async triggerSafetyIntervention(message, chatId = this.state.activeChatId) {
+        this.addOrUpdateToolInChat(
+            chatId,
             'breathing_exercise',
             await createToolByType('breathing_exercise')
         );
@@ -2889,20 +3115,24 @@ class ChatManager {
             thinkingMode: 'balanced'
         });
         const recommendations = inferHighRiskSafetyRecommendations(message);
-        const finalized = (await finalizeAssistantReply(rawReply, message)) ||
+        const finalized = normalizeReplyWhitespace(
+            stripToolTags(await finalizeAssistantReply(rawReply, message))
+        ) ||
             "I hear you. Let's do a short breathing reset now. If you want, I can also look up nearby crisis resources.";
         return attachHighRiskSafetyRecommendations(finalized, recommendations);
     }
 
-    checkForWithdrawalPattern() {
-        const chat = this.state.chats[this.state.activeChatId];
+    checkForWithdrawalPattern(chatId = this.state.activeChatId) {
+        const chat = this.state.chats[chatId];
         if (!chat?.lastUserMessageTimestamp) return false;
 
-        const days = (Date.now() - chat.lastUserMessageTimestamp) / 86400000;
-        return days > 3 ? { days: Math.round(days), reason: 'inactive' } : false;
+        return window.AURA_TURN_POLICY.resolveReEngagement({
+            lastUserMessageAt: chat.lastUserMessageTimestamp,
+            lastReengagementAt: chat.lastReengagementAt
+        }) || false;
     }
 
-    async triggerReEngagement(pattern) {
+    async triggerReEngagement(pattern, chatId = this.state.activeChatId) {
         const prompt = PROMPTS.RE_ENGAGEMENT
             .replace('%DAYS%', pattern.days)
             .replace('%REASON%', pattern.reason);
@@ -2911,7 +3141,14 @@ class ChatManager {
             modelName: getBackgroundModelName(),
             callType: 'default'
         });
-        const cleaned = await finalizeAssistantReply(rawReply, '');
+        const cleaned = normalizeReplyWhitespace(
+            stripToolTags(await finalizeAssistantReply(rawReply, ''))
+        );
+        const chat = this.state.chats[chatId];
+        if (chat) {
+            chat.lastReengagementAt = Date.now();
+            this.saveState();
+        }
         return cleaned;
     }
 }
@@ -3251,12 +3488,12 @@ function buildMinimumEvidenceAnswer(userMessage, evidenceCatalog) {
         "I would treat this as something that needs a careful, plain-English answer rather than a quick guess. The safest read from the available information is that there are several moving parts, so the next step is to look at the pattern, timing, severity, and what changed recently.";
 }
 
-function removeImmediateAssistantEcho(reply) {
+function removeImmediateAssistantEcho(reply, chatId = chatManager.getActiveChatId()) {
     const artifacts = splitReplyArtifacts(reply);
     const body = normalizeReplyWhitespace(artifacts.body);
     if (!body || typeof window === 'undefined' || !window.chatManager) return reply;
 
-    const latestAi = getLatestMessageByRole(window.chatManager.getActiveChatHistory(), 'ai');
+    const latestAi = getLatestMessageByRole(window.chatManager.getChatHistory(chatId), 'ai');
     const previousBody = sanitizeContentForModelContext(latestAi?.content || '');
     if (!previousBody) return reply;
 
@@ -3283,15 +3520,19 @@ async function finalizeReplyWithProactiveTool(
     recommendation = null,
     route = 'GeneralFriendAgent',
     preferences = DEFAULT_RESPONSE_PREFERENCES,
-    turnSupport = null
+    turnSupport = null,
+    chatId = chatManager.getActiveChatId()
 ) {
-    const cleanReply = removeImmediateAssistantEcho(await finalizeAssistantReply(rawReply, userMessage));
+    const cleanReply = removeImmediateAssistantEcho(
+        await finalizeAssistantReply(rawReply, userMessage),
+        chatId
+    );
     if (!cleanReply) return null;
-    if (!recommendation) return cleanReply;
+    if (!recommendation) return normalizeReplyWhitespace(stripToolTags(cleanReply));
 
     const augmented = attachProactiveToolTag(cleanReply, recommendation);
-    if (!containsToolTag(cleanReply) && containsToolTag(augmented)) {
-        chatManager.markProactiveToolUsed(recommendation.type);
+    if (containsToolTag(augmented)) {
+        chatManager.markProactiveToolUsed(recommendation.type, chatId);
     }
 
     return augmented;
@@ -3304,7 +3545,8 @@ async function finalizeAgenticReply(
     highRiskRecommendations = [],
     route = 'GeneralFriendAgent',
     preferences = DEFAULT_RESPONSE_PREFERENCES,
-    turnSupport = null
+    turnSupport = null,
+    chatId = chatManager.getActiveChatId()
 ) {
     const cleanReply = await finalizeReplyWithProactiveTool(
         rawReply,
@@ -3312,7 +3554,8 @@ async function finalizeAgenticReply(
         proactiveRecommendation,
         route,
         preferences,
-        turnSupport
+        turnSupport,
+        chatId
     );
     if (!cleanReply) return null;
     return attachHighRiskSafetyRecommendations(cleanReply, highRiskRecommendations);
@@ -3328,25 +3571,36 @@ function buildAgentWorkflowLine(stages = []) {
 
 function runReceptionAgent(userMessage, chatHistory) {
     const baseRoute = deriveHeuristicRoute(userMessage);
-    const turnSupport = deriveHeuristicTurnSupport(userMessage, baseRoute, chatHistory);
+    const turnPolicy = window.AURA_TURN_POLICY.resolveTurnPolicy({
+        message: userMessage,
+        route: baseRoute,
+        history: chatHistory
+    });
+    const turnSupport = deriveHeuristicTurnSupport(
+        userMessage,
+        baseRoute,
+        chatHistory,
+        turnPolicy
+    );
     const contextualUserMessage = buildContextualUserMessage(userMessage, chatHistory, turnSupport);
     const route = deriveHeuristicRoute(contextualUserMessage);
 
     return {
         name: 'ReceptionAgent',
         baseRoute,
+        turnPolicy,
         turnSupport,
         contextualUserMessage,
         route
     };
 }
 
-function runPreferenceAgent(contextualUserMessage) {
+function runPreferenceAgent(contextualUserMessage, chatId = chatManager.getActiveChatId()) {
     const adaptivePreferences = deriveHeuristicResponsePreferences(
         contextualUserMessage,
-        chatManager.getActiveResponsePreferences()
+        chatManager.getResponsePreferencesForChat(chatId)
     );
-    chatManager.updateResponsePreferences(adaptivePreferences);
+    chatManager.updateResponsePreferences(adaptivePreferences, chatId);
 
     return {
         name: 'PreferenceAgent',
@@ -3401,15 +3655,48 @@ function runModelRoutingAgent({
     };
 }
 
-async function runToolUseAgent(userMessage, effectiveRoute, adaptivePreferences) {
-    const proactiveRecommendation = await inferProactiveToolOpportunity(
+async function runToolUseAgent(
+    userMessage,
+    effectiveRoute,
+    adaptivePreferences,
+    chatHistory,
+    baseTurnPolicy,
+    chatId = chatManager.getActiveChatId()
+) {
+    const candidate = await inferProactiveToolOpportunity(
         userMessage,
         effectiveRoute,
-        adaptivePreferences
+        adaptivePreferences,
+        chatId
     );
+    const explicitToolRequest = isExplicitToolCreationRequest(userMessage);
+    const immediateSupportNeed = Boolean(
+        candidate?.type === 'breathing_exercise' &&
+        window.AURA_TURN_POLICY.hasImmediateGroundingNeed(userMessage)
+    );
+    const turnPolicy = candidate
+        ? window.AURA_TURN_POLICY.resolveTurnPolicy({
+            message: userMessage,
+            route: effectiveRoute,
+            history: chatHistory,
+            toolCandidate: candidate,
+            explicitToolRequest,
+            immediateSupportNeed,
+            hasActiveTool: chatManager.hasActiveToolType(candidate.type, chatId),
+            recentlyDeclinedTool: chatManager.wasToolRecentlyDeclined(
+                candidate.type,
+                30 * 60 * 1000,
+                chatId
+            )
+        })
+        : baseTurnPolicy;
+    const proactiveRecommendation = candidate && turnPolicy?.tool?.mode !== 'none'
+        ? { ...candidate, delivery: turnPolicy.tool.mode }
+        : null;
 
     return {
         name: 'ToolUseAgent',
+        turnPolicy,
         proactiveRecommendation,
         proactiveToolGuidance: buildProactiveToolGuidance(proactiveRecommendation)
     };
@@ -3422,15 +3709,27 @@ async function runMemoryAgent({
     contextualUserMessage,
     userMessage,
     modelHistoryStr,
-    turnSupport
+    turnSupport,
+    turnPolicy,
+    chatId = chatManager.getActiveChatId()
 }) {
     const effectiveUserMessage = contextualUserMessage || userMessage;
+    const usePriorTurn = Boolean(turnPolicy?.continuity?.usePriorTurn);
 
     return {
         name: 'MemoryAgent',
-        vectorContext: await chatManager.searchVectorData(effectiveUserMessage),
-        historyStr: modelHistoryStr,
-        memoryContext: buildAuraMemoryContext(profileStr, conversationSummary),
+        vectorContext: await chatManager.searchRelevantVectorData(
+            userMessage,
+            turnPolicy,
+            chatId
+        ),
+        historyStr: usePriorTurn
+            ? modelHistoryStr
+            : 'Recent chat omitted because this turn begins a new topic.',
+        memoryContext: buildAuraMemoryContext(
+            profileStr,
+            usePriorTurn ? conversationSummary : ''
+        ),
         continuityContext: buildContinuityContext(chatHistory, effectiveUserMessage, turnSupport)
     };
 }
@@ -3439,14 +3738,20 @@ async function runResponseExampleAgent({
     contextualUserMessage,
     userMessage,
     modelDecision,
-    documentText
+    documentText,
+    turnPolicy,
+    proactiveRecommendation,
+    highRiskRecommendations
 }) {
     return {
         name: 'ResponseExampleAgent',
         exampleContext: await searchResponseExamples({
             message: contextualUserMessage || userMessage,
             modelDecision,
-            documentText
+            documentText,
+            turnPolicy,
+            proactiveRecommendation,
+            highRisk: Array.isArray(highRiskRecommendations) && highRiskRecommendations.length > 0
         })
     };
 }
@@ -3456,6 +3761,7 @@ function runTurnProfileAgent({
     sourceNeedDecision,
     adaptivePreferences,
     turnSupport,
+    turnPolicy,
     documentText,
     workflowStages
 }) {
@@ -3465,6 +3771,7 @@ function runTurnProfileAgent({
             sourceDecision: sourceNeedDecision,
             preferences: adaptivePreferences,
             turnSupport,
+            turnPolicy,
             documentText
         }),
         buildAgentWorkflowLine(workflowStages)
@@ -3476,18 +3783,36 @@ function runTurnProfileAgent({
     };
 }
 
-async function buildAuraAgentContext(userMessage, documentText = null) {
-    const profileStr = JSON.stringify(chatManager.getCombinedContentStore(), null, 2);
+async function buildAuraAgentContext(
+    userMessage,
+    documentText = null,
+    chatId = chatManager.getActiveChatId()
+) {
     const runtimeContext = getRuntimeContextString();
-    const chatHistory = chatManager.getActiveChatHistory();
-    const conversationSummary = await chatManager.getConversationSummary();
+    const storedChatHistory = chatManager.getChatHistory(chatId);
+    const chatHistory = window.AURA_TURN_POLICY.excludeCurrentTurn(
+        storedChatHistory,
+        userMessage,
+        { forceTrailingUser: true }
+    );
+    const conversationSummary = await chatManager.getConversationSummary(chatHistory, chatId);
     const modelHistoryStr = buildModelSafeHistoryString(chatHistory);
     const workflowStages = [];
 
     const reception = runReceptionAgent(userMessage, chatHistory);
     workflowStages.push(reception);
+    const profileStr = JSON.stringify(
+        window.AURA_TURN_POLICY.buildRelevantProfileBundle({
+            query: userMessage,
+            activeProfile: chatManager.getContentStoreForChat(chatId),
+            durableProfile: chatManager.getUserMemoryStore(),
+            includeDurable: isUserMemoryEnabled()
+        }),
+        null,
+        2
+    );
 
-    const preference = runPreferenceAgent(reception.contextualUserMessage);
+    const preference = runPreferenceAgent(reception.contextualUserMessage, chatId);
     workflowStages.push(preference);
 
     const evidence = runEvidenceDecisionAgent(reception.contextualUserMessage, reception.route);
@@ -3514,9 +3839,13 @@ async function buildAuraAgentContext(userMessage, documentText = null) {
     const toolUse = await runToolUseAgent(
         userMessage,
         evidence.effectiveRoute,
-        preference.adaptivePreferences
+        preference.adaptivePreferences,
+        chatHistory,
+        reception.turnPolicy,
+        chatId
     );
     workflowStages.push(toolUse);
+    const effectiveTurnPolicy = toolUse.turnPolicy || reception.turnPolicy;
 
     const [memory, responseExamples] = await Promise.all([
         runMemoryAgent({
@@ -3526,13 +3855,18 @@ async function buildAuraAgentContext(userMessage, documentText = null) {
             contextualUserMessage: reception.contextualUserMessage,
             userMessage,
             modelHistoryStr,
-            turnSupport: reception.turnSupport
+            turnSupport: reception.turnSupport,
+            turnPolicy: effectiveTurnPolicy,
+            chatId
         }),
         runResponseExampleAgent({
             contextualUserMessage: reception.contextualUserMessage,
             userMessage,
             modelDecision: modelRouting.modelDecision,
-            documentText
+            documentText,
+            turnPolicy: effectiveTurnPolicy,
+            proactiveRecommendation: toolUse.proactiveRecommendation,
+            highRiskRecommendations: safety.highRiskRecommendations
         })
     ]);
     workflowStages.push(memory);
@@ -3543,12 +3877,14 @@ async function buildAuraAgentContext(userMessage, documentText = null) {
         sourceNeedDecision: evidence.sourceNeedDecision,
         adaptivePreferences: preference.adaptivePreferences,
         turnSupport: reception.turnSupport,
+        turnPolicy: effectiveTurnPolicy,
         documentText,
         workflowStages
     });
     workflowStages.push(profile);
 
     return {
+        chatId,
         activeModel,
         modelDecision: modelRouting.modelDecision,
         responseSystemPrompt,
@@ -3558,6 +3894,7 @@ async function buildAuraAgentContext(userMessage, documentText = null) {
         conversationSummary,
         modelHistoryStr,
         baseRoute: reception.baseRoute,
+        turnPolicy: effectiveTurnPolicy,
         turnSupport: reception.turnSupport,
         contextualUserMessage: reception.contextualUserMessage,
         route: reception.route,
@@ -3673,7 +4010,8 @@ async function runKnowledgeComposerAgent(context) {
                     context.highRiskRecommendations,
                     context.effectiveRoute,
                     context.adaptivePreferences,
-                    context.turnSupport
+                    context.turnSupport,
+                    context.chatId
                 )) || attachHighRiskSafetyRecommendations(
                     buildHumanFallbackAnswer(context.contextualUserMessage, context.effectiveRoute),
                     context.highRiskRecommendations
@@ -3740,7 +4078,8 @@ async function runEvidenceComposerAgent(context) {
                 context.highRiskRecommendations,
                 context.effectiveRoute,
                 context.adaptivePreferences,
-                context.turnSupport
+                context.turnSupport,
+                context.chatId
             )) ||
             attachHighRiskSafetyRecommendations(
                 buildHumanFallbackAnswer(context.contextualUserMessage, context.effectiveRoute),
@@ -3784,23 +4123,27 @@ async function runDirectComposerAgent(context) {
         context.highRiskRecommendations,
         context.effectiveRoute,
         context.adaptivePreferences,
-        context.turnSupport
+        context.turnSupport,
+        context.chatId
     )) || attachHighRiskSafetyRecommendations(
         buildHumanFallbackAnswer(context.contextualUserMessage || context.originalUserMessage, context.effectiveRoute),
         context.highRiskRecommendations
     );
 }
 
-async function runToolFollowUpAgent(toolFollowUp) {
+async function runToolFollowUpAgent(
+    toolFollowUp,
+    chatId = chatManager.getActiveChatId()
+) {
     const activeModel = getBackgroundModelName();
     const responseSystemPrompt = buildResponseSystemPrompt(getEffectiveSystemPrompt(), activeModel);
-    const profileStr = JSON.stringify(chatManager.getCombinedContentStore(), null, 2);
+    const profileStr = JSON.stringify(chatManager.getCombinedContentStore(chatId), null, 2);
     const runtimeContext = getRuntimeContextString();
-    const chatHistory = chatManager.getActiveChatHistory();
-    const conversationSummary = await chatManager.getConversationSummary();
+    const chatHistory = chatManager.getChatHistory(chatId);
+    const conversationSummary = await chatManager.getConversationSummary(null, chatId);
     const modelHistoryStr = buildModelSafeHistoryString(chatHistory);
     const turnSupport = deriveHeuristicTurnSupport('', 'GeneralFriendAgent', chatHistory);
-    const toolPreferences = chatManager.getActiveResponsePreferences();
+    const toolPreferences = chatManager.getResponsePreferencesForChat(chatId);
     const turnProfile = [
         buildAuraTurnProfile({
             route: 'GeneralFriendAgent',
@@ -3838,13 +4181,18 @@ async function runToolFollowUpAgent(toolFollowUp) {
         null,
         'GeneralFriendAgent',
         toolPreferences,
-        turnSupport
+        turnSupport,
+        chatId
     )) ||
         "Nice progress. If you want, we can build on this and handle the next step together.";
 }
 
-async function runAuraAgentPipeline(userMessage, documentText = null) {
-    const context = await buildAuraAgentContext(userMessage, documentText);
+async function runAuraAgentPipeline(
+    userMessage,
+    documentText = null,
+    chatId = chatManager.getActiveChatId()
+) {
+    const context = await buildAuraAgentContext(userMessage, documentText, chatId);
     context.originalUserMessage = userMessage;
 
     const knowledgeReply = await runKnowledgeComposerAgent(context);
@@ -3856,7 +4204,12 @@ async function runAuraAgentPipeline(userMessage, documentText = null) {
     return runDirectComposerAgent(context);
 }
 
-async function getOllamaResponse(userMessage, toolFollowUp = null, documentText = null) {
-    if (toolFollowUp) return runToolFollowUpAgent(toolFollowUp);
-    return runAuraAgentPipeline(userMessage, documentText);
+async function getOllamaResponse(
+    userMessage,
+    toolFollowUp = null,
+    documentText = null,
+    chatId = chatManager.getActiveChatId()
+) {
+    if (toolFollowUp) return runToolFollowUpAgent(toolFollowUp, chatId);
+    return runAuraAgentPipeline(userMessage, documentText, chatId);
 }

@@ -205,7 +205,7 @@ Reasoning traces are not displayed or stored. Medical responses remain informati
 Aura keeps reusable response examples separate from personal context inside the same ChromaDB server:
 
 - `aura_long_term_memory` contains user-specific conversation memory.
-- `aura_response_examples_v1` contains approved synthetic response-pattern examples.
+- `aura_response_examples_v1` contains approved synthetic medical and companion response-pattern examples.
 
 Seed the example collection after ChromaDB and Ollama are running:
 
@@ -213,9 +213,9 @@ Seed the example collection after ChromaDB and Ollama are running:
 npm run examples:seed
 ```
 
-The seed command validates and upserts the approved examples from `contents/examples/medical-response-examples.json`. It does not read or modify personal memory. Evaluation cases in `contents/examples/medical-evaluation-cases.json` are never seeded.
+The seed command validates and upserts 68 approved examples from `contents/examples/medical-response-examples.json` and `contents/examples/companion-response-examples.json`. It does not read or modify personal memory. Evaluation cases in `contents/examples/medical-evaluation-cases.json` and `contents/examples/companion-evaluation-cases.json` are never seeded.
 
-For non-emergency medical turns, Aura retrieves up to three examples filtered by domain, task, risk, and model family. Example retrieval runs in parallel with personal-memory retrieval. Examples guide response structure and safety behavior only; they are explicitly separated from user facts and external evidence in the prompt. Acute emergency turns skip example retrieval.
+For non-emergency medical turns, Aura retrieves up to three examples filtered by domain, task, risk, and model family. Selected companion turns retrieve up to two examples for emotional presence, supportive disagreement, clarification, topic transitions, repair, and good tool/no-tool behavior. Example retrieval runs in parallel with personal-memory retrieval. Examples guide response structure and safety behavior only; they are explicitly separated from user facts and external evidence in the prompt. High-risk turns skip example retrieval.
 
 ## Notes
 

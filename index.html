@@ -10,39 +10,10 @@
     <script src="https://cdn.jsdelivr.net/npm/dompurify/dist/purify.min.js"></script>
     <link rel="stylesheet" href="css/style.css">
 </head>
-<body class="font-sans text-gray-200">
+<body class="font-sans">
+    <a class="skip-link" href="#userInput">Skip to message composer</a>
     <div class="browser-shell">
         <div class="browser-frame">
-            <header class="browser-toolbar" aria-label="Workspace chrome">
-                <div class="browser-toolbar-left">
-                    <div class="browser-dots" aria-hidden="true">
-                        <span class="dot dot-pink"></span>
-                        <span class="dot dot-blue"></span>
-                        <span class="dot dot-neutral"></span>
-                    </div>
-                    <div class="browser-nav" aria-hidden="true">
-                        <button type="button" class="chrome-icon-button">
-                            <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8"><path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7" /></svg>
-                        </button>
-                        <button type="button" class="chrome-icon-button">
-                            <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7" /></svg>
-                        </button>
-                    </div>
-                </div>
-                <div class="browser-address">
-                    <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 address-icon" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8"><path stroke-linecap="round" stroke-linejoin="round" d="M16.5 10.5V7.875a4.125 4.125 0 10-8.25 0V10.5m-.75 0h9a.75.75 0 01.75.75v7.5a.75.75 0 01-.75.75h-9a.75.75 0 01-.75-.75v-7.5a.75.75 0 01.75-.75z" /></svg>
-                    <span class="browser-address-text">aura.workspace</span>
-                </div>
-                <div class="browser-toolbar-right" aria-hidden="true">
-                    <button type="button" class="chrome-icon-button">
-                        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8"><path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12a7.5 7.5 0 1015 0 7.5 7.5 0 00-15 0z" /><path stroke-linecap="round" stroke-linejoin="round" d="M12 8.25v4.5l3 1.5" /></svg>
-                        </button>
-                    <button type="button" class="chrome-icon-button">
-                        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8"><path stroke-linecap="round" stroke-linejoin="round" d="M7.5 12h9m-4.5-4.5L16.5 12 12 16.5" /><path stroke-linecap="round" stroke-linejoin="round" d="M21 15v3a2.25 2.25 0 01-2.25 2.25H5.25A2.25 2.25 0 013 18v-3" /></svg>
-                    </button>
-                </div>
-            </header>
-
             <div class="app-shell">
                 <aside id="chatSidebar" data-liquid class="side-rail liquid-glass liquid-panel">
                     <div class="rail-brand">
@@ -53,19 +24,19 @@
                     </div>
 
                     <div class="rail-actions">
-                        <button id="insightsButton" title="Aura's Insights" class="rail-button liquid-icon-button transition duration-200">
+                        <button type="button" id="insightsButton" title="Context Notes" aria-label="Open context notes" class="rail-button liquid-icon-button transition duration-200">
                             <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
                         </button>
-                        <button id="toolsButton" title="Tools" class="hidden rail-button liquid-icon-button transition duration-200">
+                        <button type="button" id="toolsButton" title="Tools" aria-label="Open Toolbox" class="hidden rail-button liquid-icon-button transition duration-200">
                             <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" /></svg>
                         </button>
-                        <button id="settingsButton" title="Settings" class="rail-button liquid-icon-button transition duration-200">
+                        <button type="button" id="settingsButton" title="Settings" aria-label="Open Settings" class="rail-button liquid-icon-button transition duration-200">
                             <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826 3.31 2.37-2.37.525.322.956.51 1.066 1.065z" /><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
                         </button>
                     </div>
 
                     <div class="rail-footer">
-                        <button id="themeToggleButton" title="Toggle Light Or Dark Mode" class="theme-toggle liquid-control transition duration-200" aria-label="Toggle light or dark mode">
+                        <button type="button" id="themeToggleButton" title="Toggle Light Or Dark Mode" class="theme-toggle liquid-control transition duration-200" aria-label="Toggle light or dark mode">
                             <span class="theme-toggle-label">Light</span>
                         </button>
                         <div class="rail-avatar" aria-hidden="true">A</div>
@@ -73,51 +44,61 @@
                 </aside>
 
                 <section class="workspace-main">
+                    <header class="app-header">
+                        <div>
+                            <div class="app-eyebrow">Calm focus</div>
+                            <h1>Aura</h1>
+                        </div>
+                        <div class="app-header-controls">
+                            <span class="local-status"><span aria-hidden="true"></span>Memory stored on this device</span>
+                            <label for="composerThinkingMode" class="sr-only">Thinking mode</label>
+                            <select id="composerThinkingMode" class="composer-thinking-select transition duration-200" aria-label="Thinking mode" title="Thinking mode">
+                                <option value="auto">Auto</option>
+                                <option value="fast">Fast</option>
+                                <option value="balanced">Balanced</option>
+                                <option value="deep">Deep</option>
+                            </select>
+                        </div>
+                    </header>
+
                     <div class="tab-strip liquid-glass liquid-panel">
                         <button type="button" id="newChatButton" class="tab-create-button liquid-primary-button transition duration-200" aria-label="Start New Chat" title="Start New Chat">
                             <span>New Chat</span>
                         </button>
-                        <div id="chatList" class="chat-tab-list" aria-label="Chat tabs"></div>
+                        <div id="chatList" class="chat-tab-list" role="tablist" aria-label="Conversations"></div>
                     </div>
 
-                    <div class="workspace-stage liquid-glass liquid-panel">
-                        <main id="chatMessages" class="chat-thread"></main>
+                    <main class="workspace-stage liquid-glass liquid-panel">
+                        <div id="chatMessages" class="chat-thread" role="log" aria-live="polite" aria-relevant="additions text" aria-label="Conversation with Aura"></div>
 
                         <footer data-liquid class="floating-input-area composer-shell">
                             <div id="editMessageIndicator" class="hidden items-center text-sm rounded-2xl px-4 py-2 mb-2 max-w-max"></div>
                             <div id="fileAttachmentIndicator" class="hidden items-center text-sm rounded-full px-4 py-1 mb-2 max-w-max"></div>
                             <div class="composer-row">
-                                <label for="fileInput" id="fileUploadButton" title="Attach document" class="composer-icon-button liquid-icon-button transition duration-200 cursor-pointer">
+                                <button type="button" id="fileUploadButton" title="Attach document" aria-label="Attach a text or markdown document" class="composer-icon-button liquid-icon-button transition duration-200">
                                     <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                                         <path stroke-linecap="round" stroke-linejoin="round" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
                                     </svg>
-                                </label>
+                                </button>
                                 <input type="file" id="fileInput" class="hidden" accept=".txt,.md" aria-label="Attach a text or markdown document" title="Attach a document">
 
-                                <label for="composerThinkingMode" class="sr-only">Thinking mode</label>
-                                <select id="composerThinkingMode" class="composer-thinking-select transition duration-200" aria-label="Thinking mode" title="Thinking mode">
-                                    <option value="auto">Auto</option>
-                                    <option value="fast">Fast</option>
-                                    <option value="balanced">Balanced</option>
-                                    <option value="deep">Deep</option>
-                                </select>
-
-                                <input id="userInput" type="text" placeholder="Ask Aura something..." aria-label="Type your message to Aura" title="Type your message" class="flex-1 p-3 bg-transparent text-gray-100 placeholder-gray-400 focus:outline-none transition duration-200">
+                                <textarea id="userInput" rows="1" placeholder="Message Aura…" aria-label="Type your message to Aura" title="Type your message" class="flex-1 p-3 bg-transparent text-gray-100 placeholder-gray-400 focus:outline-none transition duration-200"></textarea>
 
                                 <button type="button" id="sendButton" class="liquid-send-button transition duration-200" aria-label="Send Message" title="Send Message">
                                     <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path d="M3.105 3.105a1.25 1.25 0 011.367-.271l11.25 5a1.25 1.25 0 010 2.332l-11.25 5A1.25 1.25 0 013 14.023V11.12a1.25 1.25 0 011.035-1.232l4.229-.745-4.23-.745A1.25 1.25 0 013 7.165V4.26a1.25 1.25 0 01.105-1.155z" /></svg>
                                 </button>
                             </div>
+                            <div class="composer-hint">Enter to send · Shift+Enter for a new line</div>
                         </footer>
-                    </div>
+                    </main>
                 </section>
             </div>
         </div>
     </div>
 
-    <div id="settingsModal" class="hidden fixed inset-0 z-50 overflow-y-auto bg-black bg-opacity-75 flex items-center justify-center">
-        <div data-liquid class="relative liquid-glass liquid-panel rounded-3xl p-8 w-full max-w-lg shadow-2xl border border-white/10">
-            <h3 class="text-2xl font-bold mb-6 text-gray-100">Settings</h3>
+    <div id="settingsModal" class="hidden fixed inset-0 z-50 overflow-y-auto bg-black bg-opacity-75 flex items-center justify-center p-4">
+        <div data-liquid role="dialog" aria-modal="true" aria-labelledby="settingsTitle" tabindex="-1" class="modal-panel relative liquid-glass liquid-panel rounded-3xl p-8 w-full max-w-lg shadow-2xl border border-white/10">
+            <h3 id="settingsTitle" class="text-2xl font-bold mb-6 text-gray-100">Settings</h3>
             <div class="space-y-6">
                 <div class="space-y-3 rounded-2xl border border-white/10 p-4">
                     <div>
@@ -155,21 +136,26 @@
                         <textarea id="advancedPromptTextarea" rows="5" class="mt-3 block w-full p-3 bg-gray-900/50 rounded-xl focus:outline-none focus:ring-2 focus:ring-pink-500" placeholder="Optional developer override for Aura's base persona."></textarea>
                     </details>
                 </div>
-                <div>
-                    <label for="modelSelectDropdown" class="block text-sm font-medium text-gray-300">Model Routing</label>
-                    <select id="modelSelectDropdown" class="mt-1 block w-full p-3 bg-gray-900/50 rounded-xl focus:outline-none focus:ring-2 focus:ring-pink-500"></select>
-                    <p class="text-xs text-gray-400 mt-2">Auto may send a turn to GPT-OSS Cloud, MedGemma, or both. Choosing a specific model disables automatic switching except for urgent safety fallback.</p>
-                </div>
-                <div>
-                    <label for="thinkingModeDropdown" class="block text-sm font-medium text-gray-300">Thinking Mode</label>
-                    <select id="thinkingModeDropdown" class="mt-1 block w-full p-3 bg-gray-900/50 rounded-xl focus:outline-none focus:ring-2 focus:ring-pink-500">
-                        <option value="auto">Auto - match effort to each task</option>
-                        <option value="fast">Fast - quicker everyday replies</option>
-                        <option value="balanced">Balanced - default effort</option>
-                        <option value="deep">Deep - more careful reasoning</option>
-                    </select>
-                    <p id="thinkingModeStatusText" class="text-xs text-gray-400 mt-2">Balanced gives Aura normal depth without slowing every answer down.</p>
-                </div>
+                <details class="advanced-model-panel">
+                    <summary>Advanced model settings</summary>
+                    <div class="advanced-model-content">
+                        <div>
+                            <label for="modelSelectDropdown" class="block text-sm font-medium text-gray-300">Model Routing</label>
+                            <select id="modelSelectDropdown" class="mt-1 block w-full p-3 bg-gray-900/50 rounded-xl focus:outline-none focus:ring-2 focus:ring-pink-500"></select>
+                            <p class="text-xs text-gray-400 mt-2">Auto may use GPT-OSS Cloud, MedGemma, or both. A specific model disables automatic switching except for urgent safety fallback.</p>
+                        </div>
+                        <div>
+                            <label for="thinkingModeDropdown" class="block text-sm font-medium text-gray-300">Thinking Mode</label>
+                            <select id="thinkingModeDropdown" class="mt-1 block w-full p-3 bg-gray-900/50 rounded-xl focus:outline-none focus:ring-2 focus:ring-pink-500">
+                                <option value="auto">Auto - match effort to each task</option>
+                                <option value="fast">Fast - quicker everyday replies</option>
+                                <option value="balanced">Balanced - default effort</option>
+                                <option value="deep">Deep - more careful reasoning</option>
+                            </select>
+                            <p id="thinkingModeStatusText" class="text-xs text-gray-400 mt-2">Balanced gives Aura normal depth without slowing every answer down.</p>
+                        </div>
+                    </div>
+                </details>
                 <div class="space-y-3">
                     <div class="flex items-start justify-between gap-4">
                         <div>
@@ -204,36 +190,38 @@
                 </div>
             </div>
             <div class="mt-8 flex justify-end space-x-4">
-                <button id="cancelSettingsButton" class="px-4 py-2 rounded-xl transition duration-200">Cancel</button>
-                <button id="resetSettingsButton" class="px-4 py-2 rounded-xl transition duration-200">Reset</button>
-                <button id="saveSettingsButton" class="px-4 py-2 font-semibold rounded-xl transition duration-200">Save</button>
+                <button type="button" id="cancelSettingsButton" class="px-4 py-2 rounded-xl transition duration-200">Cancel</button>
+                <button type="button" id="resetSettingsButton" class="px-4 py-2 rounded-xl transition duration-200">Reset</button>
+                <button type="button" id="saveSettingsButton" class="px-4 py-2 font-semibold rounded-xl transition duration-200">Save</button>
             </div>
         </div>
     </div>
 
-    <div id="toolsModal" class="hidden fixed inset-0 z-50 overflow-y-auto bg-black bg-opacity-75 flex items-center justify-center">
-        <div data-liquid class="relative liquid-glass liquid-panel rounded-3xl p-8 w-full max-w-4xl shadow-2xl border border-white/10">
-            <h3 class="text-2xl font-bold mb-6 text-gray-100">Your Toolbox</h3>
+    <div id="toolsModal" class="hidden fixed inset-0 z-50 overflow-y-auto bg-black bg-opacity-75 flex items-center justify-center p-4">
+        <div data-liquid role="dialog" aria-modal="true" aria-labelledby="toolsTitle" tabindex="-1" class="modal-panel relative liquid-glass liquid-panel rounded-3xl p-8 w-full max-w-4xl shadow-2xl border border-white/10">
+            <h3 id="toolsTitle" class="text-2xl font-bold mb-6 text-gray-100">Your Toolbox</h3>
             <div id="toolsModalContent" class="space-y-6"></div>
             <div class="mt-8 flex justify-end">
-                <button id="closeToolsButton" class="px-4 py-2 rounded-xl transition duration-200">Close</button>
+                <button type="button" id="closeToolsButton" class="px-4 py-2 rounded-xl transition duration-200">Close</button>
             </div>
         </div>
     </div>
 
-    <div id="insightsModal" class="hidden fixed inset-0 z-50 overflow-y-auto bg-black bg-opacity-75 flex items-center justify-center">
-        <div data-liquid class="relative liquid-glass liquid-panel rounded-3xl p-8 w-full max-w-2xl shadow-2xl border border-white/10">
-            <h3 class="text-2xl font-bold mb-2 text-gray-100">Aura's Behavioral Insights</h3>
-            <p class="text-sm text-gray-400 mb-6">This is Aura's dynamic understanding of you. It updates automatically as you chat, running locally and privately on your machine.</p>
+    <div id="insightsModal" class="hidden fixed inset-0 z-50 overflow-y-auto bg-black bg-opacity-75 flex items-center justify-center p-4">
+        <div data-liquid role="dialog" aria-modal="true" aria-labelledby="insightsTitle" tabindex="-1" class="modal-panel relative liquid-glass liquid-panel rounded-3xl p-8 w-full max-w-2xl shadow-2xl border border-white/10">
+            <h3 id="insightsTitle" class="text-2xl font-bold mb-2 text-gray-100">Aura's Context Notes</h3>
+            <p class="text-sm text-gray-400 mb-6">A compact view of the preferences and patterns Aura may use. It updates as you chat and is stored with your Aura data on this device.</p>
             <div id="insightsContent" class="space-y-4 text-gray-200"></div>
             <div class="mt-8 flex justify-end">
-                <button id="closeInsightsButton" class="px-4 py-2 rounded-xl transition duration-200">Close</button>
+                <button type="button" id="closeInsightsButton" class="px-4 py-2 rounded-xl transition duration-200">Close</button>
             </div>
         </div>
     </div>
 
     <script src="js/config.js"></script>
     <script src="js/model-routing.js"></script>
+    <script src="js/turn-policy.js"></script>
+    <script src="js/tool-artifacts.js"></script>
     <script src="js/chat-logic.js"></script>
     <script src="js/ui.js"></script>
     <script src="js/app.js"></script>
