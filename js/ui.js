@@ -715,12 +715,26 @@ function closeSettingsModal() { deactivateModal(settingsModal); }
 function openInsightsModal() {
     const modal = document.getElementById('insightsModal');
     const container = document.getElementById('insightsContent');
-    const store = window.chatManager ? window.chatManager.getActiveContentStore() : {};
+    const personalIntelligenceActive = Boolean(
+        window.chatManager?.isPersonalIntelligenceActive()
+    );
+    const personalIntelligenceState = window.chatManager
+        ? window.chatManager.getPersonalIntelligenceState()
+        : 'not_enabled';
+    const store = window.chatManager
+        ? (personalIntelligenceActive
+            ? window.chatManager.getActiveContentStore()
+            : window.chatManager.getInferenceContentStore())
+        : {};
     const userStore = window.chatManager ? window.chatManager.getUserMemoryStore() : {};
-    const userMemoryEnabled = localStorage.getItem(STORAGE_KEYS.USER_MEMORY_ENABLED) === 'true';
     const prefs = window.chatManager
-        ? window.chatManager.getActiveResponsePreferences()
+        ? window.chatManager.getInferenceResponsePreferences()
         : (store.responsePreferences || {});
+    const intelligenceStatusCopy = {
+        active: 'Active. Approved profile context may be used across chats.',
+        paused: 'Paused. Stored profile context is retained but is not used in replies or new learning.',
+        not_enabled: 'Not enabled. Aura uses only the current chat and explicit settings.'
+    }[personalIntelligenceState] || 'Not enabled. Aura uses only the current chat and explicit settings.';
 
     const renderList = (arr, emptyMsg) => {
         if (!arr || arr.length === 0) {
@@ -757,9 +771,14 @@ function openInsightsModal() {
                 <p class="text-sm">Directness: ${escapeHTML(prefs.directnessLevel || 'balanced')}</p>
             </div>
             <div class="bg-gray-800 p-4 rounded-lg border border-cyan-900">
-                <h4 class="text-cyan-300 font-semibold mb-2">Persistent Companion Memory</h4>
-                <p class="text-sm mb-2">${userMemoryEnabled ? 'Enabled across chats on this device.' : 'Disabled.'}</p>
-                ${renderList(userStore.behavioralFacts, "No durable cross-chat memory stored yet.")}
+                <h4 class="text-cyan-300 font-semibold mb-2">Personal Intelligence</h4>
+                <p class="text-sm mb-2">${escapeHTML(intelligenceStatusCopy)}</p>
+                ${renderList(
+                    userStore.behavioralFacts,
+                    personalIntelligenceActive
+                        ? "No durable cross-chat memory stored yet."
+                        : "No retained profile memory to show."
+                )}
             </div>
         </div>
     `;

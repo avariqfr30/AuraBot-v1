@@ -4,7 +4,7 @@
     if (root) root.AURA_MODEL_ROUTING = api;
 })(typeof globalThis !== 'undefined' ? globalThis : this, function createModelRouting() {
     const AUTO_MODEL_PREFERENCE = 'auto';
-    const MEDICAL_TERMS = /\b(symptoms?|diagnos(?:is|e)|treatment|medication|medicine|dose|dosage|side effects?|interaction|lab(?:s| report)?|blood test|imaging|x-?ray|mri|ct scan|clinical|medical|patient|doctor|physician|pharmacist|disease|disorder|condition|syndrome|infection|injury|surgery|pain|fever|headache|migraine|nausea|vomit|rash|allerg\w*|diabet\w*|cancer|asthma|antibiotic|antidepressant|vaccine|blood pressure|heart rate|hba1c|glucose|cholesterol)\b/i;
+    const MEDICAL_TERMS = /\b(symptoms?|diagnos(?:is|e)|treatment|medication|medicine|dose|dosage|side effects?|interaction|lab(?:s| report)?|blood test|imaging|x-?ray|mri|ct scan|clinical|medical|patient|doctor|physician|pharmacist|disease|disorder|condition|syndrome|infection|injury|surgery|pain|fever|headache|migraine|nausea|vomit|rash|allerg\w*|diabet\w*|cancer|asthma|antibiotic|antidepressant|vaccine|blood pressure|hypertension|kidney|renal|liver|heart rate|hba1c|glucose|cholesterol)\b/i;
     const MEDICAL_DOCUMENT_TERMS = /\b(extract|interpret|summarize|review|values?|units?|abnormal|reference range|report|record|ehr|lab)\b/i;
     const COMPLEX_MEDICAL_TERMS = /\b(diagnos(?:is|e)|treatment plan|drug interaction|contraindication|multiple medications|differential|prognosis|severe|worsening|pregnan|child|infant)\b/i;
     const FRESHNESS_TERMS = /\b(current|latest|today|recent|guideline|approved|recall|interaction database)\b/i;

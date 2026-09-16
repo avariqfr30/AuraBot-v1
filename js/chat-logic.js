@@ -8,6 +8,7 @@ const STORAGE_KEYS = {
     LOCATION_CONTEXT: 'aura_location_context',
     USER_MEMORY_ENABLED: 'aura_user_memory_enabled',
     EXPERIENCE_STYLE: 'aura_experience_style',
+    RESPONSE_DETAIL: 'aura_response_detail',
     THINKING_MODE: 'aura_thinking_mode',
     FEEDBACK_PROFILE_ID: 'aura_feedback_profile_id'
 };
@@ -68,6 +69,10 @@ const analysisCaches = {
     evidenceRewrite: new Map(),
     turnSupport: new Map()
 };
+
+function clearAnalysisCaches() {
+    Object.keys(analysisCaches).forEach((cacheName) => analysisCaches[cacheName].clear());
+}
 
 const DEFAULT_RESPONSE_PREFERENCES = {
     detailLevel: 'balanced',
@@ -421,6 +426,9 @@ Return ONLY the JSON object with this exact shape:
 Rules:
 - Store only durable preferences, recurring patterns, and stable support needs.
 - Do not store one-off topics unless they are clearly recurring or personally important.
+- Do not automatically add sensitive health/mental-health conditions, symptoms, medications,
+  trauma/abuse, sexuality, finances, precise location, legal matters, or third-party private details.
+- Already-approved stored entries may be preserved as-is, but do not expand them automatically.
 - Do not invent facts.
 - No markdown, no commentary, no code fences.`,
 
@@ -1292,7 +1300,10 @@ function sanitizeResponsePreferences(candidate, fallback = DEFAULT_RESPONSE_PREF
 }
 
 function getExperienceStyleKey(value = null) {
-    const raw = String(value || localStorage.getItem(STORAGE_KEYS.EXPERIENCE_STYLE) || 'balanced').trim();
+    const storedStyle = window.chatManager
+        ? window.chatManager.getProfileSetting(STORAGE_KEYS.EXPERIENCE_STYLE, 'balanced')
+        : localStorage.getItem(STORAGE_KEYS.EXPERIENCE_STYLE);
+    const raw = String(value || storedStyle || 'balanced').trim();
     return Object.prototype.hasOwnProperty.call(EXPERIENCE_STYLE_PRESETS, raw) ? raw : 'balanced';
 }
 
@@ -1300,12 +1311,22 @@ function getExperienceStylePreset(style = null) {
     return EXPERIENCE_STYLE_PRESETS[getExperienceStyleKey(style)] || EXPERIENCE_STYLE_PRESETS.balanced;
 }
 
-function getStoredExperienceResponsePreferences() {
+function getExplicitResponsePreferenceOverrides() {
     const preset = getExperienceStylePreset();
+    const configuredDetail = window.chatManager
+        ? window.chatManager.getProfileSetting(STORAGE_KEYS.RESPONSE_DETAIL, null)
+        : null;
+    return {
+        ...preset.preferences,
+        ...(DETAIL_LEVELS.has(configuredDetail) ? { detailLevel: configuredDetail } : {})
+    };
+}
+
+function getStoredExperienceResponsePreferences() {
     return sanitizeResponsePreferences(
         {
             ...DEFAULT_RESPONSE_PREFERENCES,
-            ...preset.preferences
+            ...getExplicitResponsePreferenceOverrides()
         },
         DEFAULT_RESPONSE_PREFERENCES
     );
@@ -1328,13 +1349,9 @@ function buildExperienceStyleContext(style = null) {
 
 function applyExperienceStyle(style) {
     const key = getExperienceStyleKey(style);
-    localStorage.setItem(STORAGE_KEYS.EXPERIENCE_STYLE, key);
 
     if (typeof window !== 'undefined' && window.chatManager) {
-        window.chatManager.updateResponsePreferences({
-            ...window.chatManager.getActiveResponsePreferences(),
-            ...getExperienceStylePreset(key).preferences
-        });
+        window.chatManager.setProfileSetting(STORAGE_KEYS.EXPERIENCE_STYLE, key);
     }
 
     return key;
@@ -1552,7 +1569,7 @@ function buildConversationSummaryContext(summaryData) {
 }
 
 function isUserMemoryEnabled() {
-    return localStorage.getItem(STORAGE_KEYS.USER_MEMORY_ENABLED) === 'true';
+    return Boolean(window.chatManager?.isPersonalIntelligenceActive());
 }
 
 function mergeUniqueStrings(...lists) {
@@ -2368,8 +2385,13 @@ function formatLocationContext(locationContext) {
 function getRuntimeContextString() {
     const now = new Date();
     const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'Unknown';
-    const locationEnabled = localStorage.getItem(STORAGE_KEYS.LOCATION_ENABLED) === 'true';
-    const locationContext = safeParseJson(localStorage.getItem(STORAGE_KEYS.LOCATION_CONTEXT), null);
+    const locationEnabled = Boolean(
+        window.chatManager?.getProfileSetting(STORAGE_KEYS.LOCATION_ENABLED, false)
+    );
+    const locationContext = window.chatManager?.getProfileSetting(
+        STORAGE_KEYS.LOCATION_CONTEXT,
+        null
+    );
 
     return [
         '[System Context]',
@@ -2477,6 +2499,9 @@ async function searchResponseExamples({
 } = {}) {
     const classification = modelDecision?.classification;
     if (!classification || highRisk || classification.risk === 'high') return '';
+    const sourceProfileId = chatManager.getActiveProfileId();
+    const sourceContextEpoch = chatManager.getPersonalContextEpoch();
+    const personalSearchActive = chatManager.isPersonalIntelligenceActive();
 
     try {
         const isMedical = classification.domain === 'medical';
@@ -2485,7 +2510,7 @@ async function searchResponseExamples({
             ? deriveResponseExampleTask(message, classification, documentText)
             : deriveCompanionExampleTask(message, turnPolicy, proactiveRecommendation);
         const modelFamily = window.AURA_MODEL_ROUTING.getModelFamily(modelDecision.primaryModel);
-        const activePersonalIds = isMedical
+        const activePersonalIds = isMedical || !personalSearchActive
             ? []
             : chatManager.getActivePersonalExampleIds();
         const curatedRequest = task
@@ -2500,7 +2525,7 @@ async function searchResponseExamples({
             : Promise.resolve({ examples: [] });
         const personalRequest = activePersonalIds.length
             ? postJson(API_ENDPOINTS.searchPersonalExamples, {
-                profileId: chatManager.getFeedbackProfileId(),
+                profileId: sourceProfileId,
                 query: message,
                 modelFamily,
                 limit: 2
@@ -2513,7 +2538,11 @@ async function searchResponseExamples({
         const curatedExamples = curatedResult.status === 'fulfilled'
             ? (curatedResult.value.examples || [])
             : [];
-        const personalExamples = personalResult.status === 'fulfilled'
+        const personalResultsStillValid = personalSearchActive &&
+            chatManager.isPersonalIntelligenceActive() &&
+            sourceProfileId === chatManager.getActiveProfileId() &&
+            sourceContextEpoch === chatManager.getPersonalContextEpoch();
+        const personalExamples = personalResultsStillValid && personalResult.status === 'fulfilled'
             ? (personalResult.value.examples || []).filter((entry) => (
                 activePersonalIds.includes(entry.id)
             ))
@@ -2628,15 +2657,6 @@ function createLocalIdentifier(prefix = 'local') {
     return `${prefix}-${randomPart}`;
 }
 
-function getOrCreateFeedbackProfileId() {
-    const stored = String(localStorage.getItem(STORAGE_KEYS.FEEDBACK_PROFILE_ID) || '').trim();
-    if (/^profile-[a-z0-9_-]{8,120}$/i.test(stored)) return stored;
-
-    const profileId = createLocalIdentifier('profile');
-    localStorage.setItem(STORAGE_KEYS.FEEDBACK_PROFILE_ID, profileId);
-    return profileId;
-}
-
 function buildInferenceRouteSnapshot(modelDecision, route) {
     const classification = modelDecision?.classification || {};
     return window.AURA_FEEDBACK.normalizeRouteSnapshot({
@@ -2654,9 +2674,13 @@ function buildInferenceRouteSnapshot(modelDecision, route) {
 
 class ChatManager {
     constructor() {
+        this.profileManager = window.AURA_PERSONAL_INTELLIGENCE.createManager(localStorage);
         this.pendingResponseMetadata = new Map();
+        this.pendingVectorWrites = new Map();
+        this.personalContextEpoch = 0;
         this.state = this.ensureStateShape(this.loadState() || this.getInitialState());
         if (!this.state.activeChatId) this.createNewChat();
+        this.saveState();
     }
 
     getInitialState() {
@@ -2714,6 +2738,35 @@ class ChatManager {
             chat.contextSummaryAnchor = typeof chat.contextSummaryAnchor === 'string' ? chat.contextSummaryAnchor : '';
         });
         safeState.localContentStore = globalFallbackStore;
+        const feedbackState = safeState.feedbackLearning &&
+            typeof safeState.feedbackLearning === 'object'
+            ? safeState.feedbackLearning
+            : {};
+        const migratedFeedbackEntries = Object.fromEntries(
+            Object.entries(
+                feedbackState.entries && typeof feedbackState.entries === 'object'
+                    ? feedbackState.entries
+                    : {}
+            ).map(([key, candidate]) => {
+                if (
+                    !candidate ||
+                    typeof candidate !== 'object' ||
+                    Object.prototype.hasOwnProperty.call(candidate, 'learningEligible')
+                ) return [key, candidate];
+                return [key, {
+                    ...candidate,
+                    learningEligible: window.AURA_FEEDBACK.resolveFeedbackLearningEligibility(
+                        undefined,
+                        this.isPersonalIntelligenceActive(),
+                        candidate.routeSnapshot
+                    )
+                }];
+            })
+        );
+        safeState.feedbackLearning = {
+            ...feedbackState,
+            entries: migratedFeedbackEntries
+        };
         safeState.feedbackLearning = window.AURA_FEEDBACK.normalizeState(safeState.feedbackLearning);
 
         return safeState;
@@ -2721,14 +2774,106 @@ class ChatManager {
 
     loadState() {
         try {
-            return safeParseJson(localStorage.getItem(STORAGE_KEYS.STATE), null);
+            return this.profileManager.loadProfileState();
         } catch (_error) {
             return null;
         }
     }
 
     saveState() {
-        localStorage.setItem(STORAGE_KEYS.STATE, JSON.stringify(this.state));
+        return this.profileManager.saveProfileState(this.state);
+    }
+
+    listProfiles() {
+        return this.profileManager.listProfiles();
+    }
+
+    getActiveProfile() {
+        return this.profileManager.getActiveProfile();
+    }
+
+    getActiveProfileId() {
+        return this.profileManager.getActiveProfileId();
+    }
+
+    getPersonalContextEpoch() {
+        return this.personalContextEpoch;
+    }
+
+    advancePersonalContextEpoch() {
+        this.personalContextEpoch += 1;
+        return this.personalContextEpoch;
+    }
+
+    createProfile(name) {
+        const profile = this.profileManager.createProfile(name);
+        return profile ? this.switchProfile(profile.id) : null;
+    }
+
+    renameProfile(profileId, name) {
+        return this.profileManager.renameProfile(profileId, name);
+    }
+
+    switchProfile(profileId) {
+        this.saveState();
+        const selected = this.profileManager.switchProfile(profileId);
+        if (!selected) return null;
+
+        this.advancePersonalContextEpoch();
+        this.pendingResponseMetadata.clear();
+        clearAnalysisCaches();
+        this.state = this.ensureStateShape(this.loadState() || this.getInitialState());
+        if (!this.state.activeChatId) this.createNewChat();
+        this.saveState();
+        return selected;
+    }
+
+    deleteProfileLocal(profileId) {
+        const previousActiveId = this.getActiveProfileId();
+        this.saveState();
+        const deleted = this.profileManager.deleteProfile(profileId);
+        if (!deleted) return false;
+
+        if (this.getActiveProfileId() !== previousActiveId) {
+            this.advancePersonalContextEpoch();
+            this.pendingResponseMetadata.clear();
+            clearAnalysisCaches();
+            this.state = this.ensureStateShape(this.loadState() || this.getInitialState());
+            if (!this.state.activeChatId) this.createNewChat();
+            this.saveState();
+        }
+        return true;
+    }
+
+    getPersonalIntelligenceState() {
+        return this.profileManager.getPersonalIntelligenceState();
+    }
+
+    setPersonalIntelligenceEnabled(enabled) {
+        const previousState = this.getPersonalIntelligenceState();
+        const state = this.profileManager.setPersonalIntelligenceEnabled(enabled);
+        if (state !== previousState) {
+            this.advancePersonalContextEpoch();
+            this.pendingResponseMetadata.clear();
+            clearAnalysisCaches();
+        }
+        return state;
+    }
+
+    isPersonalIntelligenceActive() {
+        return this.profileManager.isPersonalIntelligenceActive();
+    }
+
+    getProfileSetting(setting, fallbackValue = null) {
+        return this.profileManager.getProfileSetting(setting, fallbackValue);
+    }
+
+    setProfileSetting(setting, value) {
+        return this.profileManager.setProfileSetting(setting, value);
+    }
+
+    removeProfileSetting(setting) {
+        return this.profileManager.removeProfileSetting(setting);
     }
 
     createNewChat() {
@@ -2760,6 +2905,8 @@ class ChatManager {
     }
 
     deleteChat(id) {
+        if (!this.state.chats[id]) return [];
+        this.advancePersonalContextEpoch();
         const promotedExampleIds = Object.values(this.state.feedbackLearning.entries)
             .filter((entry) => entry.chatId === id && entry.promotedExampleId)
             .map((entry) => entry.promotedExampleId);
@@ -2827,7 +2974,14 @@ class ChatManager {
                 chatId: chat.id
             });
 
-            if (chat.history.length % 4 === 0) {
+            const normalUserTurnCount = chat.history.filter((entry) => (
+                entry?.role === 'user' && entry.source !== 'feedback_retry'
+            )).length;
+            if (
+                message.source !== 'feedback_retry' &&
+                normalUserTurnCount % 2 === 0 &&
+                this.isPersonalIntelligenceActive()
+            ) {
                 this.runBehaviorAnalyzer(chatId);
             }
         }
@@ -2837,29 +2991,62 @@ class ChatManager {
     }
 
     async vectorizeData(text, metadata = {}) {
-        if (!text) return;
+        const vectorClassification = window.AURA_MODEL_ROUTING.classifyTurn({ message: text });
+        if (
+            !text ||
+            !this.isPersonalIntelligenceActive() ||
+            window.AURA_FEEDBACK.isSensitiveAutomaticMemoryText(text) ||
+            vectorClassification.domain === 'medical'
+        ) return false;
+        const sourceProfileId = this.getActiveProfileId();
+        const request = postJson(API_ENDPOINTS.storeMemory, {
+            profileId: sourceProfileId,
+            text,
+            metadata
+        });
+        this.pendingVectorWrites.set(request, sourceProfileId);
 
         try {
-            await postJson(API_ENDPOINTS.storeMemory, { text, metadata });
+            await request;
+            return true;
         } catch (error) {
             console.error('Vector DB Store Error', error);
+            return false;
+        } finally {
+            this.pendingVectorWrites.delete(request);
         }
     }
 
+    async waitForPendingVectorWrites(profileId = null) {
+        const targetProfileId = profileId ? String(profileId) : '';
+        const pending = [...this.pendingVectorWrites.entries()]
+            .filter(([, sourceProfileId]) => (
+                !targetProfileId || sourceProfileId === targetProfileId
+            ))
+            .map(([request]) => request);
+        if (pending.length) await Promise.allSettled(pending);
+    }
+
     async searchRelevantVectorData(query, turnPolicy = null, chatId = this.state.activeChatId) {
-        if (!query) return '';
+        if (!query || !this.isPersonalIntelligenceActive()) return '';
+        const sourceProfileId = this.getActiveProfileId();
+        const sourceContextEpoch = this.getPersonalContextEpoch();
 
         try {
             const data = await postJson(API_ENDPOINTS.searchMemory, {
-                query,
-                chatId
+                profileId: sourceProfileId,
+                query
             });
+            if (
+                sourceProfileId !== this.getActiveProfileId() ||
+                sourceContextEpoch !== this.getPersonalContextEpoch() ||
+                !this.isPersonalIntelligenceActive()
+            ) return '';
             const matches = Array.isArray(data.matches) ? data.matches : [];
             const explicitRecall = /\b(remember|earlier|before|last time|previously|did i tell you)\b/i.test(query);
             const selected = window.AURA_TURN_POLICY.selectRelevantMemories({
                 query,
                 matches,
-                chatId,
                 explicitRecall,
                 continuity: turnPolicy?.continuity,
                 maxItems: 2
@@ -2870,7 +3057,7 @@ class ChatManager {
                 '[Relevant recalled context]',
                 ...selected.map((entry) => (
                     `- ${sanitizeContentForModelContext(entry.text)} ` +
-                    `(source: current conversation memory; relevance: ${entry.relevance})`
+                    `(source: personal conversation memory; relevance: ${entry.relevance})`
                 )),
                 'Use only when it directly helps the current message. If it conflicts with the current turn, ignore it.'
             ].join('\n');
@@ -2880,8 +3067,14 @@ class ChatManager {
     }
 
     async runBehaviorAnalyzer(chatId = this.state.activeChatId) {
+        if (!this.isPersonalIntelligenceActive()) return;
+        const sourceProfileId = this.getActiveProfileId();
+        const sourceContextEpoch = this.getPersonalContextEpoch();
         const chat = this.state.chats[chatId];
-        if (!chat || chat.history.length < 4) return;
+        const normalUserTurns = chat?.history?.filter((message) => (
+            message?.role === 'user' && message.source !== 'feedback_retry'
+        )) || [];
+        if (!chat || normalUserTurns.length < 2) return;
         const currentStore = sanitizeChatScopedProfile(
             chat.localContentStore,
             this.state.localContentStore
@@ -2897,6 +3090,11 @@ class ChatManager {
             .replace('%HISTORY%', historyStr);
 
         const response = await _callLLM(prompt, { format: 'json', callType: 'analysis' });
+        if (
+            sourceProfileId !== this.getActiveProfileId() ||
+            sourceContextEpoch !== this.getPersonalContextEpoch() ||
+            !this.isPersonalIntelligenceActive()
+        ) return;
         const parsed = safeParseJson(response, null);
 
         if (parsed && typeof parsed === 'object') {
@@ -2911,23 +3109,30 @@ class ChatManager {
                 parsed.responsePreferences,
                 previousPreferences
             );
+            const durableResponse = await _callLLM(
+                PROMPTS.USER_MEMORY_ANALYZER
+                    .replace('%STORE%', JSON.stringify(this.getUserMemoryStore(), null, 2))
+                    .replace('%CHAT_PROFILE%', JSON.stringify(nextStore, null, 2))
+                    .replace('%HISTORY%', historyStr),
+                { format: 'json', callType: 'analysis' }
+            );
+            if (
+                sourceProfileId !== this.getActiveProfileId() ||
+                sourceContextEpoch !== this.getPersonalContextEpoch() ||
+                !this.isPersonalIntelligenceActive() ||
+                !this.state.chats[chatId]
+            ) return;
+            const durableParsed = safeParseJson(durableResponse, null);
             this.state.chats[chatId].localContentStore = nextStore;
-
-            if (isUserMemoryEnabled()) {
-                const durableResponse = await _callLLM(
-                    PROMPTS.USER_MEMORY_ANALYZER
-                        .replace('%STORE%', JSON.stringify(this.getUserMemoryStore(), null, 2))
-                        .replace('%CHAT_PROFILE%', JSON.stringify(nextStore, null, 2))
-                        .replace('%HISTORY%', historyStr),
-                    { format: 'json', callType: 'analysis' }
+            if (durableParsed && typeof durableParsed === 'object') {
+                const filteredDurable = window.AURA_FEEDBACK.sanitizeAutomaticMemoryCandidate(
+                    this.getUserMemoryStore(),
+                    durableParsed
                 );
-                const durableParsed = safeParseJson(durableResponse, null);
-                if (durableParsed && typeof durableParsed === 'object') {
-                    this.state.localContentStore = sanitizeChatScopedProfile(
-                        durableParsed,
-                        this.getUserMemoryStore()
-                    );
-                }
+                this.state.localContentStore = sanitizeChatScopedProfile(
+                    filteredDurable,
+                    this.getUserMemoryStore()
+                );
             }
             this.saveState();
         }
@@ -2950,11 +3155,23 @@ class ChatManager {
         return this.getContentStoreForChat();
     }
 
+    getInferenceContentStore(chatId = this.state.activeChatId) {
+        if (this.isPersonalIntelligenceActive()) {
+            return this.getContentStoreForChat(chatId);
+        }
+
+        return {
+            ...buildChatScopedProfile(),
+            responsePreferences: getStoredExperienceResponsePreferences()
+        };
+    }
+
     getUserMemoryStore() {
         return sanitizeChatScopedProfile(this.state.localContentStore, buildChatScopedProfile());
     }
 
     rememberUserFact(text) {
+        if (!this.isPersonalIntelligenceActive()) return false;
         const value = String(text || '').trim();
         if (!value) return false;
 
@@ -2974,12 +3191,13 @@ class ChatManager {
     }
 
     clearUserMemoryStore() {
+        this.advancePersonalContextEpoch();
         this.state.localContentStore = buildChatScopedProfile();
         this.saveState();
     }
 
     getFeedbackProfileId() {
-        return getOrCreateFeedbackProfileId();
+        return this.getActiveProfileId();
     }
 
     setPendingResponseMetadata(chatId, metadata = {}) {
@@ -3008,11 +3226,13 @@ class ChatManager {
     }
 
     getFeedbackPreferenceOverrides() {
+        if (!this.isPersonalIntelligenceActive()) return {};
         return { ...this.state.feedbackLearning.preferenceOverrides };
     }
 
     prefersFewerToolOffers() {
-        return this.state.feedbackLearning.toolOfferMode === 'explicit_only';
+        return this.isPersonalIntelligenceActive() &&
+            this.state.feedbackLearning.toolOfferMode === 'explicit_only';
     }
 
     findRelatedUserMessage(chatId, assistantMessage) {
@@ -3037,6 +3257,7 @@ class ChatManager {
         if (!assistantMessage || assistantMessage.role !== 'ai') return null;
         const existing = this.getResponseFeedback(chatId, messageId);
         const userMessage = this.findRelatedUserMessage(chatId, assistantMessage);
+        const routeSnapshot = assistantMessage.routeSnapshot || existing?.routeSnapshot;
 
         this.state.feedbackLearning = window.AURA_FEEDBACK.upsertFeedback(
             this.state.feedbackLearning,
@@ -3045,8 +3266,13 @@ class ChatManager {
                 ...patch,
                 chatId,
                 messageId,
+                learningEligible: window.AURA_FEEDBACK.resolveFeedbackLearningEligibility(
+                    existing?.learningEligible,
+                    this.isPersonalIntelligenceActive(),
+                    routeSnapshot
+                ),
                 userMessageId: userMessage?.id || existing?.userMessageId || '',
-                routeSnapshot: assistantMessage.routeSnapshot || existing?.routeSnapshot
+                routeSnapshot
             }
         );
         this.saveState();
@@ -3091,6 +3317,7 @@ class ChatManager {
     }
 
     getPersonalExampleCandidate(chatId, messageId) {
+        if (!this.isPersonalIntelligenceActive()) return null;
         const chat = this.getChat(chatId);
         const assistantMessage = chat?.history?.find((message) => message.id === messageId);
         const feedback = this.getResponseFeedback(chatId, messageId);
@@ -3118,7 +3345,7 @@ class ChatManager {
     }
 
     markFeedbackPromoted(chatId, messageId, exampleId) {
-        if (!this.getResponseFeedback(chatId, messageId)) return;
+        if (!this.isPersonalIntelligenceActive() || !this.getResponseFeedback(chatId, messageId)) return;
         this.state.feedbackLearning = window.AURA_FEEDBACK.markPromoted(
             this.state.feedbackLearning,
             messageId,
@@ -3138,6 +3365,17 @@ class ChatManager {
 
     getActivePersonalExampleIds() {
         return Object.values(this.state.feedbackLearning.entries)
+            .filter((entry) => (
+                entry.learningEligible &&
+                window.AURA_FEEDBACK.isFeedbackLearningRouteEligible(entry.routeSnapshot)
+            ))
+            .map((entry) => entry.promotedExampleId)
+            .filter(Boolean);
+    }
+
+    getPromotedExampleIdsForChat(chatId) {
+        return Object.values(this.state.feedbackLearning.entries)
+            .filter((entry) => entry.chatId === String(chatId || ''))
             .map((entry) => entry.promotedExampleId)
             .filter(Boolean);
     }
@@ -3147,6 +3385,7 @@ class ChatManager {
     }
 
     clearFeedbackLearning() {
+        this.advancePersonalContextEpoch();
         const promotedExampleIds = this.getActivePersonalExampleIds();
         this.state.feedbackLearning = window.AURA_FEEDBACK.createState();
         this.saveState();
@@ -3156,23 +3395,32 @@ class ChatManager {
     exportLocalData() {
         return {
             exportedAt: new Date().toISOString(),
-            version: 'aura-local-export-v2',
+            version: 'aura-profile-export-v3',
+            profile: this.getActiveProfile(),
+            personalIntelligenceState: this.getPersonalIntelligenceState(),
             state: this.state,
             settings: {
                 theme: localStorage.getItem(STORAGE_KEYS.THEME),
                 model: localStorage.getItem(STORAGE_KEYS.MODEL),
-                experienceStyle: localStorage.getItem(STORAGE_KEYS.EXPERIENCE_STYLE),
+                experienceStyle: this.getProfileSetting(STORAGE_KEYS.EXPERIENCE_STYLE, 'balanced'),
+                responseDetail: this.getProfileSetting(STORAGE_KEYS.RESPONSE_DETAIL, null),
                 thinkingMode: localStorage.getItem(STORAGE_KEYS.THINKING_MODE),
-                locationEnabled: localStorage.getItem(STORAGE_KEYS.LOCATION_ENABLED) === 'true',
-                userMemoryEnabled: localStorage.getItem(STORAGE_KEYS.USER_MEMORY_ENABLED) === 'true',
-                feedbackProfileId: localStorage.getItem(STORAGE_KEYS.FEEDBACK_PROFILE_ID)
+                prompt: localStorage.getItem(STORAGE_KEYS.PROMPT),
+                promptOverrideEnabled: localStorage.getItem(STORAGE_KEYS.PROMPT_OVERRIDE_ENABLED) === 'true',
+                locationEnabled: Boolean(this.getProfileSetting(STORAGE_KEYS.LOCATION_ENABLED, false)),
+                locationContext: this.getProfileSetting(STORAGE_KEYS.LOCATION_CONTEXT, null)
             }
         };
     }
 
-    deleteAllLocalData() {
+    async deleteAllLocalData() {
+        await this.waitForPendingVectorWrites();
+        this.advancePersonalContextEpoch();
+        clearAnalysisCaches();
+        this.profileManager.clearAllProfileData();
         Object.values(STORAGE_KEYS).forEach((key) => localStorage.removeItem(key));
         this.pendingResponseMetadata.clear();
+        this.pendingVectorWrites.clear();
         this.state = this.getInitialState();
         this.createNewChat();
         this.saveState();
@@ -3190,6 +3438,19 @@ class ChatManager {
             {
                 ...this.getStoredResponsePreferencesForChat(chatId),
                 ...this.getFeedbackPreferenceOverrides()
+            },
+            DEFAULT_RESPONSE_PREFERENCES
+        );
+    }
+
+    getInferenceResponsePreferences(chatId = this.state.activeChatId) {
+        const preferences = this.isPersonalIntelligenceActive()
+            ? this.getResponsePreferencesForChat(chatId)
+            : getStoredExperienceResponsePreferences();
+        return sanitizeResponsePreferences(
+            {
+                ...preferences,
+                ...getExplicitResponsePreferenceOverrides()
             },
             DEFAULT_RESPONSE_PREFERENCES
         );
@@ -3213,6 +3474,9 @@ class ChatManager {
     }
 
     async getConversationSummary(historyOverride = null, chatId = this.state.activeChatId) {
+        if (!this.isPersonalIntelligenceActive()) return '';
+        const sourceProfileId = this.getActiveProfileId();
+        const sourceContextEpoch = this.getPersonalContextEpoch();
         const chat = this.getChat(chatId);
         if (!chat) return '';
         const history = Array.isArray(historyOverride) ? historyOverride : chat.history;
@@ -3233,6 +3497,12 @@ class ChatManager {
             PROMPTS.CONVERSATION_SUMMARIZER.replace('%HISTORY%', historyStr),
             { format: 'json', callType: 'analysis' }
         );
+        if (
+            sourceProfileId !== this.getActiveProfileId() ||
+            sourceContextEpoch !== this.getPersonalContextEpoch() ||
+            !this.isPersonalIntelligenceActive() ||
+            !this.state.chats[chatId]
+        ) return '';
         const parsed = safeParseJson(response, null);
         if (!parsed || typeof parsed !== 'object') return '';
 
@@ -3925,18 +4195,17 @@ function runReceptionAgent(userMessage, chatHistory) {
 }
 
 function runPreferenceAgent(contextualUserMessage, chatId = chatManager.getActiveChatId()) {
-    const storedPreferences = deriveHeuristicResponsePreferences(
-        contextualUserMessage,
-        chatManager.getStoredResponsePreferencesForChat(chatId)
-    );
-    chatManager.updateResponsePreferences(storedPreferences, chatId);
     const adaptivePreferences = deriveHeuristicResponsePreferences(
         contextualUserMessage,
-        {
-            ...storedPreferences,
-            ...chatManager.getFeedbackPreferenceOverrides()
-        }
+        chatManager.getInferenceResponsePreferences(chatId)
     );
+    if (chatManager.isPersonalIntelligenceActive()) {
+        const learnedPreferences = deriveHeuristicResponsePreferences(
+            contextualUserMessage,
+            chatManager.getStoredResponsePreferencesForChat(chatId)
+        );
+        chatManager.updateResponsePreferences(learnedPreferences, chatId);
+    }
 
     return {
         name: 'PreferenceAgent',
@@ -4140,7 +4409,7 @@ async function buildAuraAgentContext(
     const profileStr = JSON.stringify(
         window.AURA_TURN_POLICY.buildRelevantProfileBundle({
             query: userMessage,
-            activeProfile: chatManager.getContentStoreForChat(chatId),
+            activeProfile: chatManager.getInferenceContentStore(chatId),
             durableProfile: chatManager.getUserMemoryStore(),
             includeDurable: isUserMemoryEnabled()
         }),
@@ -4492,13 +4761,13 @@ async function runToolFollowUpAgent(
         }
     });
     const responseSystemPrompt = buildResponseSystemPrompt(getEffectiveSystemPrompt(), activeModel);
-    const profileStr = JSON.stringify(chatManager.getCombinedContentStore(chatId), null, 2);
+    const profileStr = JSON.stringify(chatManager.getInferenceContentStore(chatId), null, 2);
     const runtimeContext = getRuntimeContextString();
     const chatHistory = chatManager.getChatHistory(chatId);
     const conversationSummary = await chatManager.getConversationSummary(null, chatId);
     const modelHistoryStr = buildModelSafeHistoryString(chatHistory);
     const turnSupport = deriveHeuristicTurnSupport('', 'GeneralFriendAgent', chatHistory);
-    const toolPreferences = chatManager.getResponsePreferencesForChat(chatId);
+    const toolPreferences = chatManager.getInferenceResponsePreferences(chatId);
     const turnProfile = [
         buildAuraTurnProfile({
             route: 'GeneralFriendAgent',

@@ -101,3 +101,31 @@ Getting started guide: https://docs.trychroma.com/docs/overview/getting-started
 
 OpenTelemetry is not enabled because it is missing from the config.
 
+
+
+                [38;5;069m(((((((((    [38;5;203m((((([38;5;220m####
+             [38;5;069m((((((((((((([38;5;203m((((((((([38;5;220m#########
+           [38;5;069m((((((((((((([38;5;203m((((((((((([38;5;220m###########
+         [38;5;069m(((((((((((((([38;5;203m(((((((((((([38;5;220m############
+        [38;5;069m((((((((((((([38;5;203m(((((((((((((([38;5;220m#############
+        [38;5;069m((((((((((((([38;5;203m(((((((((((((([38;5;220m#############
+         [38;5;069m(((((((((((([38;5;203m((((((((((((([38;5;220m##############
+         [38;5;069m(((((((((((([38;5;203m(((((((((((([38;5;220m##############
+           [38;5;069m(((((((((([38;5;203m((((((((((([38;5;220m#############
+             [38;5;069m(((((((([38;5;203m(((((((([38;5;220m##############
+                [38;5;069m((((([38;5;203m((((    [38;5;220m#########[0m
+
+Saving data to: /Users/avariqfr30/Documents/GitHub Repositories/AuraBot-v1/chroma-data
+Connect to Chroma at: http://localhost:8000
+Getting started guide: https://docs.trychroma.com/docs/overview/getting-started
+
+☁️ To deploy your DB - try Chroma Cloud!
+- Sign up: https://trychroma.com/signup
+- Copy your data to Cloud: chroma copy --to-cloud --all
+
+  [2m2026-09-16T06:53:13.619556Z[0m [32m INFO[0m  [32mGlobal tracing subscriber set[0m
+    [2;3mat[0m rust/tracing/src/init_tracer.rs:370
+
+  [2m2026-09-16T06:53:13.627272Z[0m [32m INFO[0m  [32mFrontend server listening on address, [1;32maddr[0m[32m: 127.0.0.1:8000[0m
+    [2;3mat[0m rust/frontend/src/server.rs:416
+

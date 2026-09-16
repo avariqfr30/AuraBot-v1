@@ -12,6 +12,8 @@ const models = [GPT, MED];
 
 assert.equal(classifyTurn({ message: 'Help me organize my week.' }).domain, 'general');
 assert.equal(classifyTurn({ message: 'Explain my HbA1c result.' }).domain, 'medical');
+assert.equal(classifyTurn({ message: 'I have hypertension.' }).domain, 'medical');
+assert.equal(classifyTurn({ message: 'I have a kidney condition.' }).domain, 'medical');
 assert.equal(classifyTurn({
     message: 'Extract the values from this lab report.',
     documentText: 'Hemoglobin 13.2 g/dL\nHbA1c 8.4%'

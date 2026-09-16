@@ -13,6 +13,13 @@ const {
     buildPersonalMetadata
 } = require('./lib/response-examples');
 const { buildMemoryMatches } = require('./lib/memory-results');
+const {
+    normalizeProfileId,
+    normalizeChatId,
+    normalizeProfileDataScope,
+    scopeMemoryMetadata,
+    buildProfileWhere
+} = require('./lib/profile-scope');
 
 const app = express();
 
@@ -90,11 +97,6 @@ function normalizeExampleLimit(value) {
     const parsed = Number(value);
     if (!Number.isFinite(parsed)) return 3;
     return Math.min(Math.max(Math.floor(parsed), 1), 4);
-}
-
-function normalizeLocalProfileId(value) {
-    const profileId = String(value || '').trim();
-    return /^[a-z0-9_-]{8,120}$/i.test(profileId) ? profileId : '';
 }
 
 function normalizePersonalExample(value, profileId) {
@@ -432,16 +434,17 @@ app.post('/api/ollama/generate', async (req, res) => {
 
 app.post('/api/store_memory', async (req, res) => {
     try {
-        const { text, metadata, id } = req.body;
+        const { text, metadata, id } = req.body || {};
+        const profileId = normalizeProfileId(req.body?.profileId);
 
-        if (!text) {
-            return res.status(400).json({ error: 'Memory text is required' });
+        if (!profileId || !String(text || '').trim()) {
+            return res.status(400).json({ error: 'A valid local profile and memory text are required' });
         }
 
         const collection = await getMemoryCollection();
         await collection.add({
             ids: [id || `mem_${Date.now()}`],
-            metadatas: [metadata || {}],
+            metadatas: [scopeMemoryMetadata(metadata, profileId)],
             documents: [text]
         });
 
@@ -461,21 +464,24 @@ app.post('/api/store_memory', async (req, res) => {
 
 app.post('/api/search_memory', async (req, res) => {
     try {
-        const { query, nResults = 3, chatId } = req.body;
+        const { query, nResults = 3 } = req.body || {};
+        const profileId = normalizeProfileId(req.body?.profileId);
+        const rawChatId = req.body?.chatId;
+        const chatId = normalizeChatId(rawChatId);
 
-        if (!query) {
-            return res.status(400).json({ error: 'A search query is required' });
+        if (!profileId || !String(query || '').trim()) {
+            return res.status(400).json({ error: 'A valid local profile and search query are required' });
+        }
+        if (rawChatId !== undefined && !chatId) {
+            return res.status(400).json({ error: 'Chat ID must be a valid local chat identifier' });
         }
 
         const collection = await getMemoryCollection();
         const queryPayload = {
             queryTexts: [query],
-            nResults
+            nResults,
+            where: buildProfileWhere(profileId, chatId)
         };
-
-        if (chatId) {
-            queryPayload.where = { chatId };
-        }
 
         const results = await collection.query(queryPayload);
 
@@ -595,7 +601,7 @@ app.post('/api/personal_examples/search', async (req, res) => {
             modelFamily = 'either',
             limit = 2
         } = req.body || {};
-        const profileId = normalizeLocalProfileId(rawProfileId);
+        const profileId = normalizeProfileId(rawProfileId);
 
         if (!profileId || !String(query || '').trim()) {
             return res.status(400).json({ error: 'A local profile and search query are required' });
@@ -661,7 +667,7 @@ app.post('/api/personal_examples/search', async (req, res) => {
 
 app.post('/api/personal_examples/upsert', async (req, res) => {
     try {
-        const profileId = normalizeLocalProfileId(req.body?.profileId);
+        const profileId = normalizeProfileId(req.body?.profileId);
         const example = normalizePersonalExample(req.body?.example, profileId);
         if (!profileId || !example) {
             return res.status(400).json({
@@ -689,7 +695,7 @@ app.post('/api/personal_examples/upsert', async (req, res) => {
 
 app.post('/api/personal_examples/delete', async (req, res) => {
     try {
-        const profileId = normalizeLocalProfileId(req.body?.profileId);
+        const profileId = normalizeProfileId(req.body?.profileId);
         const ids = [...new Set((Array.isArray(req.body?.ids) ? req.body.ids : [])
             .map((id) => String(id || '').trim())
             .filter((id) => /^personal-[a-z0-9_-]{8,160}$/i.test(id)))];
@@ -700,7 +706,7 @@ app.post('/api/personal_examples/delete', async (req, res) => {
         const collection = await getPersonalResponseExampleCollection();
         await collection.delete({
             ...(ids.length ? { ids } : {}),
-            where: { profileId: { $eq: profileId } }
+            where: buildProfileWhere(profileId)
         });
         return res.json({ deleted: true, count: ids.length || null });
     } catch (error) {
@@ -711,6 +717,59 @@ app.post('/api/personal_examples/delete', async (req, res) => {
             });
         }
         respondWithUpstreamError(res, 'Personal response example deletion', error);
+    }
+});
+
+app.post('/api/profile_data/delete', async (req, res) => {
+    const completedScopes = [];
+    try {
+        const profileId = normalizeProfileId(req.body?.profileId);
+        const scope = normalizeProfileDataScope(req.body?.scope);
+        const rawChatId = req.body?.chatId;
+        const chatId = normalizeChatId(rawChatId);
+        if (!profileId || !scope) {
+            return res.status(400).json({
+                error: 'A valid local profile and deletion scope are required'
+            });
+        }
+        if (rawChatId !== undefined && (!chatId || scope !== 'memory')) {
+            return res.status(400).json({
+                error: 'Chat-scoped deletion requires a valid chat ID and memory scope'
+            });
+        }
+
+        if (scope === 'memory' || scope === 'all') {
+            const memoryCollection = await getMemoryCollection();
+            await memoryCollection.delete({ where: buildProfileWhere(profileId, chatId) });
+            completedScopes.push('memory');
+        }
+
+        if (scope === 'all') {
+            const personalExampleCollection = await getPersonalResponseExampleCollection();
+            await personalExampleCollection.delete({ where: buildProfileWhere(profileId) });
+            completedScopes.push('personal_examples');
+        }
+
+        return res.json({
+            deleted: true,
+            scope,
+            ...(chatId ? { chatId } : {}),
+            completedScopes
+        });
+    } catch (error) {
+        const unavailable = isChromaUnavailable(error);
+        const details = unavailable
+            ? 'Start ChromaDB to remove stored local profile data.'
+            : (error.response?.data || error.message);
+        console.error('[Profile data deletion]', details);
+        return res.status(unavailable ? 503 : (error.response?.status || 500)).json({
+            error: completedScopes.length
+                ? 'Profile data deletion only partially completed'
+                : 'Profile data deletion failed',
+            details,
+            partial: completedScopes.length > 0,
+            completedScopes
+        });
     }
 });
 

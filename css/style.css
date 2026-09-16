@@ -468,12 +468,49 @@ body::before {
     font-weight: 600;
 }
 
-.local-status > span {
+.profile-status-button {
+    max-width: min(42vw, 320px);
+    padding: 7px 10px;
+    border: 1px solid var(--surface-border);
+    border-radius: 999px;
+    background: var(--button-bg);
+    cursor: pointer;
+}
+
+.profile-status-button:hover {
+    border-color: var(--surface-border-strong);
+    background: var(--button-bg-hover);
+}
+
+.profile-status-button:disabled {
+    cursor: not-allowed;
+    opacity: 0.55;
+}
+
+#activeProfileLabel {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.local-status > .profile-status-dot {
+    flex: 0 0 auto;
     width: 8px;
     height: 8px;
     border-radius: 999px;
+    background: #8b96a8;
+    box-shadow: 0 0 0 4px rgba(139, 150, 168, 0.12);
+}
+
+.profile-status-button[data-personal-intelligence-state="active"] .profile-status-dot {
     background: #69c49a;
     box-shadow: 0 0 0 4px rgba(105, 196, 154, 0.12);
+}
+
+.profile-status-button[data-personal-intelligence-state="paused"] .profile-status-dot {
+    background: #e3b45d;
+    box-shadow: 0 0 0 4px rgba(227, 180, 93, 0.12);
 }
 
 .tab-strip {
@@ -1087,6 +1124,7 @@ button:disabled {
 
 .message-action-button,
 .tool-button,
+.settings-secondary-button,
 #refreshLocationButton,
 #cancelSettingsButton,
 #resetSettingsButton,
@@ -1111,6 +1149,7 @@ button:disabled {
 
 .message-action-button:hover,
 .tool-button:hover,
+.settings-secondary-button:hover,
 #refreshLocationButton:hover,
 #cancelSettingsButton:hover,
 #resetSettingsButton:hover,
@@ -1695,7 +1734,10 @@ label[for="fileInput"]:focus-visible {
     }
 
     .local-status {
-        display: none;
+        max-width: min(42vw, 180px);
+        font-size: 0.72rem;
+        gap: 6px;
+        padding: 6px 8px;
     }
 
     .tab-strip {

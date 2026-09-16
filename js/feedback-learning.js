@@ -20,6 +20,26 @@
     const DETAIL_LEVELS = new Set(['brief', 'balanced', 'detailed']);
     const DIRECTNESS_LEVELS = new Set(['soft', 'balanced', 'direct']);
     const STRUCTURE_LEVELS = new Set(['paragraphs', 'mixed', 'stepwise']);
+    const LEARNING_ROUTES = new Set([
+        'GeneralFriendAgent',
+        'CbtAnalystAgent',
+        'PlannerAgent'
+    ]);
+    const SENSITIVE_AUTOMATIC_MEMORY_PATTERNS = [
+        /\b(health|medical|diagnos(?:is|ed)|symptom|disease|disorder|depress(?:ion|ed)|anxi(?:ety|ous)|bipolar|adhd|autis(?:m|tic)|suicid(?:e|al)|self[- ]?harm|therapy|therapist|psychiatr(?:y|ist|ic))\b/i,
+        /\b(ptsd|schizophren(?:ia|ic)|psychosis|psychotic|hiv|aids|asthma|inhaler|diabet(?:es|ic)|cancer|epilepsy|seizures?|addiction|substance use|fertility|infertil(?:ity|e)|disab(?:ility|led)|blood pressure|hypertension|fever|rash|allerg(?:y|ic)|kidney|renal|liver|heart condition|lab results?)\b/i,
+        /\b(medication|medicine|meds|drug|dose|dosage|prescription|pill|insulin|sertraline|antidepressant|antipsychotic)\b/i,
+        /\b(trauma|traumatic|traumatized|abuse|abusive|assault(?:ed)?|rape|raped|violence|victim)\b/i,
+        /\b(sexual|sexuality|gay|lesbian|bisexual|transgender|queer|orientation|sex life|pregnan(?:t|cy))\b/i,
+        /\b(finance|financial|income|salary|debt|bank|credit[- ]?card|account balance|net worth|mortgage)\b/i,
+        /\b(address|street|avenue|apartment|postcode|zip code|coordinates?|latitude|longitude|phone number|email address|contact details?)\b/i,
+        /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/i,
+        /(?:^|[^\w])\+?\d[\d\s().-]{7,}\d(?:[^\w]|$)/,
+        /\b\d{1,6}\s+[A-Za-z0-9.' -]+\s(?:st(?:reet)?|rd|road|ave(?:nue)?|blvd|boulevard|lane|ln|drive|dr)\b/i,
+        /\b(?:jl\.?|jalan)\s+[A-Za-z0-9.' -]+\s+\d{1,6}\b/i,
+        /\b(legal|lawsuit|court|crime|criminal|arrest(?:ed)?|lawyer|attorney|immigration|custody|divorce)\b/i,
+        /\b(my|their|his|her)\s+(friend|partner|spouse|wife|husband|coworker|colleague|manager|boss|child|parent|mother|father|sibling|brother|sister)\b/i
+    ];
 
     function cleanText(value, maxLength) {
         return String(value || '')
@@ -52,6 +72,87 @@
         };
     }
 
+    function isFeedbackLearningRouteEligible(routeSnapshot) {
+        const safe = normalizeRouteSnapshot(routeSnapshot);
+        return safe.domain === 'general' &&
+            safe.risk === 'low' &&
+            safe.task === 'conversation' &&
+            safe.source !== 'background' &&
+            LEARNING_ROUTES.has(safe.route);
+    }
+
+    function resolveFeedbackLearningEligibility(existingEligibility, personalIntelligenceActive, routeSnapshot) {
+        if (existingEligibility === false) return false;
+        return personalIntelligenceActive === true &&
+            isFeedbackLearningRouteEligible(routeSnapshot);
+    }
+
+    function normalizeMemoryText(value) {
+        return String(value || '').replace(/\0/g, '').trim();
+    }
+
+    function isSensitiveAutomaticMemoryText(value) {
+        const text = normalizeMemoryText(value);
+        return Boolean(text) && SENSITIVE_AUTOMATIC_MEMORY_PATTERNS.some((pattern) => pattern.test(text));
+    }
+
+    function mergeAutomaticMemoryStrings(existingValues, proposedValues) {
+        const result = [];
+        const seen = new Set();
+        const add = (value, allowSensitive) => {
+            const text = normalizeMemoryText(value);
+            const key = text.toLowerCase();
+            if (!text || seen.has(key) || (!allowSensitive && isSensitiveAutomaticMemoryText(text))) return;
+            seen.add(key);
+            result.push(text);
+        };
+        (Array.isArray(existingValues) ? existingValues : []).forEach((value) => add(value, true));
+        (Array.isArray(proposedValues) ? proposedValues : []).forEach((value) => add(value, false));
+        return result;
+    }
+
+    function sanitizeAutomaticMemoryCandidate(existingValue, proposedValue) {
+        const existing = existingValue && typeof existingValue === 'object' ? existingValue : {};
+        const proposed = proposedValue && typeof proposedValue === 'object' ? proposedValue : {};
+        const existingStyle = normalizeMemoryText(existing.communicationStyle);
+        const proposedStyle = normalizeMemoryText(proposed.communicationStyle);
+        const keepProposedStyle = !isSensitiveAutomaticMemoryText(existingStyle) &&
+            proposedStyle &&
+            (
+                proposedStyle.toLowerCase() === existingStyle.toLowerCase() ||
+                !isSensitiveAutomaticMemoryText(proposedStyle)
+            );
+        const existingPreferences = existing.responsePreferences &&
+            typeof existing.responsePreferences === 'object'
+            ? existing.responsePreferences
+            : {};
+        const proposedPreferences = proposed.responsePreferences &&
+            typeof proposed.responsePreferences === 'object'
+            ? proposed.responsePreferences
+            : {};
+        const proposedTone = normalizeMemoryText(proposedPreferences.likelyTone);
+        const existingTone = normalizeMemoryText(existingPreferences.likelyTone);
+        const keepProposedTone = !isSensitiveAutomaticMemoryText(existingTone) &&
+            proposedTone &&
+            (
+                proposedTone.toLowerCase() === existingTone.toLowerCase() ||
+                !isSensitiveAutomaticMemoryText(proposedTone)
+            );
+
+        return {
+            ...proposed,
+            communicationStyle: keepProposedStyle ? proposedStyle : existingStyle,
+            moodPatterns: mergeAutomaticMemoryStrings(existing.moodPatterns, proposed.moodPatterns),
+            potentialLapses: mergeAutomaticMemoryStrings(existing.potentialLapses, proposed.potentialLapses),
+            behavioralFacts: mergeAutomaticMemoryStrings(existing.behavioralFacts, proposed.behavioralFacts),
+            responsePreferences: {
+                ...existingPreferences,
+                ...proposedPreferences,
+                likelyTone: keepProposedTone ? proposedTone : existingTone
+            }
+        };
+    }
+
     function normalizePreferenceOverrides(value) {
         const safe = value && typeof value === 'object' ? value : {};
         const normalized = {};
@@ -75,6 +176,7 @@
             rating: RATINGS.has(value.rating) ? value.rating : 'unrated',
             reasons: normalizeReasons(value.reasons),
             comment: cleanText(value.comment, 1200),
+            learningEligible: value.learningEligible !== false,
             routeSnapshot: normalizeRouteSnapshot(value.routeSnapshot),
             createdAt: Number(value.createdAt) || Date.now(),
             updatedAt: Number(value.updatedAt) || Number(value.createdAt) || Date.now(),
@@ -106,7 +208,7 @@
             if (entry.rating === 'not_helpful') summary.notHelpful += 1;
             if (entry.comment) summary.written += 1;
             if (entry.promotedExampleId) summary.promoted += 1;
-            if (entry.rating !== 'not_helpful') return;
+            if (entry.rating !== 'not_helpful' || !entry.learningEligible) return;
 
             if (entry.reasons.includes('too_long')) summary.shorter += 1;
             if (entry.reasons.includes('too_short')) summary.longer += 1;
@@ -160,16 +262,20 @@
         const current = normalizeState(state);
         const messageId = cleanText(input?.messageId, 120);
         const existing = current.entries[messageId];
+        const nextLearningEligible = input?.learningEligible ??
+            existing?.learningEligible ??
+            true;
+        const keepPromotion = input?.rating === 'helpful' && nextLearningEligible !== false;
         const next = normalizeEntry({
             ...existing,
             ...input,
             id: existing?.id || input?.id || `feedback-${messageId}`,
             createdAt: existing?.createdAt || input?.createdAt || now,
             updatedAt: now,
-            promotedExampleId: input?.rating === 'helpful'
+            promotedExampleId: keepPromotion
                 ? (input?.promotedExampleId ?? existing?.promotedExampleId)
                 : '',
-            promotedAt: input?.rating === 'helpful'
+            promotedAt: keepPromotion
                 ? (input?.promotedAt ?? existing?.promotedAt)
                 : 0
         });
@@ -194,7 +300,12 @@
     function markPromoted(state, messageId, exampleId, now = Date.now()) {
         const current = normalizeState(state);
         const entry = current.entries[cleanText(messageId, 120)];
-        if (!entry || entry.rating !== 'helpful') return current;
+        if (
+            !entry ||
+            entry.rating !== 'helpful' ||
+            !entry.learningEligible ||
+            !isFeedbackLearningRouteEligible(entry.routeSnapshot)
+        ) return current;
         return upsertFeedback(current, {
             ...entry,
             promotedExampleId: cleanText(exampleId, 160),
@@ -253,15 +364,8 @@
 
     function canPromotePersonalExample({ feedback, userMessage, assistantMessage } = {}) {
         const safe = normalizeEntry(feedback);
-        const allowedRoutes = new Set([
-            'GeneralFriendAgent',
-            'CbtAnalystAgent',
-            'PlannerAgent'
-        ]);
-        if (!safe || safe.rating !== 'helpful') return false;
-        if (safe.routeSnapshot.domain !== 'general' || safe.routeSnapshot.risk !== 'low') return false;
-        if (!allowedRoutes.has(safe.routeSnapshot.route)) return false;
-        if (safe.routeSnapshot.task !== 'conversation') return false;
+        if (!safe || safe.rating !== 'helpful' || !safe.learningEligible) return false;
+        if (!isFeedbackLearningRouteEligible(safe.routeSnapshot)) return false;
         if (!cleanText(userMessage, 4000) || !cleanText(assistantMessage, 8000)) return false;
         return true;
     }
@@ -273,6 +377,10 @@
         normalizeState,
         normalizeEntry,
         normalizeRouteSnapshot,
+        isFeedbackLearningRouteEligible,
+        resolveFeedbackLearningEligibility,
+        isSensitiveAutomaticMemoryText,
+        sanitizeAutomaticMemoryCandidate,
         upsertFeedback,
         removeFeedback,
         markPromoted,

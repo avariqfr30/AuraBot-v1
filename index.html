@@ -50,7 +50,10 @@
                             <h1>Aura</h1>
                         </div>
                         <div class="app-header-controls">
-                            <span class="local-status"><span aria-hidden="true"></span>Memory stored on this device</span>
+                            <button type="button" id="activeProfileButton" class="local-status profile-status-button" title="Open local profile settings" aria-label="Open local profile settings" data-block-during-response="true">
+                                <span class="profile-status-dot" aria-hidden="true"></span>
+                                <span id="activeProfileLabel">My Profile · Personal Intelligence off</span>
+                            </button>
                             <label for="composerThinkingMode" class="sr-only">Thinking mode</label>
                             <select id="composerThinkingMode" class="composer-thinking-select transition duration-200" aria-label="Thinking mode" title="Thinking mode">
                                 <option value="auto">Auto</option>
@@ -97,9 +100,25 @@
     </div>
 
     <div id="settingsModal" class="hidden fixed inset-0 z-50 overflow-y-auto bg-black bg-opacity-75 flex items-center justify-center p-4">
-        <div data-liquid role="dialog" aria-modal="true" aria-labelledby="settingsTitle" tabindex="-1" class="modal-panel relative liquid-glass liquid-panel rounded-3xl p-8 w-full max-w-lg shadow-2xl border border-white/10">
+        <div data-liquid role="dialog" aria-modal="true" aria-labelledby="settingsTitle" tabindex="-1" class="modal-panel relative liquid-glass liquid-panel rounded-3xl p-8 w-full max-w-2xl shadow-2xl border border-white/10">
             <h3 id="settingsTitle" class="text-2xl font-bold mb-6 text-gray-100">Settings</h3>
             <div class="space-y-6">
+                <div class="space-y-3 rounded-2xl border border-white/10 p-4">
+                    <div>
+                        <h4 class="text-sm font-semibold text-gray-200">Local Profile</h4>
+                        <p class="text-xs text-gray-400 mt-1">Profiles separate chats, feedback, and Personal Intelligence data in this browser. They are local namespaces, not account authentication.</p>
+                    </div>
+                    <div>
+                        <label for="profileSelect" class="block text-sm font-medium text-gray-300">Active profile</label>
+                        <select id="profileSelect" class="mt-1 block w-full p-3 bg-gray-900/50 rounded-xl focus:outline-none focus:ring-2 focus:ring-pink-500" data-block-during-response="true"></select>
+                    </div>
+                    <div class="flex flex-wrap gap-2">
+                        <button id="createProfileButton" type="button" class="settings-secondary-button px-3 py-2 rounded-xl transition duration-200 text-sm" data-block-during-response="true">New Profile</button>
+                        <button id="renameProfileButton" type="button" class="settings-secondary-button px-3 py-2 rounded-xl transition duration-200 text-sm" data-block-during-response="true">Rename</button>
+                        <button id="deleteProfileButton" type="button" class="settings-secondary-button px-3 py-2 rounded-xl transition duration-200 text-sm" data-block-during-response="true">Delete Profile</button>
+                    </div>
+                    <div id="profileActionStatusText" class="text-xs text-gray-400" role="status" aria-live="polite"></div>
+                </div>
                 <div class="space-y-3 rounded-2xl border border-white/10 p-4">
                     <div>
                         <h4 class="text-sm font-semibold text-gray-200">Aura Behavior</h4>
@@ -167,40 +186,41 @@
                     <div id="locationStatusText" class="text-xs text-gray-400">Location access is off.</div>
                     <button id="refreshLocationButton" type="button" class="px-3 py-2 rounded-xl transition duration-200 text-sm">Refresh Location</button>
                 </div>
-                <div class="space-y-3">
+                <div class="space-y-3 rounded-2xl border border-white/10 p-4">
                     <div class="flex items-start justify-between gap-4">
                         <div>
-                            <label for="userMemoryCheckbox" class="block text-sm font-medium text-gray-300">Persistent Companion Memory</label>
-                            <p class="text-xs text-gray-400 mt-1">Lets Aura carry durable preferences and recurring support context across chats on this device.</p>
+                            <label for="personalIntelligenceCheckbox" class="block text-sm font-medium text-gray-300">Personal Intelligence</label>
+                            <p class="text-xs text-gray-400 mt-1">Optional. When active, Aura can carry preferences and approved context across chats for this profile. Turning it off pauses retrieval and learning without deleting stored data.</p>
                         </div>
-                        <input id="userMemoryCheckbox" type="checkbox" class="mt-1 h-4 w-4 rounded border-gray-500 bg-gray-800 text-pink-600 focus:ring-pink-500">
+                        <input id="personalIntelligenceCheckbox" type="checkbox" class="mt-1 h-4 w-4 rounded border-gray-500 bg-gray-800 text-pink-600 focus:ring-pink-500" data-block-during-response="true">
                     </div>
-                    <div id="userMemoryStatusText" class="text-xs text-gray-400">Cross-chat memory is off.</div>
+                    <div id="personalIntelligenceStatusText" class="text-xs text-gray-400">Not enabled. Aura only uses the current chat.</div>
+                    <p class="text-xs text-gray-400">Sensitive details are remembered only when you explicitly ask Aura to remember them.</p>
                 </div>
                 <div class="space-y-3 rounded-2xl border border-white/10 p-4">
                     <div>
                         <h4 class="text-sm font-semibold text-gray-200">Local Feedback Learning</h4>
-                        <p class="text-xs text-gray-400 mt-1">Uses your response ratings and explicit personal examples to adapt Aura on this device. Raw feedback stays separate from companion memory.</p>
+                        <p class="text-xs text-gray-400 mt-1">Response ratings can guide an immediate retry. Only eligible feedback saved while Personal Intelligence is active can influence future replies.</p>
                     </div>
                     <div id="feedbackLearningStatusText" class="text-xs text-gray-400">No response feedback saved yet.</div>
-                    <button id="clearFeedbackButton" type="button" class="px-3 py-2 rounded-xl transition duration-200 text-sm">Clear Feedback Learning</button>
+                    <button id="clearFeedbackButton" type="button" class="px-3 py-2 rounded-xl transition duration-200 text-sm" data-block-during-response="true">Clear Feedback Learning</button>
                 </div>
                 <div class="space-y-3 rounded-2xl border border-white/10 p-4">
                     <div>
                         <h4 class="text-sm font-semibold text-gray-200">Privacy & Data</h4>
-                        <p class="text-xs text-gray-400 mt-1">Export your local Aura data, clear cross-chat memory, or wipe chats, feedback, and settings from this browser.</p>
+                        <p class="text-xs text-gray-400 mt-1">Export the active profile, clear only its cross-chat memory, or wipe every local profile and device setting.</p>
                     </div>
                     <div class="flex flex-wrap gap-2">
-                        <button id="exportDataButton" type="button" class="px-3 py-2 rounded-xl transition duration-200 text-sm">Export Data</button>
-                        <button id="clearMemoryButton" type="button" class="px-3 py-2 rounded-xl transition duration-200 text-sm">Forget Memory</button>
-                        <button id="deleteAllDataButton" type="button" class="px-3 py-2 rounded-xl transition duration-200 text-sm">Delete All Data</button>
+                        <button id="exportDataButton" type="button" class="px-3 py-2 rounded-xl transition duration-200 text-sm" data-block-during-response="true">Export Active Profile</button>
+                        <button id="clearMemoryButton" type="button" class="px-3 py-2 rounded-xl transition duration-200 text-sm" data-block-during-response="true">Forget Profile Memory</button>
+                        <button id="deleteAllDataButton" type="button" class="px-3 py-2 rounded-xl transition duration-200 text-sm" data-block-during-response="true">Delete All Data</button>
                     </div>
                 </div>
             </div>
             <div class="mt-8 flex justify-end space-x-4">
                 <button type="button" id="cancelSettingsButton" class="px-4 py-2 rounded-xl transition duration-200">Cancel</button>
-                <button type="button" id="resetSettingsButton" class="px-4 py-2 rounded-xl transition duration-200">Reset</button>
-                <button type="button" id="saveSettingsButton" class="px-4 py-2 font-semibold rounded-xl transition duration-200">Save</button>
+                <button type="button" id="resetSettingsButton" class="px-4 py-2 rounded-xl transition duration-200" data-block-during-response="true">Reset</button>
+                <button type="button" id="saveSettingsButton" class="px-4 py-2 font-semibold rounded-xl transition duration-200" data-block-during-response="true">Save</button>
             </div>
         </div>
     </div>
@@ -227,6 +247,7 @@
     </div>
 
     <script src="js/config.js"></script>
+    <script src="js/personal-intelligence.js"></script>
     <script src="js/model-routing.js"></script>
     <script src="js/turn-policy.js"></script>
     <script src="js/tool-artifacts.js"></script>
