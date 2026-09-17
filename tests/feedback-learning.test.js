@@ -1,5 +1,5 @@
 const assert = require('node:assert/strict');
-const feedbackLearning = require('../js/feedback-learning');
+const feedbackLearning = require('../public/js/feedback-learning');
 
 let state = feedbackLearning.createState();
 

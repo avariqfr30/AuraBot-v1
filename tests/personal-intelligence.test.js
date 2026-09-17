@@ -1,5 +1,5 @@
 const assert = require('node:assert/strict');
-const personalIntelligence = require('../js/personal-intelligence');
+const personalIntelligence = require('../public/js/personal-intelligence');
 
 class MemoryStorage {
     constructor(entries = {}) {

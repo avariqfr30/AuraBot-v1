@@ -3,7 +3,7 @@ const { test } = require('node:test');
 const fs = require('node:fs');
 const vm = require('node:vm');
 const path = require('node:path');
-const { createRuntime } = require('../js/request-runtime');
+const { createRuntime } = require('../public/js/request-runtime');
 
 function harness({ fetchImpl, retrievalTimeoutMs = 15 } = {}) {
     const runtime = createRuntime({ fetchImpl, retrievalTimeoutMs, requestTimeoutMs: 100 });
@@ -45,7 +45,7 @@ function harness({ fetchImpl, retrievalTimeoutMs = 15 } = {}) {
         getOllamaResponse: async () => (await runtime.fetchJson('/generate')).data.response,
         createToolByType: async () => ({ id: 'tool-1' })
     };
-    const source = fs.readFileSync(path.join(__dirname, '../js/app.js'), 'utf8');
+    const source = fs.readFileSync(path.join(__dirname, '../public/js/app.js'), 'utf8');
     // Execute the real handlers with small DOM/model doubles, without app startup.
     const handlerSource = source.slice(0, source.indexOf("    userInput.addEventListener('keydown'"));
     vm.runInNewContext(handlerSource + `

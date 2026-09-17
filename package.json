@@ -8,14 +8,15 @@
     "start:with-chroma": "npm run chroma:up && npm start",
     "chroma:up": "node ./scripts/chroma-up.js",
     "chroma:down": "node ./scripts/chroma-down.js",
-    "chroma:logs": "./scripts/chroma-logs.sh",
+    "chroma:logs": "node ./scripts/chroma-logs.js",
     "examples:seed": "node ./scripts/seed-examples.js",
-    "chroma:up:docker": "docker compose up -d chromadb",
-    "chroma:down:docker": "docker compose stop chromadb",
-    "chroma:logs:docker": "docker compose logs -f chromadb",
-    "check": "node --check server.js && node --check lib/memory-results.js && node --check lib/profile-scope.js && node --check lib/response-examples.js && node --check scripts/seed-examples.js && node --check js/app.js && node --check js/chat-logic.js && node --check js/config.js && node --check js/model-routing.js && node --check js/turn-policy.js && node --check js/personal-intelligence.js && node --check js/tool-artifacts.js && node --check js/feedback-learning.js && node --check js/ui.js && node tests/memory-results.test.js && node tests/profile-scope.test.js && node tests/profile-retrieval.test.js && node tests/model-routing.test.js && node tests/turn-policy.test.js && node tests/tool-artifacts.test.js && node tests/response-examples.test.js && node tests/feedback-learning.test.js && node tests/personal-intelligence.test.js && node tests/settings-regression.test.js",
-    "check:resilience": "node --check js/request-runtime.js && node --check lib/request-bounds.js && node --check lib/chroma-health.js && node --check scripts/chroma-up.js && node --test tests/request-runtime.test.js tests/chat-resilience.test.js && node tests/server-request-bounds.test.js && node tests/chroma-health.test.js",
-    "test": "npm run check && npm run check:resilience"
+    "chroma:up:docker": "node ./scripts/chroma-docker.js up",
+    "chroma:down:docker": "node ./scripts/chroma-docker.js stop",
+    "chroma:logs:docker": "node ./scripts/chroma-docker.js logs",
+    "check": "node --check server.js && node --check lib/memory-results.js && node --check lib/profile-scope.js && node --check lib/response-examples.js && node --check lib/runtime-paths.js && node --check lib/chroma-process.js && node --check scripts/seed-examples.js && node --check scripts/chroma-up.js && node --check scripts/chroma-down.js && node --check scripts/chroma-logs.js && node --check scripts/chroma-docker.js && node --check public/js/app.js && node --check public/js/chat-logic.js && node --check public/js/config.js && node --check public/js/model-routing.js && node --check public/js/turn-policy.js && node --check public/js/personal-intelligence.js && node --check public/js/tool-artifacts.js && node --check public/js/feedback-learning.js && node --check public/js/ui.js && node tests/memory-results.test.js && node tests/profile-scope.test.js && node tests/profile-retrieval.test.js && node tests/model-routing.test.js && node tests/turn-policy.test.js && node tests/tool-artifacts.test.js && node tests/response-examples.test.js && node tests/feedback-learning.test.js && node tests/personal-intelligence.test.js && node tests/settings-regression.test.js",
+    "check:resilience": "node --check public/js/request-runtime.js && node --check lib/request-bounds.js && node --check lib/chroma-health.js && node --check scripts/chroma-up.js && node --test tests/request-runtime.test.js tests/chat-resilience.test.js && node tests/server-request-bounds.test.js && node tests/chroma-health.test.js",
+    "check:security": "node --test tests/runtime-paths.test.js tests/chroma-process.test.js tests/chroma-docker.test.js tests/server-security.test.js",
+    "test": "npm run check && npm run check:resilience && npm run check:security"
   },
   "repository": {
     "type": "git",
@@ -25,15 +26,17 @@
   "author": "",
   "license": "ISC",
   "type": "commonjs",
+  "engines": {
+    "node": ">=24.0.0 <25.0.0"
+  },
   "bugs": {
     "url": "https://github.com/avariqfr30/AuraBot-v1/issues"
   },
   "homepage": "https://github.com/avariqfr30/AuraBot-v1#readme",
   "dependencies": {
-    "axios": "^1.13.6",
-    "chromadb": "^3.3.3",
-    "cors": "^2.8.6",
-    "dotenv": "^17.3.1",
+    "axios": "^1.20.0",
+    "chromadb": "^3.5.0",
+    "dotenv": "^17.4.2",
     "express": "^5.2.1"
   }
 }

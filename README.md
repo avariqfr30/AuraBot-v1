@@ -7,19 +7,19 @@ Aura is a locally hosted AI companion with:
 - live OSINT/search via Serper
 - a browser UI for chats, tools, and behavioral insights
 
-The app now runs in a host-machine model: the machine running Aura can act as the server for other devices on the same network instead of every browser needing its own local Ollama instance.
+Aura's beta configuration is intentionally single-user and same-device. The Node server, nginx example, and bundled Chroma configuration bind to loopback by default and are not intended to serve other devices.
 
 ## What Changed
 
-- The browser no longer hardcodes `127.0.0.1` for chat, memory, or search.
-- The Node server now serves the web app directly.
+- The browser uses same-origin requests for chat, memory, and search.
+- The Node server serves only the explicit `public/` browser-asset directory.
 - Ollama calls are proxied through the Aura server.
 - Search was upgraded into a structured OSINT flow with richer evidence and source-backed synthesis.
-- A sample nginx config is included at [deploy/nginx/aura.conf](deploy/nginx/aura.conf).
+- A loopback-only nginx example is included at [deploy/nginx/aura.conf](deploy/nginx/aura.conf).
 
 ## Requirements
 
-- Node.js 18+
+- Node.js 24.21.0 LTS (see `.nvmrc`)
 - Ollama running on the host machine
 - Chroma running on the host machine
 - A Serper API key for live search
@@ -76,10 +76,9 @@ You can also do both in one shot:
 npm run start:with-chroma
 ```
 
-6. Open the app:
+6. Open the app on the same machine at `http://127.0.0.1:3000`.
 
-- On the same machine: `http://127.0.0.1:3000`
-- From another device on the LAN: `http://<host-machine-ip>:3000`
+Aura does not listen on the machine's LAN address by default. Do not set `HOST` to a non-loopback address unless you separately provide authentication, TLS, restrictive CORS, and ownership/access controls. Those controls are not part of this beta.
 
 ## nginx Deployment
 
@@ -88,18 +87,22 @@ If you want nginx in front of Aura:
 1. Start Aura on the host machine with `npm start`.
 2. Copy [deploy/nginx/aura.conf](deploy/nginx/aura.conf) into your nginx sites config.
 3. Reload nginx.
-4. Open `http://<host-machine-ip>` or your configured hostname.
+4. Open `http://127.0.0.1` on the same machine.
 
-The nginx layer simply fronts the Aura Node server, which already serves the UI and proxies Ollama for connected clients.
+The example nginx listener is also loopback-only. Making nginx public would bypass the same-device release boundary and requires the additional controls described above.
 
 ## Environment Variables
 
 See [.env.example](.env.example) for the full set. The main ones are:
 
 - `PORT`: Aura server port
-- `HOST`: bind address, defaults to `0.0.0.0`
+- `HOST`: bind address, defaults to `127.0.0.1`
+- `AURA_DATA_DIR`: absolute or repository-relative runtime directory, defaults to `.aura-data`
 - `OLLAMA_URL`: Ollama base URL on the host machine
 - `CHROMA_URL`: Chroma base URL on the host machine
+- `CHROMA_HOST`: Chroma bind address, defaults to `127.0.0.1`
+- `CHROMA_PORT`: Chroma port, defaults to `8000`
+- `CHROMA_PATH`: optional existing Chroma storage override; relative paths resolve from the repository root
 - `EMBEDDING_MODEL`: embedding model used for memory
 - `SERPER_API_KEY`: API key for live OSINT/search
 
@@ -141,7 +144,7 @@ npm run chroma:logs
 npm run chroma:down
 ```
 
-By default, Aura starts ChromaDB on `http://127.0.0.1:8000` and stores data in `./chroma-data`.
+By default, Aura starts ChromaDB on `http://127.0.0.1:8000` and stores its database, log, and PID beneath the absolute path resolved from `AURA_DATA_DIR` (`./.aura-data` by default). Docker also publishes Chroma only on `127.0.0.1:8000`.
 
 ### Chat stalls or an embedding service becomes unavailable
 
@@ -164,7 +167,7 @@ python3 -m venv .venv
 
 ### Optional Docker fallback
 
-If you ever want Docker after all, the old path is still there:
+If you prefer Docker, use the validated wrapper (it resolves and rejects runtime paths inside `public/` before invoking Compose):
 
 ```bash
 npm run chroma:up:docker
@@ -176,12 +179,26 @@ npm run chroma:down:docker
 Chroma’s official docs support running a local server from the CLI with:
 
 ```bash
-chroma run --path ./chroma-data --host 127.0.0.1 --port 8000
+chroma run --path ./.aura-data/chroma --host 127.0.0.1 --port 8000
 ```
 
 That is the same approach Aura now uses under the hood.
 
 - [Client-Server Mode](https://docs.trychroma.com/docs/run-chroma/client-server)
+
+### Existing Chroma data, migration, and backups
+
+Aura never deletes or silently moves an existing `chroma-data/` directory. Before an upgrade or migration:
+
+1. Stop Aura and Chroma with `npm run chroma:down`.
+2. Back up the complete existing directory while Chroma is stopped, preserving file permissions.
+3. Choose one of these approaches:
+   - Keep the existing location by setting `CHROMA_PATH=chroma-data`.
+   - Copy—not move—the directory to `.aura-data/chroma`, then leave the original backup untouched until verification is complete.
+4. Start Chroma with `npm run chroma:up`.
+5. Open Aura and verify expected memories and response examples before removing any old copy manually.
+
+For backups of the new default, stop Chroma and copy the complete `.aura-data/` directory. During application upgrades, preserve `.aura-data/`; it is ignored by Git and is not part of the browser-served `public/` tree. `AURA_DATA_DIR` and `CHROMA_PATH` are rejected if they resolve inside `public/`.
 
 ## OSINT Flow
 
@@ -245,6 +262,7 @@ Deleting a chat removes its local feedback authority, clearing Feedback Learning
 
 ## Notes
 
-- Full chat, memory, and search features depend on the Aura server. Opening `index.html` directly is no longer the recommended path.
-- If you expose Aura beyond your local network, put it behind proper authentication and TLS before treating it as an internet-facing service.
+- Full chat, memory, and search features depend on the Aura server. Open `http://127.0.0.1:3000`; the source `public/index.html` is not a standalone deployment target.
+- Binding Aura or nginx beyond loopback requires authentication, TLS, restrictive CORS, and ownership controls. This repository does not provide those controls.
+- Release verification, manual network checks, branch-protection guidance, the historical-secret blocker, and the GitHub Pages blocker are documented in [docs/release-verification.md](docs/release-verification.md).
 - MedGemma 1.5 is a medical model. Aura now adds MedGemma-specific prompt guidance for triage, uncertainty, and red-flag handling when that family of model is selected, but this is still not a substitute for clinician review or deployment-specific validation.

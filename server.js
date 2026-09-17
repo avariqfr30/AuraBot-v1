@@ -1,9 +1,8 @@
-require('dotenv').config();
+require('dotenv').config({ quiet: true });
 
 const path = require('path');
 const crypto = require('crypto');
 const express = require('express');
-const cors = require('cors');
 const axios = require('axios');
 const { ChromaClient } = require('chromadb');
 const {
@@ -33,9 +32,18 @@ const {
 
 const app = express();
 
-const HOST = process.env.HOST || '0.0.0.0';
-const PORT = Number(process.env.PORT || 3000);
+const DEFAULT_HOST = '127.0.0.1';
+
+function resolveServerConfig(env = process.env) {
+    return {
+        host: env.HOST || DEFAULT_HOST,
+        port: Number(env.PORT || 3000)
+    };
+}
+
+const { host: HOST, port: PORT } = resolveServerConfig();
 const APP_ROOT = __dirname;
+const PUBLIC_DIR = path.join(APP_ROOT, 'public');
 const REQUEST_TIMEOUT_MS = normalizeTimeoutMs(process.env.REQUEST_TIMEOUT_MS, 90000);
 const CHROMA_TIMEOUT_MS = normalizeTimeoutMs(process.env.CHROMA_TIMEOUT_MS, 10000);
 const EMBEDDING_TIMEOUT_MS = normalizeTimeoutMs(process.env.EMBEDDING_TIMEOUT_MS, 8000);
@@ -71,9 +79,8 @@ const responseCaches = {
     osint: new Map()
 };
 
-app.use(cors());
 app.use(express.json({ limit: '2mb' }));
-app.use(express.static(APP_ROOT));
+app.use(express.static(PUBLIC_DIR));
 app.use((req, res, next) => {
     if (!req.path.startsWith('/api/')) return next();
 
@@ -872,9 +879,28 @@ app.use((req, res) => {
         return res.status(404).json({ error: 'Not found' });
     }
 
-    return res.sendFile(path.join(APP_ROOT, 'index.html'));
+    return res.status(404).type('text/plain').send('Not found');
 });
 
-app.listen(PORT, HOST, () => {
-    console.log(`Aura app server live on http://${HOST}:${PORT}`);
-});
+function startServer({ host = HOST, port = PORT } = {}) {
+    return app.listen(port, host, function onListening() {
+        const address = this.address();
+        const listeningPort = typeof address === 'object' && address ? address.port : port;
+        console.log(`Aura app server live on http://${host}:${listeningPort}`);
+    });
+}
+
+if (require.main === module) {
+    startServer();
+}
+
+module.exports = {
+    APP_ROOT,
+    DEFAULT_HOST,
+    HOST,
+    PORT,
+    PUBLIC_DIR,
+    app,
+    resolveServerConfig,
+    startServer
+};

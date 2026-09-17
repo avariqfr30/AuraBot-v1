@@ -2,7 +2,7 @@ const assert = require('node:assert/strict');
 
 let toolArtifacts = null;
 try {
-    toolArtifacts = require('../js/tool-artifacts');
+    toolArtifacts = require('../public/js/tool-artifacts');
 } catch {
     toolArtifacts = null;
 }

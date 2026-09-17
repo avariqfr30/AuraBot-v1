@@ -4,7 +4,7 @@ const {
     classifyTurn,
     resolveModelRoute,
     resolveInferencePolicy
-} = require('../js/model-routing');
+} = require('../public/js/model-routing');
 
 const GPT = 'gpt-oss:120b-cloud';
 const MED = 'medgemma1.5:4b';

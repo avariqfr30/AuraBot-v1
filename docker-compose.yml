@@ -3,11 +3,11 @@ services:
     image: chromadb/chroma:0.5.23
     container_name: aurabot-chromadb
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
     environment:
       IS_PERSISTENT: "TRUE"
       ANONYMIZED_TELEMETRY: "FALSE"
       ALLOW_RESET: "FALSE"
     volumes:
-      - ./chroma-data:/chroma/chroma
+      - "${AURA_CHROMA_DOCKER_PATH:?Use npm run chroma:up:docker so the runtime path is validated}:/chroma/chroma"
     restart: unless-stopped

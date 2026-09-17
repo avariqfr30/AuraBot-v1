@@ -63,8 +63,10 @@ temp/
 *.bak
 
 # Runtime state and service data
+.aura-data/
 .chroma.pid
 chroma.log
+*.log
 chroma-data/
 *.sqlite
 *.sqlite3

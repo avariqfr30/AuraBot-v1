@@ -2,7 +2,7 @@ const assert = require('node:assert/strict');
 
 let turnPolicy = null;
 try {
-    turnPolicy = require('../js/turn-policy');
+    turnPolicy = require('../public/js/turn-policy');
 } catch {
     turnPolicy = null;
 }

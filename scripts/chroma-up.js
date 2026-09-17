@@ -3,17 +3,23 @@
 const fs = require('fs');
 const net = require('net');
 const path = require('path');
+const crypto = require('node:crypto');
 const { spawn } = require('child_process');
 const {
     checkChromaHealth,
     describeHealthFailure,
     waitForChromaReady
 } = require('../lib/chroma-health');
+const { resolveRuntimePaths } = require('../lib/runtime-paths');
+const { parsePidRecord } = require('../lib/chroma-process');
 
 const rootDir = path.resolve(__dirname, '..');
-const pidFile = path.join(rootDir, '.chroma.pid');
-const logFile = path.join(rootDir, 'chroma.log');
-const chromaPath = process.env.CHROMA_PATH || path.join(rootDir, 'chroma-data');
+const {
+    dataDir,
+    pidFile,
+    logFile,
+    chromaPath
+} = resolveRuntimePaths(process.env, rootDir);
 const chromaHost = process.env.CHROMA_HOST || '127.0.0.1';
 const chromaPort = Number(process.env.CHROMA_PORT || 8000);
 
@@ -65,7 +71,7 @@ function isPortOpen() {
 
 async function main() {
     if (fs.existsSync(pidFile)) {
-        const existingPid = Number(fs.readFileSync(pidFile, 'utf8').trim());
+        const { pid: existingPid } = parsePidRecord(fs.readFileSync(pidFile, 'utf8'));
         if (existingPid && isProcessRunning(existingPid)) {
             const health = await checkChromaHealth({
                 host: chromaHost,
@@ -111,20 +117,26 @@ async function main() {
         return;
     }
 
+    fs.mkdirSync(dataDir, { recursive: true });
     fs.mkdirSync(chromaPath, { recursive: true });
     const logFd = fs.openSync(logFile, 'a');
+    const processToken = crypto.randomUUID();
     const child = spawn(
         chromaBin,
         ['run', '--path', chromaPath, '--host', chromaHost, '--port', String(chromaPort)],
         {
             cwd: rootDir,
             detached: true,
+            env: {
+                ...process.env,
+                AURA_CHROMA_PROCESS_TOKEN: processToken
+            },
             stdio: ['ignore', logFd, logFd]
         }
     );
 
     child.unref();
-    fs.writeFileSync(pidFile, `${child.pid}\n`);
+    fs.writeFileSync(pidFile, `${JSON.stringify({ pid: child.pid, token: processToken })}\n`);
 
     const readiness = await waitForChromaReady({
         host: chromaHost,

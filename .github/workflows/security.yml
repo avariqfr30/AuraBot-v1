@@ -1,0 +1,63 @@
+name: Security gates
+
+on:
+  push:
+    branches:
+      - dev
+      - main
+  pull_request:
+    branches:
+      - dev
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out full history
+        uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3 # v6.0.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@2028fbc5c25fe9cf00d9f06a71cc4710d4507903 # v6.0.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Scan current tracked tree for secrets
+        uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # v3.0.0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_ENABLE_COMMENTS: "false"
+          GITLEAKS_ENABLE_UPLOAD_ARTIFACT: "false"
+
+      - name: Scan current checkout explicitly
+        run: gitleaks dir . --redact --no-banner
+
+      - name: Scan all commits in the change range
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$GITHUB_EVENT_NAME" == "pull_request" ]]; then
+            range="$(git merge-base "origin/$GITHUB_BASE_REF" "$GITHUB_SHA")..$GITHUB_SHA"
+          elif [[ "${GITHUB_EVENT_BEFORE:-}" =~ ^0+$ ]]; then
+            range="$(git rev-list --max-parents=0 "$GITHUB_SHA" | tail -n 1)..$GITHUB_SHA"
+          else
+            range="$GITHUB_EVENT_BEFORE..$GITHUB_SHA"
+          fi
+          gitleaks git . --log-opts="$range" --redact --no-banner
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Run tests
+        run: npm test
+
+      - name: Audit high-severity vulnerabilities
+        run: npm audit --audit-level=high

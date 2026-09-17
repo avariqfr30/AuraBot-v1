@@ -1,6 +1,6 @@
 const assert = require('node:assert/strict');
 const { test } = require('node:test');
-const { createRuntime } = require('../js/request-runtime');
+const { createRuntime } = require('../public/js/request-runtime');
 
 const never = () => new Promise(() => {});
 const ok = (data) => ({ ok: true, status: 200, json: async () => data });

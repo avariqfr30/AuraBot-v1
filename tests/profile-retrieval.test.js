@@ -3,11 +3,11 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const chatLogic = fs.readFileSync(
-    path.resolve(__dirname, '..', 'js', 'chat-logic.js'),
+    path.resolve(__dirname, '..', 'public', 'js', 'chat-logic.js'),
     'utf8'
 );
 const app = fs.readFileSync(
-    path.resolve(__dirname, '..', 'js', 'app.js'),
+    path.resolve(__dirname, '..', 'public', 'js', 'app.js'),
     'utf8'
 );
 
