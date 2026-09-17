@@ -1303,6 +1303,10 @@ button:disabled {
     flex-shrink: 0;
 }
 
+#stopResponseButton.hidden {
+    display: none;
+}
+
 .composer-hint {
     margin: 6px 58px 0;
     color: var(--text-muted);

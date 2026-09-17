@@ -1,6 +1,8 @@
 document.addEventListener('DOMContentLoaded', () => {
     const userInput = document.getElementById('userInput');
     const sendButton = document.getElementById('sendButton');
+    const stopResponseButton = document.getElementById('stopResponseButton');
+    const responseStatus = document.getElementById('responseStatus');
     const newChatButton = document.getElementById('newChatButton');
     const chatListContainer = document.getElementById('chatList');
     const chatMessagesSurface = document.getElementById('chatMessages');
@@ -54,6 +56,10 @@ document.addEventListener('DOMContentLoaded', () => {
     function syncResponseInFlightControls() {
         const appBusy = responseInFlight || profileOperationInFlight;
         if (sendButton) sendButton.disabled = appBusy;
+        if (stopResponseButton) {
+            stopResponseButton.classList.toggle('hidden', !responseInFlight);
+            stopResponseButton.disabled = Boolean(responseRuntime.getTurnSignal()?.aborted);
+        }
         if (newChatButton) newChatButton.disabled = appBusy;
         if (settingsButton) settingsButton.disabled = appBusy;
         if (fileUploadButton) fileUploadButton.disabled = appBusy;
@@ -81,8 +87,29 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function setResponseInFlight(value) {
+        if (value && !responseInFlight) {
+            responseRuntime.beginTurn();
+            if (responseStatus) responseStatus.textContent = '';
+        } else if (!value && responseInFlight) {
+            if (responseStatus && !responseStatus.textContent && responseRuntime.isRetrievalUnavailable()) {
+                responseStatus.textContent = 'Some saved context was unavailable for this reply.';
+            }
+            responseRuntime.endTurn();
+        }
         responseInFlight = Boolean(value);
         syncResponseInFlightControls();
+    }
+
+    function handleResponseInterruption(error) {
+        const reason = responseRuntime.getTurnSignal()?.reason || error;
+        if (!['AbortError', 'TimeoutError'].includes(reason?.name)) return false;
+        if (responseStatus) {
+            responseStatus.textContent = reason.name === 'AbortError'
+                ? 'Response stopped. You can send another message.'
+                : 'The response took too long. Your message is saved; please try again.';
+        }
+        chatManager.pendingResponseMetadata.clear();
+        return true;
     }
 
     function setProfileOperationInFlight(value) {
@@ -744,6 +771,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     async function processToolTags(rawResponse, chatId = chatManager.getActiveChatId()) {
+        responseRuntime.throwIfAborted();
         const artifacts = window.AURA_TOOL_ARTIFACTS.parseToolArtifacts(rawResponse);
 
         if (artifacts.creates.length > 0) {
@@ -752,6 +780,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         for (const entry of artifacts.creates) {
             const toolData = await createToolByType(entry.type, entry.theme);
+            responseRuntime.throwIfAborted();
             if (toolData) chatManager.addOrUpdateToolInChat(chatId, entry.type, toolData);
         }
 
@@ -772,6 +801,7 @@ document.addEventListener('DOMContentLoaded', () => {
         chatId = chatManager.getActiveChatId(),
         metadata = {}
     ) {
+        responseRuntime.throwIfAborted();
         const content = artifact?.content || fallback;
         if (!content) return false;
 
@@ -822,6 +852,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
             addAssistantArtifact(artifact, '', requestChatId);
             refreshUI();
+        } catch (error) {
+            if (!handleResponseInterruption(error)) {
+                console.error('Tool follow-up failed:', error);
+                if (responseStatus) responseStatus.textContent = 'Could not finish this reply. Please try again.';
+            }
         } finally {
             hideTypingIndicator();
             setResponseInFlight(false);
@@ -892,9 +927,11 @@ document.addEventListener('DOMContentLoaded', () => {
         showTypingIndicator(getProgressMessage(message, Boolean(currentAttachment)));
 
         try {
-            const documentText = currentAttachment ? await readAttachedFile(currentAttachment) : null;
+            const documentText = currentAttachment
+                ? await responseRuntime.waitFor(() => readAttachedFile(currentAttachment))
+                : null;
             updateTypingIndicator(getProgressMessage(message, false));
-            await ensureRuntimeLocationFresh();
+            await responseRuntime.waitFor(() => ensureRuntimeLocationFresh());
             const screenResult = await chatManager.preScreenMessage(message, requestChatId);
 
             if (screenResult === 'CRISIS') {
@@ -924,6 +961,7 @@ document.addEventListener('DOMContentLoaded', () => {
             );
             refreshUI();
         } catch (error) {
+            if (handleResponseInterruption(error)) return;
             console.error('Message handling failed:', error);
             addAssistantArtifact(
                 {
@@ -1258,6 +1296,7 @@ document.addEventListener('DOMContentLoaded', () => {
             }
             refreshUI();
         } catch (error) {
+            if (handleResponseInterruption(error)) return;
             console.error('Feedback retry failed:', error);
             addAssistantArtifact(
                 { content: "I couldn't complete that retry. Your feedback is still saved locally." },
@@ -1521,6 +1560,11 @@ document.addEventListener('DOMContentLoaded', () => {
             const artifact = await processToolTags(message, requestChatId);
             addAssistantArtifact(artifact, '', requestChatId);
             refreshUI();
+        } catch (error) {
+            if (!handleResponseInterruption(error)) {
+                console.error('Follow-up response failed:', error);
+                if (responseStatus) responseStatus.textContent = 'Could not finish this reply. Please try again.';
+            }
         } finally {
             hideTypingIndicator();
             setResponseInFlight(false);
@@ -1579,6 +1623,12 @@ document.addEventListener('DOMContentLoaded', () => {
     });
     userInput.addEventListener('input', resizeComposer);
     sendButton.addEventListener('click', handleSendMessage);
+    stopResponseButton?.addEventListener('click', () => {
+        if (!responseInFlight) return;
+        responseRuntime.cancelTurn();
+        if (responseStatus) responseStatus.textContent = 'Stopping response…';
+        syncResponseInFlightControls();
+    });
     newChatButton.addEventListener('click', () => {
         if (responseInFlight || profileOperationInFlight) return;
         chatManager.createNewChat();

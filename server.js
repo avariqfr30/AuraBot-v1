@@ -14,6 +14,16 @@ const {
 } = require('./lib/response-examples');
 const { buildMemoryMatches } = require('./lib/memory-results');
 const {
+    createRequestAbortController,
+    fetchWithTimeout,
+    getRequestSignal,
+    isRequestAborted,
+    isRequestTimeout,
+    memoizeRecoverablePromise,
+    normalizeTimeoutMs,
+    runWithRequestContext
+} = require('./lib/request-bounds');
+const {
     normalizeProfileId,
     normalizeChatId,
     normalizeProfileDataScope,
@@ -26,7 +36,9 @@ const app = express();
 const HOST = process.env.HOST || '0.0.0.0';
 const PORT = Number(process.env.PORT || 3000);
 const APP_ROOT = __dirname;
-const REQUEST_TIMEOUT_MS = Number(process.env.REQUEST_TIMEOUT_MS || 90000);
+const REQUEST_TIMEOUT_MS = normalizeTimeoutMs(process.env.REQUEST_TIMEOUT_MS, 90000);
+const CHROMA_TIMEOUT_MS = normalizeTimeoutMs(process.env.CHROMA_TIMEOUT_MS, 10000);
+const EMBEDDING_TIMEOUT_MS = normalizeTimeoutMs(process.env.EMBEDDING_TIMEOUT_MS, 8000);
 const CHROMA_URL = process.env.CHROMA_URL || 'http://127.0.0.1:8000';
 const OLLAMA_URL = process.env.OLLAMA_URL || 'http://127.0.0.1:11434';
 const EMBEDDING_MODEL = process.env.EMBEDDING_MODEL || 'bge-m3:latest';
@@ -37,6 +49,17 @@ const chroma = new ChromaClient({
     port: Number(chromaTarget.port || 8000),
     ssl: chromaTarget.protocol === 'https:'
 });
+const configuredChromaFetch = chroma.apiClient.getConfig().fetch;
+if (typeof configuredChromaFetch === 'function') {
+    chroma.apiClient.setConfig({
+        fetch: (input, init) => fetchWithTimeout(
+            configuredChromaFetch,
+            input,
+            init,
+            { timeoutMs: CHROMA_TIMEOUT_MS, label: 'Chroma request' }
+        )
+    });
+}
 let memoryCollectionPromise = null;
 let responseExampleCollectionPromise = null;
 let personalResponseExampleCollectionPromise = null;
@@ -51,46 +74,61 @@ const responseCaches = {
 app.use(cors());
 app.use(express.json({ limit: '2mb' }));
 app.use(express.static(APP_ROOT));
+app.use((req, res, next) => {
+    if (!req.path.startsWith('/api/')) return next();
+
+    const requestAbort = createRequestAbortController(req, res);
+    const cleanup = () => requestAbort.cleanup();
+    res.once('finish', cleanup);
+    res.once('close', cleanup);
+    return runWithRequestContext(requestAbort.signal, next);
+});
 
 const ollamaEmbeddingFunction = {
     generate: async (texts) => {
-        const response = await axios.post(
-            `${OLLAMA_URL}/api/embed`,
-            { model: EMBEDDING_MODEL, input: texts },
-            { timeout: REQUEST_TIMEOUT_MS }
-        );
+        const requestSignal = getRequestSignal();
+        const response = await axios.post(`${OLLAMA_URL}/api/embed`, {
+            model: EMBEDDING_MODEL,
+            input: texts
+        }, {
+            timeout: EMBEDDING_TIMEOUT_MS,
+            ...(requestSignal ? { signal: requestSignal } : {})
+        });
         return response.data.embeddings;
     }
 };
 
 function getMemoryCollection() {
-    if (!memoryCollectionPromise) {
-        memoryCollectionPromise = chroma.getOrCreateCollection({
+    return memoizeRecoverablePromise(
+        () => chroma.getOrCreateCollection({
             name: 'aura_long_term_memory',
             embeddingFunction: ollamaEmbeddingFunction
-        });
-    }
-    return memoryCollectionPromise;
+        }),
+        () => memoryCollectionPromise,
+        (value) => { memoryCollectionPromise = value; }
+    );
 }
 
 function getResponseExampleCollection() {
-    if (!responseExampleCollectionPromise) {
-        responseExampleCollectionPromise = chroma.getOrCreateCollection({
+    return memoizeRecoverablePromise(
+        () => chroma.getOrCreateCollection({
             name: RESPONSE_EXAMPLE_COLLECTION,
             embeddingFunction: ollamaEmbeddingFunction
-        });
-    }
-    return responseExampleCollectionPromise;
+        }),
+        () => responseExampleCollectionPromise,
+        (value) => { responseExampleCollectionPromise = value; }
+    );
 }
 
 function getPersonalResponseExampleCollection() {
-    if (!personalResponseExampleCollectionPromise) {
-        personalResponseExampleCollectionPromise = chroma.getOrCreateCollection({
+    return memoizeRecoverablePromise(
+        () => chroma.getOrCreateCollection({
             name: PERSONAL_RESPONSE_EXAMPLE_COLLECTION,
             embeddingFunction: ollamaEmbeddingFunction
-        });
-    }
-    return personalResponseExampleCollectionPromise;
+        }),
+        () => personalResponseExampleCollectionPromise,
+        (value) => { personalResponseExampleCollectionPromise = value; }
+    );
 }
 
 function normalizeExampleLimit(value) {
@@ -364,7 +402,9 @@ async function buildOsintReport({ primaryQuery, supportingQueries = [], includeN
 }
 
 function respondWithUpstreamError(res, label, error) {
-    const status = error.response?.status || 500;
+    if (isRequestAborted()) return;
+
+    const status = error.response?.status || (isRequestTimeout(error) ? 504 : 500);
     const details = error.response?.data || error.message;
 
     console.error(`[${label}]`, details);
@@ -382,6 +422,7 @@ function isChromaUnavailable(error) {
     return (
         message.includes('Failed to connect to chromadb') ||
         message.includes('ECONNREFUSED') ||
+        isRequestTimeout(error) ||
         message.includes('connect') ||
         body.includes('Failed to connect to chromadb')
     );
@@ -422,13 +463,19 @@ app.get('/api/ollama/tags', async (_req, res) => {
 });
 
 app.post('/api/ollama/generate', async (req, res) => {
+    const requestAbort = createRequestAbortController(req, res);
     try {
         const response = await axios.post(`${OLLAMA_URL}/api/generate`, req.body, {
-            timeout: REQUEST_TIMEOUT_MS
+            timeout: REQUEST_TIMEOUT_MS,
+            signal: requestAbort.signal
         });
+        if (requestAbort.wasClientAborted()) return;
         res.json(response.data);
     } catch (error) {
+        if (requestAbort.wasClientAborted()) return;
         respondWithUpstreamError(res, 'Ollama generate request', error);
+    } finally {
+        requestAbort.cleanup();
     }
 });
 

@@ -143,6 +143,18 @@ npm run chroma:down
 
 By default, Aura starts ChromaDB on `http://127.0.0.1:8000` and stores data in `./chroma-data`.
 
+### Chat stalls or an embedding service becomes unavailable
+
+Memory and response-example retrieval have a 3-second browser budget. If retrieval fails, Aura continues with the available context, shows a short notice, and skips retrieval for 30 seconds before trying again. Stored memory is not deleted.
+
+The composer provides **Stop** during a response. It cancels requests for that response and suppresses late replies; disconnecting an Ollama generation request also cancels the server's upstream request. Individual browser requests are bounded to 90 seconds and a complete response to 180 seconds. Slow responses release the controls with a retry message.
+
+Server defaults separately bound Chroma transport requests to 10 seconds (`CHROMA_TIMEOUT_MS`) and embedding requests to 8 seconds (`EMBEDDING_TIMEOUT_MS`). Generation retains `REQUEST_TIMEOUT_MS`. These limits are distinct from the shorter optional-retrieval budget.
+
+`npm run chroma:up` requires a valid `/api/v2/heartbeat` response before reporting success. An existing process or an open port alone is insufficient. If an existing service is unresponsive, startup exits with an error and leaves it available for inspection. Check its logs before restarting; restarting does not require deleting `chroma-data`.
+
+Run `npm test` for the existing checks plus failure tests for stalled services, cancellation, late results, retrieval recovery, and Chroma readiness. These tests use controlled local services and do not require a live model or access to saved personal data.
+
 If the `chroma` CLI is missing, install it with:
 
 ```bash

@@ -4,6 +4,11 @@ const fs = require('fs');
 const net = require('net');
 const path = require('path');
 const { spawn } = require('child_process');
+const {
+    checkChromaHealth,
+    describeHealthFailure,
+    waitForChromaReady
+} = require('../lib/chroma-health');
 
 const rootDir = path.resolve(__dirname, '..');
 const pidFile = path.join(rootDir, '.chroma.pid');
@@ -42,10 +47,6 @@ function isProcessRunning(pid) {
     }
 }
 
-function wait(ms) {
-    return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
 function isPortOpen() {
     return new Promise((resolve) => {
         const socket = net.createConnection({ host: chromaHost, port: chromaPort });
@@ -63,6 +64,42 @@ function isPortOpen() {
 }
 
 async function main() {
+    if (fs.existsSync(pidFile)) {
+        const existingPid = Number(fs.readFileSync(pidFile, 'utf8').trim());
+        if (existingPid && isProcessRunning(existingPid)) {
+            const health = await checkChromaHealth({
+                host: chromaHost,
+                port: chromaPort
+            });
+            if (health.ok) {
+                console.log(`Chroma is already healthy on PID ${existingPid} at http://${chromaHost}:${chromaPort}`);
+                return;
+            }
+
+            console.error(`Chroma process PID ${existingPid} is running but its heartbeat is unhealthy (${describeHealthFailure(health)}).`);
+            console.error('The process was left running. Inspect or stop it manually before retrying.');
+            process.exitCode = 1;
+            return;
+        }
+        fs.rmSync(pidFile, { force: true });
+    }
+
+    const existingHealth = await checkChromaHealth({
+        host: chromaHost,
+        port: chromaPort
+    });
+    if (existingHealth.ok) {
+        console.log(`Chroma is already healthy at http://${chromaHost}:${chromaPort}`);
+        return;
+    }
+
+    if (await isPortOpen()) {
+        console.error(`A service is already listening on http://${chromaHost}:${chromaPort}, but its Chroma heartbeat is unhealthy (${describeHealthFailure(existingHealth)}).`);
+        console.error('Refusing to start another process or terminate the existing service.');
+        process.exitCode = 1;
+        return;
+    }
+
     const chromaBin = resolveChromaBinary();
 
     if (!chromaBin) {
@@ -70,21 +107,8 @@ async function main() {
         console.error('Install it with:');
         console.error('  python3 -m venv .venv');
         console.error('  ./.venv/bin/python -m pip install -U pip chromadb');
-        process.exit(1);
-    }
-
-    if (fs.existsSync(pidFile)) {
-        const existingPid = Number(fs.readFileSync(pidFile, 'utf8').trim());
-        if (existingPid && isProcessRunning(existingPid)) {
-            console.log(`Chroma is already running on PID ${existingPid}`);
-            process.exit(0);
-        }
-        fs.rmSync(pidFile, { force: true });
-    }
-
-    if (await isPortOpen()) {
-        console.log(`Chroma is already listening on http://${chromaHost}:${chromaPort}`);
-        process.exit(0);
+        process.exitCode = 1;
+        return;
     }
 
     fs.mkdirSync(chromaPath, { recursive: true });
@@ -102,20 +126,29 @@ async function main() {
     child.unref();
     fs.writeFileSync(pidFile, `${child.pid}\n`);
 
-    for (let attempt = 0; attempt < 10; attempt += 1) {
-        if (await isPortOpen()) {
-            console.log(`Chroma started on http://${chromaHost}:${chromaPort} with PID ${child.pid}`);
-            process.exit(0);
-        }
-        await wait(500);
+    const readiness = await waitForChromaReady({
+        host: chromaHost,
+        port: chromaPort
+    });
+    if (readiness.ok) {
+        console.log(`Chroma started healthy on http://${chromaHost}:${chromaPort} with PID ${child.pid}`);
+        return;
     }
 
-    console.error('Failed to start Chroma. Recent log output:');
+    console.error(`Failed to start healthy Chroma with PID ${child.pid} (${describeHealthFailure(readiness)}).`);
+    if (readiness.lastAttempt) {
+        console.error(`Last heartbeat attempt: ${describeHealthFailure(readiness.lastAttempt)}.`);
+    }
+    console.error('The process was left running for manual inspection; no automatic termination was attempted.');
+    console.error('Recent log output:');
     try {
         const logContent = fs.readFileSync(logFile, 'utf8').trim().split('\n').slice(-20).join('\n');
         console.error(logContent);
     } catch (_error) {}
-    process.exit(1);
+    process.exitCode = 1;
 }
 
-main();
+main().catch((error) => {
+    console.error(`Failed to start Chroma: ${error.message}`);
+    process.exitCode = 1;
+});

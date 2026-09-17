@@ -2405,12 +2405,13 @@ function getRuntimeContextString() {
     ].join('\n');
 }
 
+const responseRuntime = window.AURA_REQUEST_RUNTIME.createRuntime();
+
 async function requestJson(url, options = {}) {
-    const response = await fetch(url, {
+    const { response, data } = await responseRuntime.fetchJson(url, {
         headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
         ...options
     });
-    const data = await response.json().catch(() => null);
 
     if (!response.ok) {
         throw new Error(extractErrorMessage(data, `Request failed with status ${response.status}`));
@@ -2419,11 +2420,19 @@ async function requestJson(url, options = {}) {
     return data;
 }
 
-async function postJson(url, body) {
-    return requestJson(url, {
+async function postJson(url, body, options = {}) {
+    const requestOptions = {
         method: 'POST',
-        body: JSON.stringify(body)
-    });
+        body: JSON.stringify(body),
+        ...options
+    };
+    if ([API_ENDPOINTS.searchMemory, API_ENDPOINTS.searchExamples, API_ENDPOINTS.searchPersonalExamples].includes(url)) {
+        return responseRuntime.retrieve(
+            (signal) => requestJson(url, { ...requestOptions, signal }),
+            { matches: [], examples: [] }
+        );
+    }
+    return requestJson(url, requestOptions);
 }
 
 function deriveResponseExampleTask(message, classification = {}, documentText = null) {
@@ -2553,6 +2562,7 @@ async function searchResponseExamples({
             ));
         return buildResponseExampleContext(combined);
     } catch (_error) {
+        responseRuntime.throwIfAborted();
         return '';
     }
 }
@@ -2562,7 +2572,8 @@ async function _callLLM(prompt, {
     format = null,
     callType = 'default',
     thinkingMode = getThinkingModeKey(),
-    routeDecision = null
+    routeDecision = null,
+    signal = responseRuntime.getTurnSignal()
 } = {}) {
     const inferencePolicy = window.AURA_MODEL_ROUTING.resolveInferencePolicy({
         modelName,
@@ -2583,7 +2594,7 @@ async function _callLLM(prompt, {
             ...(inferencePolicy.think ? { think: inferencePolicy.think } : {}),
             ...(Object.keys(options).length ? { options } : {}),
             ...(format ? { format } : {})
-        });
+        }, { signal });
 
         let rawReply = data.response?.trim() || null;
         const doneReason = String(data.done_reason || data.doneReason || '').toLowerCase();
@@ -2615,7 +2626,7 @@ async function _callLLM(prompt, {
                     stream: false,
                     ...(inferencePolicy.think ? { think: inferencePolicy.think } : {}),
                     ...(Object.keys(options).length ? { options } : {})
-                });
+                }, { signal });
                 const continuation = continuationData.response?.trim() || '';
                 if (!continuation) break;
                 rawReply = normalizeReplyWhitespace(`${rawReply} ${continuation}`);
@@ -2627,6 +2638,7 @@ async function _callLLM(prompt, {
         const reply = stripModelReasoningTokens(rawReply);
         return reply;
     } catch (error) {
+        if (error.name === 'AbortError' || error.name === 'TimeoutError') throw error;
         console.error('LLM Call Failed:', error);
         return null;
     }
@@ -2642,9 +2654,12 @@ async function fetchMarkdownContent(slug) {
     const folder = mapping[slug] || 'distortions';
 
     try {
-        const response = await fetch(`contents/${folder}/${slug}.md`);
-        return response.ok ? await response.text() : null;
+        return await responseRuntime.waitFor(async (signal) => {
+            const response = await fetch(`contents/${folder}/${slug}.md`, { signal });
+            return response.ok ? await response.text() : null;
+        });
     } catch (error) {
+        responseRuntime.throwIfAborted();
         console.error(`Failed to fetch ${slug}.md`, error);
         return null;
     }
@@ -2982,7 +2997,9 @@ class ChatManager {
                 normalUserTurnCount % 2 === 0 &&
                 this.isPersonalIntelligenceActive()
             ) {
-                this.runBehaviorAnalyzer(chatId);
+                this.runBehaviorAnalyzer(chatId).catch((error) => {
+                    console.warn('Background preference analysis unavailable:', error.name);
+                });
             }
         }
 
@@ -3003,7 +3020,7 @@ class ChatManager {
             profileId: sourceProfileId,
             text,
             metadata
-        });
+        }, { signal: null });
         this.pendingVectorWrites.set(request, sourceProfileId);
 
         try {
@@ -3062,6 +3079,7 @@ class ChatManager {
                 'Use only when it directly helps the current message. If it conflicts with the current turn, ignore it.'
             ].join('\n');
         } catch (_error) {
+            responseRuntime.throwIfAborted();
             return '';
         }
     }
@@ -3089,7 +3107,7 @@ class ChatManager {
             .replace('%STORE%', JSON.stringify(currentStore))
             .replace('%HISTORY%', historyStr);
 
-        const response = await _callLLM(prompt, { format: 'json', callType: 'analysis' });
+        const response = await _callLLM(prompt, { format: 'json', callType: 'analysis', signal: null });
         if (
             sourceProfileId !== this.getActiveProfileId() ||
             sourceContextEpoch !== this.getPersonalContextEpoch() ||
@@ -3114,7 +3132,7 @@ class ChatManager {
                     .replace('%STORE%', JSON.stringify(this.getUserMemoryStore(), null, 2))
                     .replace('%CHAT_PROFILE%', JSON.stringify(nextStore, null, 2))
                     .replace('%HISTORY%', historyStr),
-                { format: 'json', callType: 'analysis' }
+                { format: 'json', callType: 'analysis', signal: null }
             );
             if (
                 sourceProfileId !== this.getActiveProfileId() ||
@@ -4699,6 +4717,7 @@ async function runEvidenceComposerAgent(context) {
             )
         );
     } catch (error) {
+        responseRuntime.throwIfAborted();
         console.error('[SearchAgent] Full failure details:', error);
         return attachHighRiskSafetyRecommendations(
             buildHumanFallbackAnswer(context.contextualUserMessage, context.effectiveRoute),
@@ -4817,6 +4836,7 @@ async function runAuraAgentPipeline(
     chatId = chatManager.getActiveChatId()
 ) {
     const context = await buildAuraAgentContext(userMessage, documentText, chatId);
+    responseRuntime.throwIfAborted();
     context.originalUserMessage = userMessage;
 
     const knowledgeReply = await runKnowledgeComposerAgent(context);
