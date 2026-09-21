@@ -99,9 +99,9 @@ The signed-in account owns profiles, chats, feedback, Personal Intelligence stat
 
 GPT-OSS 120B Cloud remains Aura's primary model through the local Ollama API. The hosted UI discloses that inference is remote and links to Ollama's privacy policy. Ollama currently states that prompts and responses use zero data retention, are never logged, and are never used for training. The server allows only explicitly configured model IDs. Personal Intelligence and per-memory approval remain separate controls over what Aura adds to a prompt. Model availability, regional processing, policy changes, quotas, and the Ollama account used by the deployment must be reviewed before accepting clients.
 
-The hosted code has controlled two-account tests, but has not been exercised against a real OIDC provider, PostgreSQL deployment, Chroma service, or HTTPS browser session. Do not open it to clients until the hosted checks in [release verification](docs/release-verification.md) are complete. Serper web-search requests have a separate account-level opt-in because derived search terms leave Aura for another service.
+The hosted code has controlled two-account tests, but has not been exercised against a real OIDC provider, PostgreSQL deployment, Chroma service, or HTTPS browser session. Do not open it to clients until the hosted checks in [release verification](docs/release-verification.md) are complete. Deployment, backup, retention, and threat-boundary guidance is in [hosted security operations](docs/hosted-security-operations.md). Serper web-search requests have a separate account-level opt-in because derived search terms leave Aura for another service.
 
-`/api/health` reports process liveness. `/api/ready` checks the configured database, Ollama, and Chroma dependencies. Hosted inference and research have both IP and account request limits; inference also has an account concurrency limit and a 120,000-character prompt ceiling. The account limiter is process-local, so a multi-instance deployment needs a shared limiter before horizontal scaling.
+`/api/health` reports process liveness. `/api/ready` checks the configured database, required Ollama model IDs, and Chroma. Hosted inference and research have both IP and PostgreSQL-backed account request limits; inference also has an account concurrency limit, monthly unit budget, and a 120,000-character prompt ceiling. Account state and personal Chroma text are encrypted with a deployment-managed AES-256-GCM key. Chroma embeddings still require encrypted infrastructure storage.
 
 ## Environment Variables
 
@@ -117,6 +117,10 @@ See [.env.example](.env.example) for the full set. The main ones are:
 - `CHROMA_PATH`: optional existing Chroma storage override; relative paths resolve from the repository root
 - `EMBEDDING_MODEL`: embedding model used for memory
 - `SERPER_API_KEY`: API key for live OSINT/search
+- `AURA_DATA_ENCRYPTION_KEY`: hosted-only base64 32-byte data key, generated with `openssl rand -base64 32`
+- `AURA_DATA_KEY_ID`: identifier for the active hosted data key
+- `HOSTED_INFERENCE_MONTHLY_UNITS`: per-account monthly prompt-unit ceiling
+- `HOSTED_SEARCH_MONTHLY_REQUESTS`: per-account monthly external-research ceiling
 
 ## Troubleshooting
 

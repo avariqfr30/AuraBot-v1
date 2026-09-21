@@ -12,6 +12,9 @@ The optional hosted mode is a separate release track. It must not be considered 
 - Test sign-in from a second device, version conflict behavior, explicit old-profile import, logout, and complete hosted-account deletion including Chroma failures.
 - Verify that the separate Serper research consent blocks every search request before any external call and that revocation applies immediately.
 - Verify rate and concurrency limits, restore from PostgreSQL and Chroma backups, and run a real HTTPS deployment review before public exposure.
+- Verify raw PostgreSQL and Chroma records do not contain a seeded canary conversation, feedback response, or approved memory; verify the matching encryption key restores them in an isolated environment.
+- Interrupt account deletion after each Chroma phase, restart Aura, and verify access remains locked while maintenance completes the remaining phases.
+- Confirm the public host exposes only the TLS proxy; Node, Ollama, Chroma, and PostgreSQL must be unreachable from a separate network device.
 
 ## Automated verification
 
@@ -27,6 +30,8 @@ gitleaks git . --redact --no-banner
 git status --short
 git diff --check
 ```
+
+The repository exposure guard intentionally fails if a GitHub Pages publishing workflow or a database, key, environment file, or log appears beneath `public/`.
 
 Run the current-tree Gitleaks scan immediately after checkout, before installing `node_modules`; this keeps dependency contents out of the scan. If an ignored local `.env` exists, Gitleaks intentionally scans it and reports redacted findings rather than treating the ignore rule as an exemption. The current-tree scan must pass. CI also scans every commit in the PR/push range without a first-parent restriction, so secrets added on merged side branches are not skipped.
 
@@ -104,6 +109,8 @@ For legacy installations, leave `chroma-data/` untouched. Either set `CHROMA_PAT
 `origin/main` contains `.github/workflows/jekyll-gh-pages.yml`, which publishes the repository root. Aura requires its Node backend and must not be deployed through GitHub Pages.
 
 That workflow is absent from `dev`, `release-hardening`, and their merge base with `main`. Adding a replacement at the same path on this branch would create an add/add merge conflict. A separate PR based directly on `main` must delete or disable the Pages workflow. Release readiness is blocked until that PR is merged and Pages no longer publishes the repository root.
+
+The public-exposure guard runs in the security workflow and will reject a prospective `main` merge while the Pages workflow is present. Repository-owner action is still required to remove the workflow, disable the Pages source in repository settings, and verify the live URL no longer serves Aura.
 
 ## Recommended branch protection
 

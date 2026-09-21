@@ -74,6 +74,9 @@ chroma-data/
 *.db-shm
 *.db-wal
 *.pid
+backups/
+*.pgdump
+*.aura-backup
 
 # Local screenshots, recordings, and generated artifacts
 artifacts/

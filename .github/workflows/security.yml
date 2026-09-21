@@ -53,6 +53,9 @@ jobs:
           fi
           gitleaks git . --log-opts="$range" --redact --no-banner
 
+      - name: Reject static publishing and public sensitive files
+        run: node scripts/check-public-exposure.js
+
       - name: Install locked dependencies
         run: npm ci
 

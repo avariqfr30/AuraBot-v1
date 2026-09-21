@@ -20,11 +20,12 @@ const CONFIG = {
     AURA_CLOUD_MODELS: 'gpt-oss:120b-cloud',
     OLLAMA_URL: 'http://127.0.0.1:11434',
     CHROMA_URL: 'http://127.0.0.1:8000',
-    EMBEDDING_MODEL: 'bge-m3:latest'
+    EMBEDDING_MODEL: 'bge-m3:latest',
+    AURA_DATA_ENCRYPTION_KEY: Buffer.alloc(32, 9).toString('base64')
 };
 
 test('hosted mode fails closed without identity, database, and HTTPS configuration', () => {
-    for (const missing of ['AURA_PUBLIC_ORIGIN', 'DATABASE_URL', 'OIDC_ISSUER', 'OIDC_CLIENT_ID', 'OIDC_CLIENT_SECRET']) {
+    for (const missing of ['AURA_PUBLIC_ORIGIN', 'DATABASE_URL', 'OIDC_ISSUER', 'OIDC_CLIENT_ID', 'OIDC_CLIENT_SECRET', 'AURA_DATA_ENCRYPTION_KEY']) {
         const env = { ...CONFIG };
         delete env[missing];
         assert.throws(() => resolveHostedConfig(env), new RegExp(missing));
@@ -32,6 +33,8 @@ test('hosted mode fails closed without identity, database, and HTTPS configurati
     assert.throws(() => resolveHostedConfig({ ...CONFIG, AURA_PUBLIC_ORIGIN: 'http://aura.example' }), /HTTPS/);
     assert.throws(() => resolveHostedConfig({ ...CONFIG, OIDC_ISSUER: 'http://login.example' }), /OIDC_ISSUER/);
     assert.throws(() => resolveHostedConfig({ ...CONFIG, AURA_LOCAL_MODELS: '' }), /AURA_LOCAL_MODELS/);
+    assert.throws(() => resolveHostedConfig({ ...CONFIG, AURA_DATA_ENCRYPTION_KEY: `${CONFIG.AURA_DATA_ENCRYPTION_KEY}!` }), /canonical base64/);
+    assert.throws(() => resolveHostedConfig({ ...CONFIG, HOSTED_INFERENCE_MONTHLY_UNITS: '0' }), /positive integer/);
 });
 
 test('model catalog is explicit and treats Ollama cloud aliases as cloud', () => {

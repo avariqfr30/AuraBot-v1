@@ -1,0 +1,31 @@
+[Unit]
+Description=Aura hosted application
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=aura
+Group=aura
+WorkingDirectory=/opt/aura
+EnvironmentFile=/etc/aura/aura.env
+Environment=AURA_DATA_DIR=/var/lib/aura
+ExecStart=/usr/bin/node /opt/aura/server.js
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+StateDirectory=aura
+StateDirectoryMode=0700
+ReadWritePaths=/var/lib/aura
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

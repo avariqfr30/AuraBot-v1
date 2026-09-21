@@ -5,6 +5,7 @@ const { test } = require('node:test');
 const express = require('express');
 const { newDb } = require('pg-mem');
 const { createHostedStore } = require('../lib/hosted-store');
+const { createDataCipher } = require('../lib/data-crypto');
 const { createHostedAuth } = require('../lib/hosted-auth');
 
 const config = {
@@ -17,7 +18,9 @@ const config = {
 
 async function fixture() {
     const pool = new (newDb().adapters.createPg().Pool)();
-    const store = createHostedStore(pool);
+    const store = createHostedStore(pool, {
+        cipher: createDataCipher(Buffer.alloc(32, 6).toString('base64'))
+    });
     await store.initialize();
     const oidc = {
         randomPKCECodeVerifier: () => 'verifier',

@@ -4,6 +4,7 @@ const assert = require('node:assert/strict');
 const { test } = require('node:test');
 const { newDb } = require('pg-mem');
 const { createHostedStore } = require('../lib/hosted-store');
+const { createDataCipher } = require('../lib/data-crypto');
 
 Object.assign(process.env, {
     AURA_MODE: 'hosted',
@@ -14,7 +15,8 @@ Object.assign(process.env, {
     OIDC_CLIENT_SECRET: 'test-secret',
     AURA_LOCAL_MODELS: 'medgemma1.5:4b',
     AURA_CLOUD_MODELS: 'gpt-oss:120b-cloud',
-    SERPER_API_KEY: ''
+    SERPER_API_KEY: '',
+    AURA_DATA_ENCRYPTION_KEY: Buffer.alloc(32, 5).toString('base64')
 });
 const { initializeHostedRuntime, startServer } = require('../server');
 
@@ -30,7 +32,9 @@ async function signIn(base, subject) {
 
 test('hosted API protects account state, profile memory, and cloud inference', async () => {
     const pool = new (newDb().adapters.createPg().Pool)();
-    const store = createHostedStore(pool);
+    const store = createHostedStore(pool, {
+        cipher: createDataCipher(process.env.AURA_DATA_ENCRYPTION_KEY)
+    });
     const oidc = {
         randomPKCECodeVerifier: () => 'verifier',
         calculatePKCECodeChallenge: async () => 'challenge',
@@ -40,6 +44,9 @@ test('hosted API protects account state, profile memory, and cloud inference', a
     const deletions = [];
     const memoryQueries = [];
     const exampleIds = [];
+    const memoryAdds = [];
+    const exampleWrites = [];
+    let aliceAccountId = '';
     const generatedModels = [];
     let releaseMemoryWrite;
     let memoryWriteStarted;
@@ -51,6 +58,7 @@ test('hosted API protects account state, profile memory, and cloud inference', a
             generatedModels.push(body.model);
             return { data: { response: 'Cloud response', done: true } };
         },
+        embeddingGenerate: async (texts) => texts.map(() => [0.1, 0.2, 0.3]),
         readiness: {
             database: async () => true,
             ollama: async () => true,
@@ -58,19 +66,33 @@ test('hosted API protects account state, profile memory, and cloud inference', a
         },
         collections: {
             getMemoryCollection: async () => ({
-                add: async () => {
-                    memoryWriteStarted();
-                    await new Promise((resolve) => { releaseMemoryWrite = resolve; });
+                add: async (query) => {
+                    memoryAdds.push(query);
+                    if (memoryAdds.length > 1) {
+                        memoryWriteStarted();
+                        await new Promise((resolve) => { releaseMemoryWrite = resolve; });
+                    }
                 },
                 delete: async (query) => deletions.push(['memory', query.where]),
                 query: async (query) => {
                     memoryQueries.push(query.where);
+                    if (memoryAdds[0] && JSON.stringify(query.where).includes(aliceAccountId)) {
+                        return {
+                            ids: [[memoryAdds[0].ids[0]]],
+                            documents: [[null]],
+                            metadatas: [[memoryAdds[0].metadatas[0]]],
+                            distances: [[0.12]]
+                        };
+                    }
                     return { ids: [[]], documents: [[]], metadatas: [[]], distances: [[]] };
                 }
             }),
             getPersonalExampleCollection: async () => ({
                 delete: async (query) => deletions.push(['examples', query.where]),
-                upsert: async (query) => exampleIds.push(query.ids[0])
+                upsert: async (query) => {
+                    exampleIds.push(query.ids[0]);
+                    exampleWrites.push(query);
+                }
             })
         }
     });
@@ -91,6 +113,7 @@ test('hosted API protects account state, profile memory, and cloud inference', a
         const a = await signIn(base, 'alice');
         const b = await signIn(base, 'bob');
         const alice = await (await fetch(`${base}/api/account/bootstrap`, { headers: { Cookie: a } })).json();
+        aliceAccountId = alice.accountId;
         const bob = await (await fetch(`${base}/api/account/bootstrap`, { headers: { Cookie: b } })).json();
         assert.notEqual(alice.accountId, bob.accountId);
         const profileId = 'profile-alice_12345678';
@@ -114,8 +137,21 @@ test('hosted API protects account state, profile memory, and cloud inference', a
             body: JSON.stringify({ version: bob.version, storage: snapshot })
         });
         assert.equal(bobWrite.status, 200);
-        assert.equal((await post('/api/search_memory', { profileId, query: 'private' }, { Cookie: a, 'X-Aura-CSRF': alice.csrfToken })).status, 200);
-        assert.equal((await post('/api/search_memory', { profileId, query: 'private' }, { Cookie: b, 'X-Aura-CSRF': bob.csrfToken })).status, 200);
+        assert.equal((await post('/api/store_memory', {
+            profileId,
+            text: 'private memory plaintext',
+            metadata: { chatId: 'chat1', role: 'user' }
+        }, { Cookie: a, 'X-Aura-CSRF': alice.csrfToken })).status, 200);
+        assert.equal(memoryAdds[0].documents, undefined);
+        assert.deepEqual(memoryAdds[0].embeddings, [[0.1, 0.2, 0.3]]);
+        assert.doesNotMatch(JSON.stringify(memoryAdds[0].metadatas), /private memory plaintext/);
+        assert.match(memoryAdds[0].metadatas[0].encryptedDocument, /"alg":"A256GCM"/);
+        const aliceMemory = await post('/api/search_memory', { profileId, query: 'private' }, { Cookie: a, 'X-Aura-CSRF': alice.csrfToken });
+        assert.equal(aliceMemory.status, 200);
+        assert.equal((await aliceMemory.json()).matches[0].text, 'private memory plaintext');
+        const bobMemory = await post('/api/search_memory', { profileId, query: 'private' }, { Cookie: b, 'X-Aura-CSRF': bob.csrfToken });
+        assert.equal(bobMemory.status, 200);
+        assert.deepEqual((await bobMemory.json()).matches, []);
         assert.deepEqual(memoryQueries, [
             { $and: [{ profileId: { $eq: profileId } }, { ownerId: { $eq: alice.accountId } }] },
             { $and: [{ profileId: { $eq: profileId } }, { ownerId: { $eq: bob.accountId } }] }
@@ -128,6 +164,9 @@ test('hosted API protects account state, profile memory, and cloud inference', a
         assert.equal((await post('/api/personal_examples/upsert', { profileId, example }, { Cookie: a, 'X-Aura-CSRF': alice.csrfToken })).status, 200);
         assert.equal((await post('/api/personal_examples/upsert', { profileId, example }, { Cookie: b, 'X-Aura-CSRF': bob.csrfToken })).status, 200);
         assert.notEqual(exampleIds[0], exampleIds[1]);
+        assert.equal(exampleWrites[0].documents, undefined);
+        assert.equal(exampleWrites[0].metadatas[0].storedDocument, undefined);
+        assert.doesNotMatch(JSON.stringify(exampleWrites[0]), /Plan my morning|Start with one small step/);
         const cloudReply = await post('/api/ollama/generate', { model: 'gpt-oss:120b-cloud', prompt: 'private', stream: false }, { Cookie: a, 'X-Aura-CSRF': alice.csrfToken });
         assert.equal(cloudReply.status, 200);
         assert.deepEqual(await cloudReply.json(), { response: 'Cloud response', done: true });

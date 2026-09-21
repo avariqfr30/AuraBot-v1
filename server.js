@@ -11,8 +11,8 @@ const { Pool } = require('pg');
 const { createHostedStore } = require('./lib/hosted-store');
 const { createHostedAuth } = require('./lib/hosted-auth');
 const { resolveHostedConfig, authorizeProfile, authorizeModel, filterHostedModels } = require('./lib/hosted-policy');
-const { createAccountLimiter } = require('./lib/account-limiter');
 const { checkChromaHealth } = require('./lib/chroma-health');
+const { createDataKeyring } = require('./lib/data-crypto');
 const {
     RESPONSE_EXAMPLE_COLLECTION,
     PERSONAL_RESPONSE_EXAMPLE_COLLECTION,
@@ -41,6 +41,7 @@ const {
 const app = express();
 const hostedConfig = resolveHostedConfig();
 let hostedRuntime = null;
+let hostedMaintenanceTimer = null;
 const pendingAccountWrites = new Map();
 
 function trackAccountWrite(accountId, operation) {
@@ -62,9 +63,93 @@ async function waitForAccountWrites(accountId) {
     }
 }
 
-async function initializeHostedRuntime({ store, oidc, discovery, collections, ollamaGenerate, readiness } = {}) {
+async function holdAccountRequest(accountId, res) {
+    const releaseDurable = await hostedRuntime.store.beginAccountOperation(
+        accountId,
+        'personal_data',
+        { leaseMs: REQUEST_TIMEOUT_MS + 30000 }
+    );
+    let finish;
+    let released = false;
+    const pending = new Promise((resolve) => { finish = resolve; });
+    const operations = pendingAccountWrites.get(accountId) || new Set();
+    operations.add(pending);
+    pendingAccountWrites.set(accountId, operations);
+    const release = () => {
+        if (released) return;
+        released = true;
+        finish();
+        operations.delete(pending);
+        if (!operations.size) pendingAccountWrites.delete(accountId);
+        releaseDurable().catch((error) => logOperationalError('account_operation_release_failed', error));
+    };
+    res.once('finish', release);
+    res.once('close', release);
+}
+
+function logOperationalError(label, error) {
+    console.error(JSON.stringify({
+        event: label,
+        status: Number(error?.response?.status) || undefined,
+        code: typeof error?.code === 'string' ? error.code : undefined
+    }));
+}
+
+async function completeHostedAccountDeletion(accountId) {
+    const account = await hostedRuntime.store.loadAccount(accountId);
+    if (!account?.deleting) return false;
+    await waitForAccountWrites(accountId);
+    if (!(await hostedRuntime.store.waitForAccountOperations(accountId))) {
+        const error = new Error('Personal-data operations are still draining');
+        error.code = 'AURA_ACCOUNT_OPERATIONS_PENDING';
+        throw error;
+    }
+    if (!account.deletionMemoryDone) {
+        const memory = await hostedRuntime.collections.getMemoryCollection();
+        await memory.delete({ where: { ownerId: { $eq: accountId } } });
+        await hostedRuntime.store.markAccountDeletionScope(accountId, 'memory');
+    }
+    if (!account.deletionExamplesDone) {
+        const examples = await hostedRuntime.collections.getPersonalExampleCollection();
+        await examples.delete({ where: { ownerId: { $eq: accountId } } });
+        await hostedRuntime.store.markAccountDeletionScope(accountId, 'personal_examples');
+    }
+    return hostedRuntime.store.deleteAccount(accountId);
+}
+
+async function runHostedMaintenance() {
+    await hostedRuntime.store.cleanupExpiredAuthRows();
+    const pending = await hostedRuntime.store.pendingAccountDeletions();
+    await Promise.allSettled(pending.map(async (account) => {
+        try {
+            await completeHostedAccountDeletion(account.id);
+        } catch (error) {
+            logOperationalError('hosted_account_deletion_retry_failed', error);
+        }
+    }));
+}
+
+async function initializeHostedRuntime({
+    store,
+    oidc,
+    discovery,
+    collections,
+    ollamaGenerate,
+    embeddingGenerate,
+    readiness,
+    maintenance = false
+} = {}) {
     if (!hostedConfig.enabled) throw new Error('Hosted mode is not enabled');
-    const accountStore = store || createHostedStore(new Pool({ connectionString: hostedConfig.databaseUrl }));
+    const cipher = createDataKeyring(
+        hostedConfig.dataEncryptionKey,
+        hostedConfig.dataKeyId,
+        hostedConfig.previousDataEncryptionKey,
+        hostedConfig.previousDataKeyId
+    );
+    const accountStore = store || createHostedStore(
+        new Pool({ connectionString: hostedConfig.databaseUrl }),
+        { cipher }
+    );
     await accountStore.initialize();
     const oidcClient = oidc || await import('openid-client');
     const oidcDiscovery = discovery || await oidcClient.discovery(
@@ -77,11 +162,14 @@ async function initializeHostedRuntime({ store, oidc, discovery, collections, ol
             getPersonalExampleCollection: getPersonalResponseExampleCollection
         },
         ollamaGenerate,
+        embeddingGenerate: embeddingGenerate || ((texts) => ollamaEmbeddingFunction.generate(texts)),
+        cipher,
         readiness: readiness || {
             database: () => accountStore.ping(),
             ollama: async () => {
                 const response = await axios.get(`${OLLAMA_URL}/api/tags`, { timeout: 1500 });
-                return response.status === 200;
+                const available = new Set((response.data?.models || []).map((model) => String(model.name || model.model || '')));
+                return response.status === 200 && hostedModels().every((model) => available.has(model));
             },
             chroma: async () => {
                 const result = await checkChromaHealth({
@@ -99,6 +187,14 @@ async function initializeHostedRuntime({ store, oidc, discovery, collections, ol
             discovery: oidcDiscovery
         })
     };
+    await accountStore.cleanupExpiredAuthRows();
+    if (maintenance) {
+        await runHostedMaintenance();
+        hostedMaintenanceTimer = setInterval(() => {
+            runHostedMaintenance().catch((error) => logOperationalError('hosted_maintenance_failed', error));
+        }, 5 * 60 * 1000);
+        hostedMaintenanceTimer.unref?.();
+    }
     return hostedRuntime;
 }
 
@@ -142,9 +238,9 @@ const CHROMA_URL = process.env.CHROMA_URL || 'http://127.0.0.1:8000';
 const OLLAMA_URL = process.env.OLLAMA_URL || 'http://127.0.0.1:11434';
 const EMBEDDING_MODEL = process.env.EMBEDDING_MODEL || 'bge-m3:latest';
 const SERPER_API_KEY = process.env.SERPER_API_KEY || '';
-const HOSTED_MAX_PROMPT_CHARS = Number(process.env.HOSTED_MAX_PROMPT_CHARS || 120000);
-const inferenceAccountLimiter = createAccountLimiter({ limit: 30, concurrent: 2, windowMs: 60 * 1000 });
-const searchAccountLimiter = createAccountLimiter({ limit: 15, concurrent: 1, windowMs: 60 * 1000 });
+const HOSTED_MAX_PROMPT_CHARS = hostedConfig.enabled ? hostedConfig.maxPromptChars : 120000;
+const HOSTED_INFERENCE_MONTHLY_UNITS = hostedConfig.enabled ? hostedConfig.inferenceMonthlyUnits : 2000000;
+const HOSTED_SEARCH_MONTHLY_REQUESTS = hostedConfig.enabled ? hostedConfig.searchMonthlyRequests : 500;
 const chromaTarget = new URL(CHROMA_URL);
 const chroma = new ChromaClient({
     host: chromaTarget.hostname,
@@ -218,11 +314,19 @@ if (hostedConfig.enabled) {
                 const profileId = normalizeProfileId(req.body?.profileId);
                 if (!profileId) return res.status(400).json({ error: 'A valid profile is required.' });
                 return hostedRuntime.store.ownedProfileIds(req.accountId)
-                    .then((ids) => {
+                    .then(async (ids) => {
                         if (!authorizeProfile(profileId, ids)) {
                             return res.status(403).json({ error: 'This profile is not available to your account.' });
                         }
                         req.ownedProfileId = profileId;
+                        try {
+                            await holdAccountRequest(req.accountId, res);
+                        } catch (error) {
+                            if (error?.code === 'AURA_ACCOUNT_DELETING') {
+                                return res.status(409).json({ error: 'Account deletion is in progress.' });
+                            }
+                            throw error;
+                        }
                         return next();
                     })
                     .catch(next);
@@ -333,13 +437,48 @@ function normalizePersonalExample(value, profileId) {
     };
 }
 
-function parseStoredExample(metadata) {
+function parseStoredExample(metadata, cipher = hostedRuntime?.cipher) {
     try {
+        if (metadata?.encryptedDocument) {
+            return cipher.decrypt(
+                JSON.parse(metadata.encryptedDocument),
+                `example:${metadata.ownerId}:${metadata.recordId}`
+            );
+        }
         const parsed = JSON.parse(metadata?.storedDocument || '');
         return parsed && typeof parsed === 'object' ? parsed : null;
     } catch (_error) {
         return null;
     }
+}
+
+function buildHostedMemoryMatches(results, cipher) {
+    const ids = Array.isArray(results?.ids?.[0]) ? results.ids[0] : [];
+    const distances = Array.isArray(results?.distances?.[0]) ? results.distances[0] : [];
+    const metadatas = Array.isArray(results?.metadatas?.[0]) ? results.metadatas[0] : [];
+    return ids.flatMap((id, index) => {
+        const metadata = metadatas[index] || {};
+        if (!id || !metadata.encryptedDocument) return [];
+        const decrypted = cipher.decrypt(
+            JSON.parse(metadata.encryptedDocument),
+            `memory:${metadata.ownerId}:${id}`
+        );
+        const text = String(decrypted?.text || '').trim();
+        if (!text) return [];
+        const distance = Number(distances[index]);
+        return [{
+            id: String(id),
+            text,
+            distance: Number.isFinite(distance) ? distance : null,
+            provenance: {
+                source: 'conversation_vector',
+                collection: 'aura_long_term_memory',
+                chatId: String(metadata.chatId || ''),
+                role: String(metadata.role || ''),
+                timestamp: Number(metadata.timestamp) || 0
+            }
+        }];
+    });
 }
 
 function cleanSearchQuery(value) {
@@ -524,7 +663,7 @@ async function buildOsintReport({ primaryQuery, supportingQueries = [], includeN
         includeNews: Boolean(includeNews)
     });
     const cacheTtl = freshnessSensitive ? OSINT_FRESH_CACHE_TTL_MS : OSINT_STABLE_CACHE_TTL_MS;
-    const cached = readCache(responseCaches.osint, cacheKey, cacheTtl);
+    const cached = hostedConfig.enabled ? null : readCache(responseCaches.osint, cacheKey, cacheTtl);
     if (cached) return cached;
 
     const webQueries = [cleanedPrimaryQuery, ...cleanedSupportingQueries];
@@ -547,7 +686,7 @@ async function buildOsintReport({ primaryQuery, supportingQueries = [], includeN
         date
     }));
 
-    return writeCache(responseCaches.osint, cacheKey, {
+    const report = {
         executedAt: new Date().toISOString(),
         primaryQuery: cleanedPrimaryQuery,
         supportingQueries: cleanedSupportingQueries,
@@ -555,16 +694,46 @@ async function buildOsintReport({ primaryQuery, supportingQueries = [], includeN
         news,
         sources,
         evidence
-    });
+    };
+    return hostedConfig.enabled ? report : writeCache(responseCaches.osint, cacheKey, report);
+}
+
+function hostedUsageOptions(kind, units = 1) {
+    if (kind === 'inference') {
+        return {
+            limit: 30,
+            concurrent: 2,
+            windowMs: 60 * 1000,
+            leaseMs: REQUEST_TIMEOUT_MS + 15000,
+            units,
+            budget: HOSTED_INFERENCE_MONTHLY_UNITS
+        };
+    }
+    return {
+        limit: 15,
+        concurrent: 1,
+        windowMs: 60 * 1000,
+        leaseMs: REQUEST_TIMEOUT_MS + 15000,
+        units: 1,
+        budget: HOSTED_SEARCH_MONTHLY_REQUESTS
+    };
+}
+
+function usageUnitsForPrompt(prompt) {
+    return Math.max(1, Math.ceil(String(prompt || '').length / 4));
+}
+
+function respondWithUsageError(res, error) {
+    const known = new Set(['AURA_CONCURRENCY_LIMIT', 'AURA_RATE_LIMIT', 'AURA_USAGE_BUDGET']);
+    if (!known.has(error?.code)) throw error;
+    return res.status(429).json({ code: error.code, error: error.message });
 }
 
 function respondWithUpstreamError(res, label, error) {
     if (isRequestAborted()) return;
 
     const status = error.response?.status || (isRequestTimeout(error) ? 504 : 500);
-    const details = error.response?.data || error.message;
-
-    console.error(`[${label}]`, details);
+    logOperationalError(label, error);
 
     res.status(status).json({
         error: `${label} failed`
@@ -667,20 +836,13 @@ if (hostedConfig.enabled) {
         const marked = await hostedRuntime.store.beginAccountDeletion(req.accountId);
         if (!marked) return res.status(409).json({ error: 'Account deletion is already in progress.' });
         try {
-            await waitForAccountWrites(req.accountId);
-            const memory = await hostedRuntime.collections.getMemoryCollection();
-            await memory.delete({ where: { ownerId: { $eq: req.accountId } } });
-            const examples = await hostedRuntime.collections.getPersonalExampleCollection();
-            await examples.delete({ where: { ownerId: { $eq: req.accountId } } });
-            await hostedRuntime.store.deleteAccount(req.accountId);
+            await completeHostedAccountDeletion(req.accountId);
             res.set('Cache-Control', 'no-store').json({ deleted: true });
         } catch (error) {
-            if (isChromaUnavailable(error)) {
-                await hostedRuntime.store.cancelAccountDeletion(req.accountId);
-                return res.status(503).json({ error: 'Account deletion could not finish because personal memory is unavailable. Your account remains active.' });
-            }
-            await hostedRuntime.store.cancelAccountDeletion(req.accountId);
-            throw error;
+            logOperationalError('hosted_account_deletion_deferred', error);
+            return res.status(503).json({
+                error: 'Account deletion is still in progress. Access remains locked and Aura will retry automatically.'
+            });
         }
     });
 }
@@ -720,9 +882,13 @@ app.post('/api/ollama/generate', async (req, res) => {
             return res.status(413).json({ error: 'This request is too large for hosted inference.' });
         }
         try {
-            releaseAccountRequest = inferenceAccountLimiter.acquire(req.accountId);
+            releaseAccountRequest = await hostedRuntime.store.acquireUsage(
+                req.accountId,
+                'inference',
+                hostedUsageOptions('inference', usageUnitsForPrompt(req.body?.prompt))
+            );
         } catch (error) {
-            return res.status(429).json({ code: error.code, error: error.message });
+            return respondWithUsageError(res, error);
         }
     }
     const requestAbort = createRequestAbortController(req, res);
@@ -740,7 +906,7 @@ app.post('/api/ollama/generate', async (req, res) => {
         respondWithUpstreamError(res, 'Ollama generate request', error);
     } finally {
         requestAbort.cleanup();
-        releaseAccountRequest?.();
+        await releaseAccountRequest?.();
     }
 });
 
@@ -756,19 +922,34 @@ app.post('/api/store_memory', async (req, res) => {
         const collection = hostedConfig.enabled
             ? await hostedRuntime.collections.getMemoryCollection()
             : await getMemoryCollection();
-        await trackAccountWrite(req.accountId, () => collection.add({
-            ids: [hostedConfig.enabled ? `mem_${crypto.randomUUID()}` : (id || `mem_${Date.now()}`)],
-            metadatas: [{
-                ...scopeMemoryMetadata(metadata, profileId),
-                ...(hostedConfig.enabled ? { ownerId: req.accountId } : {})
-            }],
-            documents: [text]
-        }));
+        const memoryId = hostedConfig.enabled ? `mem_${crypto.randomUUID()}` : (id || `mem_${Date.now()}`);
+        const scopedMetadata = {
+            ...scopeMemoryMetadata(metadata, profileId),
+            ...(hostedConfig.enabled ? {
+                ownerId: req.accountId,
+                encryptedDocument: JSON.stringify(hostedRuntime.cipher.encrypt(
+                    { text },
+                    `memory:${req.accountId}:${memoryId}`
+                ))
+            } : {})
+        };
+        const writePayload = hostedConfig.enabled
+            ? {
+                ids: [memoryId],
+                metadatas: [scopedMetadata],
+                embeddings: await hostedRuntime.embeddingGenerate([text])
+            }
+            : {
+                ids: [id || `mem_${Date.now()}`],
+                metadatas: [scopedMetadata],
+                documents: [text]
+            };
+        await trackAccountWrite(req.accountId, () => collection.add(writePayload));
 
         res.json({ success: true });
     } catch (error) {
         if (isChromaUnavailable(error)) {
-            console.error('[Vector store]', error.message);
+            logOperationalError('vector_store_unavailable', error);
             return res.status(503).json({
                 error: 'ChromaDB is unavailable',
                 details: 'Start ChromaDB with `npm run chroma:up` in the project root, or set CHROMA_URL to a running server.'
@@ -797,20 +978,24 @@ app.post('/api/search_memory', async (req, res) => {
             ? await hostedRuntime.collections.getMemoryCollection()
             : await getMemoryCollection();
         const queryPayload = {
-            queryTexts: [query],
             nResults,
-            where: accountWhere(profileId, chatId, hostedConfig.enabled ? req.accountId : null)
+            where: accountWhere(profileId, chatId, hostedConfig.enabled ? req.accountId : null),
+            ...(hostedConfig.enabled
+                ? { queryEmbeddings: await hostedRuntime.embeddingGenerate([query]) }
+                : { queryTexts: [query] })
         };
 
         const results = await collection.query(queryPayload);
 
         res.json({
             results,
-            matches: buildMemoryMatches(results)
+            matches: hostedConfig.enabled
+                ? buildHostedMemoryMatches(results, hostedRuntime.cipher)
+                : buildMemoryMatches(results)
         });
     } catch (error) {
         if (isChromaUnavailable(error)) {
-            console.error('[Vector search]', error.message);
+            logOperationalError('vector_search_unavailable', error);
             return res.status(503).json({
                 error: 'ChromaDB is unavailable',
                 details: 'Start ChromaDB with `npm run chroma:up` in the project root, or set CHROMA_URL to a running server.'
@@ -901,7 +1086,7 @@ app.post('/api/search_examples', async (req, res) => {
         return res.json({ examples: compatible });
     } catch (error) {
         if (isChromaUnavailable(error)) {
-            console.error('[Response examples]', error.message);
+            logOperationalError('response_examples_unavailable', error);
             return res.status(503).json({
                 error: 'Response example retrieval is unavailable',
                 details: 'Start ChromaDB and seed examples with `npm run examples:seed`.'
@@ -932,9 +1117,12 @@ app.post('/api/personal_examples/search', async (req, res) => {
         const collectionCount = await collection.count();
         if (!collectionCount) return res.json({ examples: [] });
 
+        const queryText = String(query).slice(0, 4000);
         const results = await collection.query({
-            queryTexts: [String(query).slice(0, 4000)],
             nResults: Math.min(20, collectionCount),
+            ...(hostedConfig.enabled
+                ? { queryEmbeddings: await hostedRuntime.embeddingGenerate([queryText]) }
+                : { queryTexts: [queryText] }),
             where: {
                 $and: [
                     { status: { $eq: 'approved' } },
@@ -1005,14 +1193,25 @@ app.post('/api/personal_examples/upsert', async (req, res) => {
         const collection = hostedConfig.enabled
             ? await hostedRuntime.collections.getPersonalExampleCollection()
             : await getPersonalResponseExampleCollection();
-        await trackAccountWrite(req.accountId, () => collection.upsert({
+        const embeddingDocument = buildPersonalEmbeddingDocument(example);
+        const personalMetadata = buildPersonalMetadata(example);
+        if (hostedConfig.enabled) {
+            personalMetadata.ownerId = req.accountId;
+            personalMetadata.recordId = example.id;
+            personalMetadata.encryptedDocument = JSON.stringify(hostedRuntime.cipher.encrypt(
+                JSON.parse(personalMetadata.storedDocument),
+                `example:${req.accountId}:${example.id}`
+            ));
+            delete personalMetadata.storedDocument;
+        }
+        const examplePayload = {
             ids: [example.id],
-            documents: [buildPersonalEmbeddingDocument(example)],
-            metadatas: [{
-                ...buildPersonalMetadata(example),
-                ...(hostedConfig.enabled ? { ownerId: req.accountId } : {})
-            }]
-        }));
+            metadatas: [personalMetadata],
+            ...(hostedConfig.enabled
+                ? { embeddings: await hostedRuntime.embeddingGenerate([embeddingDocument]) }
+                : { documents: [embeddingDocument] })
+        };
+        await trackAccountWrite(req.accountId, () => collection.upsert(examplePayload));
         return res.json({ stored: true, id: example.id });
     } catch (error) {
         if (isChromaUnavailable(error)) {
@@ -1096,15 +1295,13 @@ app.post('/api/profile_data/delete', async (req, res) => {
         });
     } catch (error) {
         const unavailable = isChromaUnavailable(error);
-        const details = unavailable
-            ? 'Start ChromaDB to remove stored local profile data.'
-            : (error.response?.data || error.message);
-        console.error('[Profile data deletion]', details);
+        const details = 'Start ChromaDB to remove stored local profile data.';
+        logOperationalError('profile_data_deletion_failed', error);
         return res.status(unavailable ? 503 : (error.response?.status || 500)).json({
             error: completedScopes.length
                 ? 'Profile data deletion only partially completed'
                 : 'Profile data deletion failed',
-            details,
+            ...(!hostedConfig.enabled && unavailable ? { details } : {}),
             partial: completedScopes.length > 0,
             completedScopes
         });
@@ -1126,25 +1323,31 @@ app.post('/api/osint', async (req, res) => {
     try {
         if (hostedConfig.enabled) {
             try {
-                releaseAccountRequest = searchAccountLimiter.acquire(req.accountId);
+                releaseAccountRequest = await hostedRuntime.store.acquireUsage(
+                    req.accountId,
+                    'search',
+                    hostedUsageOptions('search')
+                );
             } catch (error) {
-                return res.status(429).json({ code: error.code, error: error.message });
+                return respondWithUsageError(res, error);
             }
         }
         const report = await buildOsintReport(req.body || {});
         res.json(report);
     } catch (error) {
         if (isSerperUnauthorized(error)) {
-            console.error('[OSINT research]', error.response?.data || error.message);
+            logOperationalError('osint_authorization_failed', error);
             return res.status(403).json({
                 error: 'Serper authorization failed',
-                details: 'Check SERPER_API_KEY in your .env file. Make sure it is a real key from serper.dev and that the account still has access/credits.'
+                ...(!hostedConfig.enabled ? {
+                    details: 'Check SERPER_API_KEY in your .env file. Make sure it is a real key from serper.dev and that the account still has access/credits.'
+                } : {})
             });
         }
 
         respondWithUpstreamError(res, 'OSINT research', error);
     } finally {
-        releaseAccountRequest?.();
+        await releaseAccountRequest?.();
     }
 });
 
@@ -1166,7 +1369,7 @@ app.get('/api/search', async (req, res) => {
         res.json(report);
     } catch (error) {
         if (isSerperUnauthorized(error)) {
-            console.error('[Search]', error.response?.data || error.message);
+            logOperationalError('search_authorization_failed', error);
             return res.status(403).json({
                 error: 'Serper authorization failed',
                 details: 'Check SERPER_API_KEY in your .env file. Make sure it is a real key from serper.dev and that the account still has access/credits.'
@@ -1186,7 +1389,7 @@ app.use((req, res) => {
 });
 
 app.use((error, req, res, _next) => {
-    console.error(`[${req.method} ${req.path}]`, error?.message || 'Unhandled server error');
+    logOperationalError(`unhandled_${req.method}_${req.path}`, error);
     if (res.headersSent) return res.end();
     return res.status(500).json({ error: 'Aura could not complete this request.' });
 });
@@ -1205,10 +1408,10 @@ function startServer({ host = HOST, port = PORT } = {}) {
 
 if (require.main === module) {
     if (hostedConfig.enabled) {
-        initializeHostedRuntime()
+        initializeHostedRuntime({ maintenance: true })
             .then(() => startServer())
             .catch((error) => {
-                console.error('Hosted startup failed:', error.message);
+                logOperationalError('hosted_startup_failed', error);
                 process.exitCode = 1;
             });
     } else {
