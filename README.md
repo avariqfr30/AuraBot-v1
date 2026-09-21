@@ -7,7 +7,7 @@ Aura is a locally hosted AI companion with:
 - live OSINT/search via Serper
 - a browser UI for chats, tools, and behavioral insights
 
-Aura's beta configuration is intentionally single-user and same-device. The Node server, nginx example, and bundled Chroma configuration bind to loopback by default and are not intended to serve other devices.
+Aura has a single-device local mode and a separately configured hosted account mode. The Node server and Chroma bind to loopback; a hosted service needs a dedicated HTTPS reverse proxy and identity provider.
 
 ## What Changed
 
@@ -78,7 +78,7 @@ npm run start:with-chroma
 
 6. Open the app on the same machine at `http://127.0.0.1:3000`.
 
-Aura does not listen on the machine's LAN address by default. Do not set `HOST` to a non-loopback address unless you separately provide authentication, TLS, restrictive CORS, and ownership/access controls. Those controls are not part of this beta.
+Aura's Node process accepts loopback hosts only. A hosted deployment terminates public HTTPS at a separate reverse proxy and keeps Node, Ollama, and Chroma private.
 
 ## nginx Deployment
 
@@ -89,7 +89,19 @@ If you want nginx in front of Aura:
 3. Reload nginx.
 4. Open `http://127.0.0.1` on the same machine.
 
-The example nginx listener is also loopback-only. Making nginx public would bypass the same-device release boundary and requires the additional controls described above.
+The example nginx listener is also loopback-only. A hosted deployment needs its own TLS and domain configuration; do not expose the Node or Chroma ports directly.
+
+## Hosted accounts (implementation preview)
+
+Hosted mode is separate from the local beta. It requires PostgreSQL and an OpenID Connect provider. Configure the commented `AURA_MODE=hosted` values in `.env.example` through your deployment's secret manager, register `https://your-domain/api/auth/callback` with the identity provider, and serve the configured `AURA_PUBLIC_ORIGIN` over HTTPS. Aura's Node process must remain on `HOST=127.0.0.1` behind the proxy. Hosted startup refuses missing account configuration, an HTTP origin, or a public Node bind.
+
+The signed-in account owns profiles, chats, feedback, Personal Intelligence state, and external-search consent. Browser state is hydrated from the server before chat starts. Changes are versioned; when another device changed the account, Aura keeps the unsent tab state and shows a conflict rather than overwriting it. A local profile export can be imported only by explicit selection; imported Personal Intelligence starts paused, and old vector records and personal response examples are not copied.
+
+GPT-OSS 120B Cloud remains Aura's primary model through the local Ollama API. The hosted UI discloses that inference is remote and links to Ollama's privacy policy. Ollama currently states that prompts and responses use zero data retention, are never logged, and are never used for training. The server allows only explicitly configured model IDs. Personal Intelligence and per-memory approval remain separate controls over what Aura adds to a prompt. Model availability, regional processing, policy changes, quotas, and the Ollama account used by the deployment must be reviewed before accepting clients.
+
+The hosted code has controlled two-account tests, but has not been exercised against a real OIDC provider, PostgreSQL deployment, Chroma service, or HTTPS browser session. Do not open it to clients until the hosted checks in [release verification](docs/release-verification.md) are complete. Serper web-search requests have a separate account-level opt-in because derived search terms leave Aura for another service.
+
+`/api/health` reports process liveness. `/api/ready` checks the configured database, Ollama, and Chroma dependencies. Hosted inference and research have both IP and account request limits; inference also has an account concurrency limit and a 120,000-character prompt ceiling. The account limiter is process-local, so a multi-instance deployment needs a shared limiter before horizontal scaling.
 
 ## Environment Variables
 

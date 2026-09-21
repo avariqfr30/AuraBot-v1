@@ -2,6 +2,17 @@
 
 Aura's beta release boundary is one user, one device, and loopback networking only.
 
+The optional hosted mode is a separate release track. It must not be considered client-ready solely because its account and isolation tests pass.
+
+## Hosted-mode gates
+
+- Configure a real OpenID Connect provider, PostgreSQL database, HTTPS origin, private Ollama, and private Chroma; verify the actual callback and cookie flow in a browser.
+- Test two real accounts with identical profile IDs: each must fail to read, alter, or delete the other's chat state, Chroma memory, and personal examples.
+- Verify the hosted disclosure links to Ollama's current privacy policy, GPT-OSS Cloud remains the primary configured model, and unlisted model IDs are rejected before Ollama is called.
+- Test sign-in from a second device, version conflict behavior, explicit old-profile import, logout, and complete hosted-account deletion including Chroma failures.
+- Verify that the separate Serper research consent blocks every search request before any external call and that revocation applies immediately.
+- Verify rate and concurrency limits, restore from PostgreSQL and Chroma backups, and run a real HTTPS deployment review before public exposure.
+
 ## Automated verification
 
 Use Node.js `24.21.0` from `.nvmrc`, then run:

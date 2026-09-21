@@ -39,7 +39,7 @@ assert.match(indexHtml, /id="personalIntelligenceCheckbox"/);
 assert.match(indexHtml, /id="personalIntelligenceStatusText"/);
 assert.match(indexHtml, /not account authentication/i);
 assert.doesNotMatch(indexHtml, /Persistent Companion Memory/);
-assert.match(indexHtml, /<script src="js\/personal-intelligence\.js"><\/script>\s*<script src="js\/model-routing\.js"><\/script>\s*<script src="js\/turn-policy\.js"><\/script>\s*<script src="js\/tool-artifacts\.js"><\/script>\s*<script src="js\/feedback-learning\.js"><\/script>\s*<script src="js\/chat-logic\.js"><\/script>/);
+assert.match(indexHtml, /<script src="js\/personal-intelligence\.js"><\/script>\s*<script src="js\/model-routing\.js"><\/script>\s*<script src="js\/turn-policy\.js"><\/script>\s*<script src="js\/tool-artifacts\.js"><\/script>\s*<script src="js\/feedback-learning\.js"><\/script>\s*<script src="js\/hosted-client\.js"><\/script>\s*<script src="js\/chat-logic\.js"><\/script>/);
 assert.match(indexHtml, /<option value="auto">Auto/);
 assert.match(packageJson.scripts.check, /node --check lib\/memory-results\.js/);
 assert.match(packageJson.scripts.check, /node --check public\/js\/turn-policy\.js/);
@@ -106,7 +106,7 @@ assert.match(chatLogicJs, /AURA_TURN_POLICY\.hasImmediateGroundingNeed\(userMess
 assert.match(chatLogicJs, /async function getOllamaResponse\([\s\S]*chatId = chatManager\.getActiveChatId\(\)/);
 assert.match(chatLogicJs, /feedbackLearning:\s*window\.AURA_FEEDBACK\.createState\(\)/);
 assert.match(chatLogicJs, /getPersonalExampleCandidate/);
-assert.match(chatLogicJs, /window\.AURA_PERSONAL_INTELLIGENCE\.createManager\(localStorage\)/);
+assert.match(chatLogicJs, /window\.AURA_PERSONAL_INTELLIGENCE\.createManager\(\s*window\.AURA_HOSTED\?\.enabled \? window\.AURA_HOSTED\.storage : window\.localStorage/);
 assert.match(chatLogicJs, /this\.profileManager\.loadProfileState\(\)/);
 assert.match(chatLogicJs, /this\.profileManager\.saveProfileState\(this\.state\)/);
 assert.match(chatLogicJs, /getFeedbackProfileId\(\)\s*\{\s*return this\.getActiveProfileId\(\)/);

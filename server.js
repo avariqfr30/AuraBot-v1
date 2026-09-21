@@ -3,8 +3,16 @@ require('dotenv').config({ quiet: true });
 const path = require('path');
 const crypto = require('crypto');
 const express = require('express');
+const helmet = require('helmet');
+const { rateLimit } = require('express-rate-limit');
 const axios = require('axios');
 const { ChromaClient } = require('chromadb');
+const { Pool } = require('pg');
+const { createHostedStore } = require('./lib/hosted-store');
+const { createHostedAuth } = require('./lib/hosted-auth');
+const { resolveHostedConfig, authorizeProfile, authorizeModel, filterHostedModels } = require('./lib/hosted-policy');
+const { createAccountLimiter } = require('./lib/account-limiter');
+const { checkChromaHealth } = require('./lib/chroma-health');
 const {
     RESPONSE_EXAMPLE_COLLECTION,
     PERSONAL_RESPONSE_EXAMPLE_COLLECTION,
@@ -31,8 +39,91 @@ const {
 } = require('./lib/profile-scope');
 
 const app = express();
+const hostedConfig = resolveHostedConfig();
+let hostedRuntime = null;
+const pendingAccountWrites = new Map();
+
+function trackAccountWrite(accountId, operation) {
+    const promise = Promise.resolve().then(operation);
+    if (!hostedConfig.enabled || !accountId) return promise;
+    const pending = pendingAccountWrites.get(accountId) || new Set();
+    pending.add(promise);
+    pendingAccountWrites.set(accountId, pending);
+    promise.finally(() => {
+        pending.delete(promise);
+        if (!pending.size) pendingAccountWrites.delete(accountId);
+    }).catch(() => {});
+    return promise;
+}
+
+async function waitForAccountWrites(accountId) {
+    while (pendingAccountWrites.get(accountId)?.size) {
+        await Promise.allSettled([...pendingAccountWrites.get(accountId)]);
+    }
+}
+
+async function initializeHostedRuntime({ store, oidc, discovery, collections, ollamaGenerate, readiness } = {}) {
+    if (!hostedConfig.enabled) throw new Error('Hosted mode is not enabled');
+    const accountStore = store || createHostedStore(new Pool({ connectionString: hostedConfig.databaseUrl }));
+    await accountStore.initialize();
+    const oidcClient = oidc || await import('openid-client');
+    const oidcDiscovery = discovery || await oidcClient.discovery(
+        new URL(hostedConfig.issuer), hostedConfig.clientId, hostedConfig.clientSecret
+    );
+    hostedRuntime = {
+        store: accountStore,
+        collections: collections || {
+            getMemoryCollection,
+            getPersonalExampleCollection: getPersonalResponseExampleCollection
+        },
+        ollamaGenerate,
+        readiness: readiness || {
+            database: () => accountStore.ping(),
+            ollama: async () => {
+                const response = await axios.get(`${OLLAMA_URL}/api/tags`, { timeout: 1500 });
+                return response.status === 200;
+            },
+            chroma: async () => {
+                const result = await checkChromaHealth({
+                    host: chromaTarget.hostname,
+                    port: Number(chromaTarget.port || 8000),
+                    timeoutMs: 1500
+                });
+                return result.ok;
+            }
+        },
+        auth: createHostedAuth({
+            store: accountStore,
+            config: hostedConfig,
+            oidc: oidcClient,
+            discovery: oidcDiscovery
+        })
+    };
+    return hostedRuntime;
+}
+
+function accountWhere(profileId, chatId, accountId) {
+    const where = buildProfileWhere(profileId, chatId);
+    return accountId
+        ? { $and: [where, { ownerId: { $eq: accountId } }] }
+        : where;
+}
+
+function hostedModels() {
+    return [
+        ...hostedConfig.localModels,
+        ...hostedConfig.cloudModels
+    ];
+}
 
 const DEFAULT_HOST = '127.0.0.1';
+
+function assertLoopbackHost(host) {
+    if (!['127.0.0.1', '::1', 'localhost'].includes(host)) {
+        throw new Error('Aura must listen on loopback behind an HTTPS reverse proxy. Set HOST=127.0.0.1.');
+    }
+    return host;
+}
 
 function resolveServerConfig(env = process.env) {
     return {
@@ -51,6 +142,9 @@ const CHROMA_URL = process.env.CHROMA_URL || 'http://127.0.0.1:8000';
 const OLLAMA_URL = process.env.OLLAMA_URL || 'http://127.0.0.1:11434';
 const EMBEDDING_MODEL = process.env.EMBEDDING_MODEL || 'bge-m3:latest';
 const SERPER_API_KEY = process.env.SERPER_API_KEY || '';
+const HOSTED_MAX_PROMPT_CHARS = Number(process.env.HOSTED_MAX_PROMPT_CHARS || 120000);
+const inferenceAccountLimiter = createAccountLimiter({ limit: 30, concurrent: 2, windowMs: 60 * 1000 });
+const searchAccountLimiter = createAccountLimiter({ limit: 15, concurrent: 1, windowMs: 60 * 1000 });
 const chromaTarget = new URL(CHROMA_URL);
 const chroma = new ChromaClient({
     host: chromaTarget.hostname,
@@ -79,7 +173,63 @@ const responseCaches = {
     osint: new Map()
 };
 
-app.use(express.json({ limit: '2mb' }));
+app.set('trust proxy', hostedConfig.enabled ? 1 : false);
+app.use(helmet({
+    contentSecurityPolicy: {
+        directives: {
+            defaultSrc: ["'self'"],
+            scriptSrc: ["'self'"],
+            styleSrc: ["'self'", "'unsafe-inline'"],
+            imgSrc: ["'self'", 'data:'],
+            connectSrc: ["'self'"],
+            frameAncestors: ["'self'"],
+            objectSrc: ["'none'"],
+            baseUri: ["'self'"],
+            formAction: ["'self'"]
+        }
+    },
+    referrerPolicy: { policy: 'no-referrer' },
+    hsts: hostedConfig.enabled ? { maxAge: 31536000, includeSubDomains: true } : false
+}));
+app.use(express.json({ limit: hostedConfig.enabled ? '5mb' : '2mb' }));
+if (hostedConfig.enabled) {
+    const authLimiter = rateLimit({ windowMs: 15 * 60 * 1000, limit: 30, standardHeaders: 'draft-8', legacyHeaders: false });
+    const modelLimiter = rateLimit({ windowMs: 60 * 1000, limit: 30, standardHeaders: 'draft-8', legacyHeaders: false });
+    const searchLimiter = rateLimit({ windowMs: 60 * 1000, limit: 15, standardHeaders: 'draft-8', legacyHeaders: false });
+    app.use('/api/auth/login', authLimiter);
+    app.use('/api/ollama/generate', modelLimiter);
+    app.use('/api/osint', searchLimiter);
+    app.use('/api/auth', (req, res, next) => {
+        if (!hostedRuntime) return res.status(503).json({ error: 'Hosted identity is unavailable.' });
+        return hostedRuntime.auth.router(req, res, next);
+    });
+    app.use('/api', (req, res, next) => {
+        if (req.path === '/health' || req.path === '/ready' || req.path === '/runtime') return next();
+        if (!hostedRuntime) return res.status(503).json({ error: 'Hosted identity is unavailable.' });
+        return hostedRuntime.auth.requireSession(req, res, (error) => {
+            if (error) return next(error);
+            if (!['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method)) return next();
+            return hostedRuntime.auth.requireCsrf(req, res, () => {
+                const ownedPaths = new Set([
+                    '/store_memory', '/search_memory', '/personal_examples/search',
+                    '/personal_examples/upsert', '/personal_examples/delete', '/profile_data/delete'
+                ]);
+                if (!ownedPaths.has(req.path)) return next();
+                const profileId = normalizeProfileId(req.body?.profileId);
+                if (!profileId) return res.status(400).json({ error: 'A valid profile is required.' });
+                return hostedRuntime.store.ownedProfileIds(req.accountId)
+                    .then((ids) => {
+                        if (!authorizeProfile(profileId, ids)) {
+                            return res.status(403).json({ error: 'This profile is not available to your account.' });
+                        }
+                        req.ownedProfileId = profileId;
+                        return next();
+                    })
+                    .catch(next);
+            });
+        });
+    });
+}
 app.use(express.static(PUBLIC_DIR));
 app.use((req, res, next) => {
     if (!req.path.startsWith('/api/')) return next();
@@ -417,8 +567,7 @@ function respondWithUpstreamError(res, label, error) {
     console.error(`[${label}]`, details);
 
     res.status(status).json({
-        error: `${label} failed`,
-        details
+        error: `${label} failed`
     });
 }
 
@@ -443,39 +592,147 @@ function isSerperUnauthorized(error) {
 app.get('/api/health', async (_req, res) => {
     res.json({
         status: 'ok',
-        port: PORT,
-        hostedMode: true,
-        services: {
-            ollama: OLLAMA_URL,
-            chroma: CHROMA_URL,
-            serperConfigured: Boolean(SERPER_API_KEY)
-        }
+        mode: hostedConfig.enabled ? 'hosted' : 'local'
     });
 });
+
+app.get('/api/ready', async (_req, res) => {
+    const checks = hostedConfig.enabled
+        ? hostedRuntime?.readiness
+        : {
+            ollama: async () => (await axios.get(`${OLLAMA_URL}/api/tags`, { timeout: 1500 })).status === 200,
+            chroma: async () => (await checkChromaHealth({
+                host: chromaTarget.hostname,
+                port: Number(chromaTarget.port || 8000),
+                timeoutMs: 1500
+            })).ok
+        };
+    if (!checks) return res.status(503).json({ status: 'degraded', dependencies: {} });
+    const entries = await Promise.all(Object.entries(checks).map(async ([name, check]) => {
+        try {
+            return [name, (await check()) === true];
+        } catch (_error) {
+            return [name, false];
+        }
+    }));
+    const dependencies = Object.fromEntries(entries);
+    const ready = Object.values(dependencies).every(Boolean);
+    return res.status(ready ? 200 : 503).json({ status: ready ? 'ready' : 'degraded', dependencies });
+});
+
+app.get('/api/runtime', (_req, res) => {
+    res.set('Cache-Control', 'no-store').json({ mode: hostedConfig.enabled ? 'hosted' : 'local' });
+});
+
+if (hostedConfig.enabled) {
+    app.get('/api/account/bootstrap', async (req, res) => {
+        const account = await hostedRuntime.store.loadAccount(req.accountId);
+        if (!account) return res.status(401).json({ error: 'Sign in to Aura first.' });
+        return res.set('Cache-Control', 'no-store').json({
+            mode: 'hosted',
+            accountId: account.id,
+            storage: account.storage,
+            version: account.version,
+            searchConsent: account.searchConsent,
+            models: hostedModels(),
+            csrfToken: req.csrfToken
+        });
+    });
+
+    app.put('/api/account/state', async (req, res) => {
+        try {
+            const version = Number(req.body?.version);
+            if (!Number.isSafeInteger(version) || version < 0) {
+                return res.status(400).json({ error: 'A valid state version is required.' });
+            }
+            const saved = await hostedRuntime.store.saveSnapshot(req.accountId, version, req.body?.storage);
+            return res.set('Cache-Control', 'no-store').json(saved);
+        } catch (error) {
+            if (/version conflict/i.test(error.message)) return res.status(409).json({ error: 'Account state changed on another device.' });
+            if (/storage|profile|size limit/i.test(error.message)) return res.status(400).json({ error: error.message });
+            throw error;
+        }
+    });
+
+    app.put('/api/account/search-consent', async (req, res) => {
+        if (typeof req.body?.enabled !== 'boolean') {
+            return res.status(400).json({ error: 'Web-search consent must be true or false.' });
+        }
+        const enabled = await hostedRuntime.store.saveSearchConsent(req.accountId, req.body.enabled);
+        return res.set('Cache-Control', 'no-store').json({ enabled });
+    });
+
+
+    app.delete('/api/account', async (req, res) => {
+        const marked = await hostedRuntime.store.beginAccountDeletion(req.accountId);
+        if (!marked) return res.status(409).json({ error: 'Account deletion is already in progress.' });
+        try {
+            await waitForAccountWrites(req.accountId);
+            const memory = await hostedRuntime.collections.getMemoryCollection();
+            await memory.delete({ where: { ownerId: { $eq: req.accountId } } });
+            const examples = await hostedRuntime.collections.getPersonalExampleCollection();
+            await examples.delete({ where: { ownerId: { $eq: req.accountId } } });
+            await hostedRuntime.store.deleteAccount(req.accountId);
+            res.set('Cache-Control', 'no-store').json({ deleted: true });
+        } catch (error) {
+            if (isChromaUnavailable(error)) {
+                await hostedRuntime.store.cancelAccountDeletion(req.accountId);
+                return res.status(503).json({ error: 'Account deletion could not finish because personal memory is unavailable. Your account remains active.' });
+            }
+            await hostedRuntime.store.cancelAccountDeletion(req.accountId);
+            throw error;
+        }
+    });
+}
 
 app.get('/api/ollama/tags', async (_req, res) => {
     try {
         const cached = readCache(responseCaches.ollamaTags, 'default', TAGS_CACHE_TTL_MS);
         if (cached) {
+            if (hostedConfig.enabled) {
+                return res.json(filterHostedModels(hostedConfig, cached));
+            }
             return res.json(cached);
         }
 
         const response = await axios.get(`${OLLAMA_URL}/api/tags`, {
             timeout: REQUEST_TIMEOUT_MS
         });
-        return res.json(writeCache(responseCaches.ollamaTags, 'default', response.data));
+        const cachedPayload = writeCache(responseCaches.ollamaTags, 'default', response.data);
+        if (hostedConfig.enabled) {
+            return res.json(filterHostedModels(hostedConfig, cachedPayload));
+        }
+        return res.json(cachedPayload);
     } catch (error) {
         respondWithUpstreamError(res, 'Ollama tags request', error);
     }
 });
 
 app.post('/api/ollama/generate', async (req, res) => {
+    let releaseAccountRequest = null;
+    if (hostedConfig.enabled) {
+        const model = String(req.body?.model || '');
+        const modelLocation = authorizeModel(hostedConfig, model);
+        if (!modelLocation) {
+            return res.status(400).json({ error: 'This model is not available for hosted inference.' });
+        }
+        if (String(req.body?.prompt || '').length > HOSTED_MAX_PROMPT_CHARS) {
+            return res.status(413).json({ error: 'This request is too large for hosted inference.' });
+        }
+        try {
+            releaseAccountRequest = inferenceAccountLimiter.acquire(req.accountId);
+        } catch (error) {
+            return res.status(429).json({ code: error.code, error: error.message });
+        }
+    }
     const requestAbort = createRequestAbortController(req, res);
     try {
-        const response = await axios.post(`${OLLAMA_URL}/api/generate`, req.body, {
-            timeout: REQUEST_TIMEOUT_MS,
-            signal: requestAbort.signal
-        });
+        const response = hostedConfig.enabled && hostedRuntime.ollamaGenerate
+            ? await hostedRuntime.ollamaGenerate(req.body, requestAbort.signal)
+            : await axios.post(`${OLLAMA_URL}/api/generate`, req.body, {
+                timeout: REQUEST_TIMEOUT_MS,
+                signal: requestAbort.signal
+            });
         if (requestAbort.wasClientAborted()) return;
         res.json(response.data);
     } catch (error) {
@@ -483,6 +740,7 @@ app.post('/api/ollama/generate', async (req, res) => {
         respondWithUpstreamError(res, 'Ollama generate request', error);
     } finally {
         requestAbort.cleanup();
+        releaseAccountRequest?.();
     }
 });
 
@@ -495,12 +753,17 @@ app.post('/api/store_memory', async (req, res) => {
             return res.status(400).json({ error: 'A valid local profile and memory text are required' });
         }
 
-        const collection = await getMemoryCollection();
-        await collection.add({
-            ids: [id || `mem_${Date.now()}`],
-            metadatas: [scopeMemoryMetadata(metadata, profileId)],
+        const collection = hostedConfig.enabled
+            ? await hostedRuntime.collections.getMemoryCollection()
+            : await getMemoryCollection();
+        await trackAccountWrite(req.accountId, () => collection.add({
+            ids: [hostedConfig.enabled ? `mem_${crypto.randomUUID()}` : (id || `mem_${Date.now()}`)],
+            metadatas: [{
+                ...scopeMemoryMetadata(metadata, profileId),
+                ...(hostedConfig.enabled ? { ownerId: req.accountId } : {})
+            }],
             documents: [text]
-        });
+        }));
 
         res.json({ success: true });
     } catch (error) {
@@ -530,11 +793,13 @@ app.post('/api/search_memory', async (req, res) => {
             return res.status(400).json({ error: 'Chat ID must be a valid local chat identifier' });
         }
 
-        const collection = await getMemoryCollection();
+        const collection = hostedConfig.enabled
+            ? await hostedRuntime.collections.getMemoryCollection()
+            : await getMemoryCollection();
         const queryPayload = {
             queryTexts: [query],
             nResults,
-            where: buildProfileWhere(profileId, chatId)
+            where: accountWhere(profileId, chatId, hostedConfig.enabled ? req.accountId : null)
         };
 
         const results = await collection.query(queryPayload);
@@ -661,7 +926,9 @@ app.post('/api/personal_examples/search', async (req, res) => {
             return res.status(400).json({ error: 'A local profile and search query are required' });
         }
 
-        const collection = await getPersonalResponseExampleCollection();
+        const collection = hostedConfig.enabled
+            ? await hostedRuntime.collections.getPersonalExampleCollection()
+            : await getPersonalResponseExampleCollection();
         const collectionCount = await collection.count();
         if (!collectionCount) return res.json({ examples: [] });
 
@@ -672,7 +939,8 @@ app.post('/api/personal_examples/search', async (req, res) => {
                 $and: [
                     { status: { $eq: 'approved' } },
                     { source: { $eq: 'local_feedback' } },
-                    { profileId: { $eq: profileId } }
+                    { profileId: { $eq: profileId } },
+                    ...(hostedConfig.enabled ? [{ ownerId: { $eq: req.accountId } }] : [])
                 ]
             }
         });
@@ -729,12 +997,22 @@ app.post('/api/personal_examples/upsert', async (req, res) => {
             });
         }
 
-        const collection = await getPersonalResponseExampleCollection();
-        await collection.upsert({
+        if (hostedConfig.enabled) {
+            example.id = `personal-${crypto.createHash('sha256')
+                .update(`${req.accountId}:${example.id}`).digest('hex').slice(0, 40)}`;
+        }
+
+        const collection = hostedConfig.enabled
+            ? await hostedRuntime.collections.getPersonalExampleCollection()
+            : await getPersonalResponseExampleCollection();
+        await trackAccountWrite(req.accountId, () => collection.upsert({
             ids: [example.id],
             documents: [buildPersonalEmbeddingDocument(example)],
-            metadatas: [buildPersonalMetadata(example)]
-        });
+            metadatas: [{
+                ...buildPersonalMetadata(example),
+                ...(hostedConfig.enabled ? { ownerId: req.accountId } : {})
+            }]
+        }));
         return res.json({ stored: true, id: example.id });
     } catch (error) {
         if (isChromaUnavailable(error)) {
@@ -757,10 +1035,12 @@ app.post('/api/personal_examples/delete', async (req, res) => {
             return res.status(400).json({ error: 'A valid local profile is required' });
         }
 
-        const collection = await getPersonalResponseExampleCollection();
+        const collection = hostedConfig.enabled
+            ? await hostedRuntime.collections.getPersonalExampleCollection()
+            : await getPersonalResponseExampleCollection();
         await collection.delete({
             ...(ids.length ? { ids } : {}),
-            where: buildProfileWhere(profileId)
+            where: accountWhere(profileId, null, hostedConfig.enabled ? req.accountId : null)
         });
         return res.json({ deleted: true, count: ids.length || null });
     } catch (error) {
@@ -793,14 +1073,18 @@ app.post('/api/profile_data/delete', async (req, res) => {
         }
 
         if (scope === 'memory' || scope === 'all') {
-            const memoryCollection = await getMemoryCollection();
-            await memoryCollection.delete({ where: buildProfileWhere(profileId, chatId) });
+            const memoryCollection = hostedConfig.enabled
+                ? await hostedRuntime.collections.getMemoryCollection()
+                : await getMemoryCollection();
+            await memoryCollection.delete({ where: accountWhere(profileId, chatId, hostedConfig.enabled ? req.accountId : null) });
             completedScopes.push('memory');
         }
 
         if (scope === 'all') {
-            const personalExampleCollection = await getPersonalResponseExampleCollection();
-            await personalExampleCollection.delete({ where: buildProfileWhere(profileId) });
+            const personalExampleCollection = hostedConfig.enabled
+                ? await hostedRuntime.collections.getPersonalExampleCollection()
+                : await getPersonalResponseExampleCollection();
+            await personalExampleCollection.delete({ where: accountWhere(profileId, null, hostedConfig.enabled ? req.accountId : null) });
             completedScopes.push('personal_examples');
         }
 
@@ -828,11 +1112,25 @@ app.post('/api/profile_data/delete', async (req, res) => {
 });
 
 app.post('/api/osint', async (req, res) => {
+    if (hostedConfig.enabled && !(await hostedRuntime.store.loadAccount(req.accountId))?.searchConsent) {
+        return res.status(403).json({
+            code: 'SEARCH_CONSENT_REQUIRED',
+            error: 'Enable external web research in Settings before Aura searches for you.'
+        });
+    }
     if (!SERPER_API_KEY) {
         return res.status(500).json({ error: 'Missing Serper API credentials' });
     }
 
+    let releaseAccountRequest = null;
     try {
+        if (hostedConfig.enabled) {
+            try {
+                releaseAccountRequest = searchAccountLimiter.acquire(req.accountId);
+            } catch (error) {
+                return res.status(429).json({ code: error.code, error: error.message });
+            }
+        }
         const report = await buildOsintReport(req.body || {});
         res.json(report);
     } catch (error) {
@@ -845,10 +1143,15 @@ app.post('/api/osint', async (req, res) => {
         }
 
         respondWithUpstreamError(res, 'OSINT research', error);
+    } finally {
+        releaseAccountRequest?.();
     }
 });
 
 app.get('/api/search', async (req, res) => {
+    if (hostedConfig.enabled) {
+        return res.status(405).json({ error: 'Use the consent-protected POST search endpoint.' });
+    }
     if (!SERPER_API_KEY) {
         return res.status(500).json({ error: 'Missing Serper API credentials' });
     }
@@ -882,7 +1185,17 @@ app.use((req, res) => {
     return res.status(404).type('text/plain').send('Not found');
 });
 
+app.use((error, req, res, _next) => {
+    console.error(`[${req.method} ${req.path}]`, error?.message || 'Unhandled server error');
+    if (res.headersSent) return res.end();
+    return res.status(500).json({ error: 'Aura could not complete this request.' });
+});
+
 function startServer({ host = HOST, port = PORT } = {}) {
+    assertLoopbackHost(host);
+    if (hostedConfig.enabled && !hostedRuntime) {
+        throw new Error('Hosted identity and account storage must be initialized before listening');
+    }
     return app.listen(port, host, function onListening() {
         const address = this.address();
         const listeningPort = typeof address === 'object' && address ? address.port : port;
@@ -891,16 +1204,27 @@ function startServer({ host = HOST, port = PORT } = {}) {
 }
 
 if (require.main === module) {
-    startServer();
+    if (hostedConfig.enabled) {
+        initializeHostedRuntime()
+            .then(() => startServer())
+            .catch((error) => {
+                console.error('Hosted startup failed:', error.message);
+                process.exitCode = 1;
+            });
+    } else {
+        startServer();
+    }
 }
 
 module.exports = {
     APP_ROOT,
     DEFAULT_HOST,
+    assertLoopbackHost,
     HOST,
     PORT,
     PUBLIC_DIR,
     app,
+    initializeHostedRuntime,
     resolveServerConfig,
     startServer
 };

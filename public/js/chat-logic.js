@@ -13,6 +13,18 @@ const STORAGE_KEYS = {
     FEEDBACK_PROFILE_ID: 'aura_feedback_profile_id'
 };
 
+const localStorage = {
+    getItem(key) {
+        return (window.AURA_HOSTED?.enabled ? window.AURA_HOSTED.settingsStorage : window.localStorage).getItem(key);
+    },
+    setItem(key, value) {
+        return (window.AURA_HOSTED?.enabled ? window.AURA_HOSTED.settingsStorage : window.localStorage).setItem(key, value);
+    },
+    removeItem(key) {
+        return (window.AURA_HOSTED?.enabled ? window.AURA_HOSTED.settingsStorage : window.localStorage).removeItem(key);
+    }
+};
+
 const API_ENDPOINTS = {
     ollamaGenerate: `${window.AURA_CONFIG.ollamaBaseUrl}/generate`,
     storeMemory: `${window.AURA_CONFIG.apiBaseUrl}/store_memory`,
@@ -545,9 +557,11 @@ function getConfiguredRoutingModels() {
 }
 
 function getAvailableModelNames() {
-    return Array.isArray(window.AURA_AVAILABLE_MODELS)
+    const discovered = Array.isArray(window.AURA_AVAILABLE_MODELS)
         ? window.AURA_AVAILABLE_MODELS.filter(Boolean)
         : [];
+    if (discovered.length) return discovered;
+    return window.AURA_HOSTED?.enabled ? window.AURA_HOSTED.allowedModels : [];
 }
 
 function getBackgroundModelName() {
@@ -2408,19 +2422,27 @@ function getRuntimeContextString() {
 const responseRuntime = window.AURA_REQUEST_RUNTIME.createRuntime();
 
 async function requestJson(url, options = {}) {
+    const hosted = window.AURA_HOSTED;
     const { response, data } = await responseRuntime.fetchJson(url, {
-        headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
+        headers: {
+            'Content-Type': 'application/json',
+            ...(hosted?.enabled ? { 'X-Aura-CSRF': hosted.csrfToken } : {}),
+            ...(options.headers || {})
+        },
         ...options
     });
 
     if (!response.ok) {
-        throw new Error(extractErrorMessage(data, `Request failed with status ${response.status}`));
+        const error = new Error(extractErrorMessage(data, `Request failed with status ${response.status}`));
+        error.code = data?.code;
+        throw error;
     }
 
     return data;
 }
 
 async function postJson(url, body, options = {}) {
+    if (window.AURA_HOSTED?.enabled) await window.AURA_HOSTED.waitForSync();
     const requestOptions = {
         method: 'POST',
         body: JSON.stringify(body),
@@ -2689,7 +2711,9 @@ function buildInferenceRouteSnapshot(modelDecision, route) {
 
 class ChatManager {
     constructor() {
-        this.profileManager = window.AURA_PERSONAL_INTELLIGENCE.createManager(localStorage);
+        this.profileManager = window.AURA_PERSONAL_INTELLIGENCE.createManager(
+            window.AURA_HOSTED?.enabled ? window.AURA_HOSTED.storage : window.localStorage
+        );
         this.pendingResponseMetadata = new Map();
         this.pendingVectorWrites = new Map();
         this.personalContextEpoch = 0;
@@ -3770,7 +3794,10 @@ class ChatManager {
     }
 }
 
-window.chatManager = new ChatManager();
+window.AURA_CHAT_READY = (window.AURA_HOSTED_READY || Promise.resolve()).then(() => {
+    window.chatManager = new ChatManager();
+    return window.chatManager;
+});
 
 async function createToolByType(type, theme = '') {
     const safeTheme = sanitizeToolTheme(theme, 'Quick support');
@@ -4717,6 +4744,7 @@ async function runEvidenceComposerAgent(context) {
             )
         );
     } catch (error) {
+        if (error.code === 'SEARCH_CONSENT_REQUIRED') throw error;
         responseRuntime.throwIfAborted();
         console.error('[SearchAgent] Full failure details:', error);
         return attachHighRiskSafetyRecommendations(

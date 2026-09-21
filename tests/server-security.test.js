@@ -8,6 +8,7 @@ const { once } = require('node:events');
 const { after, before, test } = require('node:test');
 const {
     DEFAULT_HOST,
+    assertLoopbackHost,
     resolveServerConfig,
     startServer
 } = require('../server');
@@ -35,6 +36,11 @@ test('empty server configuration resolves to the loopback default', () => {
     const config = resolveServerConfig({});
     assert.equal(DEFAULT_HOST, '127.0.0.1');
     assert.deepEqual(config, { host: '127.0.0.1', port: 3000 });
+});
+
+test('local liveness reports local mode without exposing service URLs', async () => {
+    const response = await fetch(`${baseUrl}/api/health`);
+    assert.deepEqual(await response.json(), { status: 'ok', mode: 'local' });
 });
 
 before(async () => {
@@ -65,6 +71,12 @@ test('default server binding is loopback-only', () => {
     assert.notEqual(boundHost, '::');
 });
 
+test('server rejects public network binding before opening a listener', () => {
+    assert.throws(() => assertLoopbackHost('0.0.0.0'), /loopback/i);
+    assert.throws(() => assertLoopbackHost('::'), /loopback/i);
+    assert.equal(assertLoopbackHost('127.0.0.1'), '127.0.0.1');
+});
+
 test('root and expected browser assets are public', async () => {
     const paths = [
         '/',
@@ -77,6 +89,14 @@ test('root and expected browser assets are public', async () => {
         const response = await fetch(`${baseUrl}${publicPath}`);
         assert.equal(response.status, 200, `${publicPath} must be public`);
     }
+});
+
+test('browser responses set security headers and do not allow framing', async () => {
+    const response = await fetch(`${baseUrl}/`);
+    assert.match(response.headers.get('content-security-policy') || '', /default-src 'self'/);
+    assert.equal(response.headers.get('x-content-type-options'), 'nosniff');
+    assert.equal(response.headers.get('x-frame-options'), 'SAMEORIGIN');
+    assert.equal(response.headers.get('referrer-policy'), 'no-referrer');
 });
 
 test('repository-private paths return genuine 404 responses without SPA HTML', async () => {

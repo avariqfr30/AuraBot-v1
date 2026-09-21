@@ -91,11 +91,11 @@ assert.match(
 );
 assert.match(
     serverJs,
-    /app\.post\('\/api\/search_memory'[\s\S]*?normalizeProfileId\(req\.body\?\.profileId\)[\s\S]*?buildProfileWhere\(profileId, chatId\)/
+    /app\.post\('\/api\/search_memory'[\s\S]*?normalizeProfileId\(req\.body\?\.profileId\)[\s\S]*?accountWhere\(profileId, chatId, hostedConfig\.enabled \? req\.accountId : null\)/
 );
 assert.match(
     serverJs,
-    /app\.post\('\/api\/profile_data\/delete'[\s\S]*?normalizeProfileDataScope\(req\.body\?\.scope\)[\s\S]*?normalizeChatId\(rawChatId\)[\s\S]*?scope === 'memory'[\s\S]*?getMemoryCollection\(\)[\s\S]*?buildProfileWhere\(profileId, chatId\)[\s\S]*?getPersonalResponseExampleCollection\(\)[\s\S]*?buildProfileWhere\(profileId\)/
+    /app\.post\('\/api\/profile_data\/delete'[\s\S]*?normalizeProfileDataScope\(req\.body\?\.scope\)[\s\S]*?normalizeChatId\(rawChatId\)[\s\S]*?scope === 'memory'[\s\S]*?getMemoryCollection\(\)[\s\S]*?accountWhere\(profileId, chatId,[\s\S]*?getPersonalResponseExampleCollection\(\)[\s\S]*?accountWhere\(profileId, null,/
 );
 assert.match(
     serverJs,

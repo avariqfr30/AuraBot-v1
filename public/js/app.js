@@ -1,4 +1,20 @@
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
+    if (window.AURA_CHAT_READY) {
+        try {
+            await window.AURA_CHAT_READY;
+        } catch (error) {
+            const surface = document.getElementById('chatMessages');
+            if (surface) {
+                surface.innerHTML = error.code === 'AUTH_REQUIRED'
+                    ? '<div class="empty-state"><h2>Sign in to Aura</h2><p>Your chats and approved memories will follow your account.</p><a href="/api/auth/login">Sign in</a></div>'
+                    : '<div class="empty-state"><h2>Aura account unavailable</h2><p>Reload after the account service is available.</p></div>';
+            }
+            return;
+        }
+    }
+    const localStorage = window.AURA_HOSTED?.enabled
+        ? window.AURA_HOSTED.settingsStorage
+        : window.localStorage;
     const userInput = document.getElementById('userInput');
     const sendButton = document.getElementById('sendButton');
     const stopResponseButton = document.getElementById('stopResponseButton');
@@ -34,6 +50,11 @@ document.addEventListener('DOMContentLoaded', () => {
     const refreshLocationButton = document.getElementById('refreshLocationButton');
     const personalIntelligenceCheckbox = document.getElementById('personalIntelligenceCheckbox');
     const personalIntelligenceStatusText = document.getElementById('personalIntelligenceStatusText');
+    const hostedAccountSettings = document.getElementById('hostedAccountSettings');
+    const externalResearchConsentCheckbox = document.getElementById('externalResearchConsentCheckbox');
+    const signOutButton = document.getElementById('signOutButton');
+    const importProfileButton = document.getElementById('importProfileButton');
+    const importProfileFile = document.getElementById('importProfileFile');
     const feedbackLearningStatusText = document.getElementById('feedbackLearningStatusText');
     const clearFeedbackButton = document.getElementById('clearFeedbackButton');
     const cancelSettingsButton = document.getElementById('cancelSettingsButton');
@@ -52,6 +73,17 @@ document.addEventListener('DOMContentLoaded', () => {
     let attachedFile = null;
     let responseInFlight = false;
     let profileOperationInFlight = false;
+
+    if (window.AURA_HOSTED?.enabled) {
+        hostedAccountSettings?.classList.remove('hidden');
+        if (externalResearchConsentCheckbox) externalResearchConsentCheckbox.checked = window.AURA_HOSTED.searchConsent;
+        const heading = document.getElementById('profileSectionTitle');
+        const description = document.getElementById('profileSectionDescription');
+        const privacyDescription = document.getElementById('privacyDataDescription');
+        if (heading) heading.textContent = 'Your Profiles';
+        if (description) description.textContent = 'Profiles keep your chats, feedback, and approved memory separate within your signed-in Aura account.';
+        if (privacyDescription) privacyDescription.textContent = 'Export the active profile, forget its memory, or delete your hosted Aura account and all of its server-side data.';
+    }
 
     function syncResponseInFlightControls() {
         const appBusy = responseInFlight || profileOperationInFlight;
@@ -186,11 +218,12 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function getPinnedModelNames() {
-        return [...new Set([
+        const models = [...new Set([
             window.AURA_CONFIG.defaultModel,
             ...(window.AURA_CONFIG.preferredModels || []),
             'gpt-oss:120b-cloud'
         ].filter(Boolean))];
+        return models;
     }
 
     function getPrioritizedModels(models = []) {
@@ -737,6 +770,19 @@ document.addEventListener('DOMContentLoaded', () => {
 
     async function deleteAllAuraData() {
         if (!window.chatManager) return;
+        if (window.AURA_HOSTED?.enabled) {
+            if (!confirm('Delete your hosted Aura account, every synced profile, chat, feedback item, and server memory? Old exports or browser data from the earlier local app are not deleted. This cannot be undone.')) return;
+            setProfileOperationInFlight(true);
+            try {
+                await chatManager.waitForPendingVectorWrites();
+                await window.AURA_HOSTED.deleteAccount();
+            } catch (error) {
+                setProfileActionStatus(error.message || 'Could not delete your account. No local profile was cleared.', { error: true });
+            } finally {
+                setProfileOperationInFlight(false);
+            }
+            return;
+        }
         if (!confirm('Delete every local profile, chat, memory, feedback item, and device setting? This cannot be undone.')) return;
 
         const profiles = chatManager.listProfiles();
@@ -962,6 +1008,13 @@ document.addEventListener('DOMContentLoaded', () => {
             refreshUI();
         } catch (error) {
             if (handleResponseInterruption(error)) return;
+            if (error.code === 'SEARCH_CONSENT_REQUIRED') {
+                addAssistantArtifact({
+                    content: 'Live web research is off for your account. You can enable Serper research in Settings before asking me to search.'
+                }, '', requestChatId);
+                refreshUI();
+                return;
+            }
             console.error('Message handling failed:', error);
             addAssistantArtifact(
                 {
@@ -1513,6 +1566,12 @@ document.addEventListener('DOMContentLoaded', () => {
         setProfileOperationInFlight(true);
 
         try {
+            if (window.AURA_HOSTED?.enabled) {
+                const requestedSearchConsent = Boolean(externalResearchConsentCheckbox?.checked);
+                if (requestedSearchConsent !== window.AURA_HOSTED.searchConsent) {
+                    await window.AURA_HOSTED.setSearchConsent(requestedSearchConsent);
+                }
+            }
             if (selectedModel) {
                 localStorage.setItem(STORAGE_KEYS.MODEL, selectedModel);
             }
@@ -1534,12 +1593,18 @@ document.addEventListener('DOMContentLoaded', () => {
                 throw new Error('The active profile changed before settings were saved.');
             }
             chatManager.setPersonalIntelligenceEnabled(Boolean(personalIntelligenceCheckbox?.checked));
+            if (window.AURA_HOSTED?.enabled) {
+                await window.AURA_HOSTED.waitForSync();
+            }
             refreshProfileControls();
             refreshFeedbackLearningStatus();
 
             closeSettingsModal();
         } catch (error) {
             console.error('Settings save failed:', error);
+            if (externalResearchConsentCheckbox && window.AURA_HOSTED?.enabled) {
+                externalResearchConsentCheckbox.checked = window.AURA_HOSTED.searchConsent;
+            }
             setProfileActionStatus('Could not finish saving this profile’s settings.', { error: true });
         } finally {
             setProfileOperationInFlight(false);
@@ -1725,6 +1790,34 @@ document.addEventListener('DOMContentLoaded', () => {
     if (createProfileButton) createProfileButton.addEventListener('click', createLocalProfile);
     if (renameProfileButton) renameProfileButton.addEventListener('click', renameActiveProfile);
     if (deleteProfileButton) deleteProfileButton.addEventListener('click', deleteActiveProfile);
+    signOutButton?.addEventListener('click', async () => {
+        try {
+            await window.AURA_HOSTED?.signOut();
+        } catch (error) {
+            setProfileActionStatus(error.message || 'Could not sign out.', { error: true });
+        }
+    });
+    importProfileButton?.addEventListener('click', () => importProfileFile?.click());
+    importProfileFile?.addEventListener('change', async () => {
+        const file = importProfileFile.files?.[0];
+        if (!file || responseInFlight || profileOperationInFlight) return;
+        if (!confirm('Upload this old Aura profile’s chats and saved context to your signed-in account? Personal Intelligence will start paused.')) {
+            importProfileFile.value = '';
+            return;
+        }
+        setProfileOperationInFlight(true);
+        try {
+            const exported = JSON.parse(await file.text());
+            const profile = await window.AURA_HOSTED.importProfileExport(exported);
+            setProfileActionStatus(`Imported ${profile.name} to your account. Reloading…`);
+            window.location.reload();
+        } catch (error) {
+            setProfileActionStatus(error.message || 'Could not import this profile.', { error: true });
+        } finally {
+            importProfileFile.value = '';
+            setProfileOperationInFlight(false);
+        }
+    });
     if (cancelSettingsButton) cancelSettingsButton.addEventListener('click', closeSettingsModal);
     if (resetSettingsButton) resetSettingsButton.addEventListener('click', resetSettingsForm);
     if (saveSettingsButton) saveSettingsButton.addEventListener('click', saveSettings);
