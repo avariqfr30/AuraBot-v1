@@ -37,9 +37,11 @@ assert.match(indexHtml, /id="renameProfileButton"/);
 assert.match(indexHtml, /id="deleteProfileButton"/);
 assert.match(indexHtml, /id="personalIntelligenceCheckbox"/);
 assert.match(indexHtml, /id="personalIntelligenceStatusText"/);
+assert.match(indexHtml, /id="clearLearnedPreferencesButton"/);
+assert.match(indexHtml, /Reset Conversation Preferences/);
 assert.match(indexHtml, /not account authentication/i);
 assert.doesNotMatch(indexHtml, /Persistent Companion Memory/);
-assert.match(indexHtml, /<script src="js\/personal-intelligence\.js"><\/script>\s*<script src="js\/model-routing\.js"><\/script>\s*<script src="js\/turn-policy\.js"><\/script>\s*<script src="js\/tool-artifacts\.js"><\/script>\s*<script src="js\/feedback-learning\.js"><\/script>\s*<script src="js\/hosted-client\.js"><\/script>\s*<script src="js\/chat-logic\.js"><\/script>/);
+assert.match(indexHtml, /<script src="js\/personal-intelligence\.js"><\/script>\s*<script src="js\/intelligence-bundle\.js"><\/script>\s*<script src="js\/model-routing\.js"><\/script>\s*<script src="js\/turn-policy\.js"><\/script>\s*<script src="js\/tool-artifacts\.js"><\/script>\s*<script src="js\/feedback-learning\.js"><\/script>\s*<script src="js\/hosted-client\.js"><\/script>\s*<script src="js\/chat-logic\.js"><\/script>/);
 assert.match(indexHtml, /<option value="auto">Auto/);
 assert.match(packageJson.scripts.check, /node --check lib\/memory-results\.js/);
 assert.match(packageJson.scripts.check, /node --check public\/js\/turn-policy\.js/);
@@ -70,6 +72,8 @@ assert.match(appJs, /chatManager\.getProfileSetting\(\s*STORAGE_KEYS\.RESPONSE_D
 assert.match(appJs, /chatManager\.setProfileSetting\(STORAGE_KEYS\.RESPONSE_DETAIL/);
 assert.match(appJs, /chatManager\.removeProfileSetting\(STORAGE_KEYS\.RESPONSE_DETAIL/);
 assert.match(appJs, /chatManager\.setPersonalIntelligenceEnabled/);
+assert.match(appJs, /chatManager\.clearLearnedPreferences\(\)/);
+assert.match(appJs, /clearLearnedPreferencesButton\.addEventListener/);
 assert.match(appJs, /chatManager\.getPersonalIntelligenceState/);
 assert.match(appJs, /chatManager\.switchProfile/);
 assert.match(appJs, /chatManager\.createProfile/);
@@ -121,8 +125,9 @@ assert.match(
     chatLogicJs,
     /runBehaviorAnalyzer[\s\S]*normalUserTurns[\s\S]*normalUserTurns\.length < 2/
 );
-assert.match(chatLogicJs, /health\/mental-health conditions/);
-assert.match(chatLogicJs, /third-party private details/);
+assert.match(chatLogicJs, /BEHAVIOR_ANALYZER:[\s\S]*current chat only/i);
+assert.match(chatLogicJs, /BEHAVIOR_ANALYZER:[\s\S]*Do not diagnose/i);
+assert.match(chatLogicJs, /BEHAVIOR_ANALYZER:[\s\S]*explicit evidence/i);
 assert.match(
     chatLogicJs,
     /getInferenceContentStore[\s\S]*?responsePreferences:\s*getStoredExperienceResponsePreferences\(\)[\s\S]*?\n    }\n\n    getUserMemoryStore/
@@ -177,9 +182,9 @@ assert.match(
     chatLogicJs,
     /searchResponseExamples[\s\S]*?const sourceProfileId = chatManager\.getActiveProfileId\(\)[\s\S]*?personalResultsStillValid/
 );
-assert.match(
+assert.doesNotMatch(
     chatLogicJs,
-    /sanitizeAutomaticMemoryCandidate\(\s*this\.getUserMemoryStore\(\),\s*durableParsed\s*\)/
+    /runBehaviorAnalyzer[\s\S]*?PROMPTS\.USER_MEMORY_ANALYZER/
 );
 assert.match(
     chatLogicJs,

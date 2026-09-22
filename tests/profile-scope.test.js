@@ -91,7 +91,7 @@ assert.match(
 );
 assert.match(
     serverJs,
-    /app\.post\('\/api\/search_memory'[\s\S]*?normalizeProfileId\(req\.body\?\.profileId\)[\s\S]*?accountWhere\(profileId, chatId, hostedConfig\.enabled \? req\.accountId : null\)/
+    /app\.post\('\/api\/search_memory'[\s\S]*?normalizeProfileId\(req\.body\?\.profileId\)[\s\S]*?approvedMemoryWhere\(profileId, chatId, hostedConfig\.enabled \? req\.accountId : null\)/
 );
 assert.match(
     serverJs,

@@ -727,6 +727,7 @@ function openInsightsModal() {
             : window.chatManager.getInferenceContentStore())
         : {};
     const userStore = window.chatManager ? window.chatManager.getUserMemoryStore() : {};
+    const legacyMemoryReview = window.chatManager ? window.chatManager.getLegacyMemoryReview() : [];
     const prefs = window.chatManager
         ? window.chatManager.getInferenceResponsePreferences()
         : (store.responsePreferences || {});
@@ -779,6 +780,12 @@ function openInsightsModal() {
                         ? "No durable cross-chat memory stored yet."
                         : "No retained profile memory to show."
                 )}
+                ${legacyMemoryReview.length ? `
+                    <div class="mt-3 border-t border-white/10 pt-3">
+                        <p class="text-xs text-amber-300 mb-2">Saved by an earlier Aura version and not currently used. Ask Aura to remember any item again to approve it under the current memory rules.</p>
+                        ${renderList(legacyMemoryReview, "")}
+                    </div>
+                ` : ''}
             </div>
         </div>
     `;

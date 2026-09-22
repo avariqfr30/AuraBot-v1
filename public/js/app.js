@@ -50,6 +50,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     const refreshLocationButton = document.getElementById('refreshLocationButton');
     const personalIntelligenceCheckbox = document.getElementById('personalIntelligenceCheckbox');
     const personalIntelligenceStatusText = document.getElementById('personalIntelligenceStatusText');
+    const clearLearnedPreferencesButton = document.getElementById('clearLearnedPreferencesButton');
     const hostedAccountSettings = document.getElementById('hostedAccountSettings');
     const externalResearchConsentCheckbox = document.getElementById('externalResearchConsentCheckbox');
     const signOutButton = document.getElementById('signOutButton');
@@ -348,8 +349,8 @@ document.addEventListener('DOMContentLoaded', async () => {
         const store = chatManager.getUserMemoryStore();
         const rememberedCount = (store?.behavioralFacts?.length || 0) + (store?.moodPatterns?.length || 0);
         personalIntelligenceStatusText.textContent = rememberedCount > 0
-            ? `Active. Aura may use ${rememberedCount} approved or learned memory item${rememberedCount === 1 ? '' : 's'} across this profile's chats.`
-            : 'Active. Aura may learn useful preferences across this profile’s chats.';
+            ? `Active. Aura may use ${rememberedCount} explicitly approved memory item${rememberedCount === 1 ? '' : 's'} and learn non-sensitive response preferences across this profile’s chats.`
+            : 'Active. Aura may learn non-sensitive response preferences across this profile’s chats. Personal facts require an explicit remember request.';
     }
 
     function refreshProfileControls({ clearStatus = false } = {}) {
@@ -766,6 +767,15 @@ document.addEventListener('DOMContentLoaded', async () => {
         } finally {
             setProfileOperationInFlight(false);
         }
+    }
+
+    function clearLearnedPreferences() {
+        if (!window.chatManager) return;
+        if (!confirm('Reset conversation-derived response preferences for this profile? Approved memories, chats, and feedback-based learning will stay.')) return;
+        chatManager.clearLearnedPreferences();
+        setProfileActionStatus('Conversation-derived response preferences were reset for this profile.');
+        refreshPersonalIntelligenceStatus();
+        refreshUI();
     }
 
     async function deleteAllAuraData() {
@@ -1824,6 +1834,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (exportDataButton) exportDataButton.addEventListener('click', exportAuraData);
     if (clearMemoryButton) clearMemoryButton.addEventListener('click', clearAuraMemory);
     if (clearFeedbackButton) clearFeedbackButton.addEventListener('click', clearFeedbackLearning);
+    if (clearLearnedPreferencesButton) clearLearnedPreferencesButton.addEventListener('click', clearLearnedPreferences);
     if (deleteAllDataButton) deleteAllDataButton.addEventListener('click', deleteAllAuraData);
     if (locationAccessCheckbox) locationAccessCheckbox.addEventListener('change', refreshLocationStatus);
     if (refreshLocationButton) refreshLocationButton.addEventListener('click', () => requestCurrentLocation({ silent: false }));

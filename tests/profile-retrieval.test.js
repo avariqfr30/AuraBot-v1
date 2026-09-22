@@ -10,18 +10,34 @@ const app = fs.readFileSync(
     path.resolve(__dirname, '..', 'public', 'js', 'app.js'),
     'utf8'
 );
+const server = fs.readFileSync(
+    path.resolve(__dirname, '..', 'server.js'),
+    'utf8'
+);
 
 assert.match(
     chatLogic,
-    /searchRelevantVectorData[\s\S]*?postJson\(API_ENDPOINTS\.searchMemory,\s*\{\s*profileId:\s*sourceProfileId,\s*query\s*\}\)/
+    /searchRelevantVectorData[\s\S]*?postJson\(API_ENDPOINTS\.searchMemory,\s*\{\s*profileId:\s*sourceProfileId,\s*query,\s*approvedOnly:\s*true\s*\}\)/
 );
 assert.match(
     chatLogic,
     /searchRelevantVectorData[\s\S]*?selectRelevantMemories\(\{\s*query,\s*matches,\s*explicitRecall,/
 );
 assert.match(chatLogic, /source: personal conversation memory/);
+assert.match(
+    server,
+    /function approvedMemoryWhere[\s\S]*?approval:\s*\{\s*\$eq:\s*'explicit'\s*\}/
+);
+assert.match(
+    server,
+    /app\.post\('\/api\/search_memory'[\s\S]*?approvedOnly[\s\S]*?where:\s*approvedMemoryWhere/
+);
 assert.doesNotMatch(chatLogic, /source: current conversation memory/);
 assert.match(chatLogic, /this\.pendingVectorWrites = new Map\(\)/);
+assert.doesNotMatch(
+    chatLogic,
+    /if \(role === 'user' && !metadata\.skipVectorization\)[\s\S]*?this\.vectorizeData\(content/
+);
 assert.match(
     chatLogic,
     /waitForPendingVectorWrites\(profileId = null\)[\s\S]*?Promise\.allSettled\(pending\)/
@@ -30,13 +46,14 @@ assert.match(
     chatLogic,
     /vectorizeData[\s\S]*?pendingVectorWrites\.set\(request, sourceProfileId\)[\s\S]*?pendingVectorWrites\.delete\(request\)/
 );
+assert.match(chatLogic, /vectorizeData[\s\S]*?metadata\?\.approval !== 'explicit'[\s\S]*?return false/);
 assert.match(
     chatLogic,
-    /vectorizeData[\s\S]*?isSensitiveAutomaticMemoryText\(text\)[\s\S]*?return false/
+    /rememberUserFact[\s\S]*?vectorizeData\(value,[\s\S]*?sourceChatId:\s*chatId,[\s\S]*?approval:\s*'explicit'/
 );
 assert.match(
     chatLogic,
-    /vectorizeData[\s\S]*?classifyTurn\(\{\s*message:\s*text\s*\}\)[\s\S]*?domain\s*===\s*'medical'[\s\S]*?return false/
+    /searchRelevantVectorData[\s\S]*?postJson[\s\S]*?approvedOnly:\s*true/
 );
 assert.match(chatLogic, /getPromotedExampleIdsForChat\(chatId\)/);
 [

@@ -399,50 +399,18 @@ Return ONLY valid JSON with this exact shape:
 
 Set requiresRevision to true only when the draft contains a material medical error, unsafe dosing or treatment advice, a missed urgent red flag, unsupported certainty, or a contradiction with the supplied user information. Do not rewrite for style. Do not diagnose the user. Do not add facts that require current external evidence.`,
 
-    BEHAVIOR_ANALYZER: `You are Aura's background profiling agent.
-Update the user's behavioral profile based on the recent chat history.
-Focus on updating: communicationStyle, moodPatterns, potentialLapses, and behavioralFacts.
+    BEHAVIOR_ANALYZER: `You are Aura's background conversation-adaptation agent.
+Maintain a working understanding for the current chat only. This is not a diagnosis or a durable personal record.
+Focus on communicationStyle, responsePreferences, tentative moodPatterns, potentialLapses, and user-stated behavioralFacts.
+
+Rules:
+- Change response preferences only when the recent chat contains explicit evidence or a repeated, clear interaction pattern.
+- Keep mood and caution patterns tentative, specific to this chat, and grounded in what the user actually said.
+- Do not diagnose, assign clinical labels, infer hidden trauma, or turn a temporary emotion into an identity.
+- Do not invent facts or silently promote current-chat observations into cross-chat memory.
 [Current Profile]: %STORE%
 [Recent Chat]: %HISTORY%
 Respond ONLY with the updated JSON object matching the input structure.`,
-
-    USER_MEMORY_ANALYZER: `You are Aura's durable user-memory agent.
-Update the user's cross-chat memory using only information that is stable and useful across conversations.
-
-[Current Durable User Memory]
-%STORE%
-
-[Active Chat Profile]
-%CHAT_PROFILE%
-
-[Recent Chat]
-%HISTORY%
-
-Return ONLY the JSON object with this exact shape:
-{
-  "communicationStyle": "string",
-  "moodPatterns": ["string"],
-  "potentialLapses": ["string"],
-  "behavioralFacts": ["string"],
-  "responsePreferences": {
-    "detailLevel": "balanced",
-    "reassuranceLevel": "medium",
-    "technicalLevel": "plain",
-    "structureLevel": "paragraphs",
-    "directnessLevel": "balanced",
-    "followUpLevel": "gentle",
-    "likelyTone": "neutral"
-  }
-}
-
-Rules:
-- Store only durable preferences, recurring patterns, and stable support needs.
-- Do not store one-off topics unless they are clearly recurring or personally important.
-- Do not automatically add sensitive health/mental-health conditions, symptoms, medications,
-  trauma/abuse, sexuality, finances, precise location, legal matters, or third-party private details.
-- Already-approved stored entries may be preserved as-is, but do not expand them automatically.
-- Do not invent facts.
-- No markdown, no commentary, no code fences.`,
 
     CONVERSATION_SUMMARIZER: `You are Aura's conversation memory summarizer.
 Summarize the older part of this one chat so Aura can continue the conversation without losing context.
@@ -2716,6 +2684,7 @@ class ChatManager {
         );
         this.pendingResponseMetadata = new Map();
         this.pendingVectorWrites = new Map();
+        this.behaviorAnalysisVersions = new Map();
         this.personalContextEpoch = 0;
         this.state = this.ensureStateShape(this.loadState() || this.getInitialState());
         if (!this.state.activeChatId) this.createNewChat();
@@ -2727,6 +2696,7 @@ class ChatManager {
             chats: {},
             activeChatId: null,
             localContentStore: buildChatScopedProfile(),
+            intelligenceBundle: window.AURA_INTELLIGENCE_BUNDLE.createBundle(),
             feedbackLearning: window.AURA_FEEDBACK.createState()
         };
     }
@@ -2734,7 +2704,10 @@ class ChatManager {
     ensureStateShape(state) {
         const safeState = state && typeof state === 'object' ? state : this.getInitialState();
         safeState.chats = safeState.chats && typeof safeState.chats === 'object' ? safeState.chats : {};
-        const globalFallbackStore = sanitizeChatScopedProfile(
+        const hadIntelligenceBundle = Boolean(
+            safeState.intelligenceBundle && typeof safeState.intelligenceBundle === 'object'
+        );
+        const legacyGlobalStore = sanitizeChatScopedProfile(
             safeState.localContentStore,
             this.getInitialState().localContentStore
         );
@@ -2772,11 +2745,23 @@ class ChatManager {
             chat.lastReengagementAt = Number(chat.lastReengagementAt) || 0;
             chat.lastProactiveToolAt = Number(chat.lastProactiveToolAt) || 0;
             chat.lastProactiveToolType = typeof chat.lastProactiveToolType === 'string' ? chat.lastProactiveToolType : '';
-            chat.localContentStore = sanitizeChatScopedProfile(chat.localContentStore, globalFallbackStore);
+            chat.localContentStore = sanitizeChatScopedProfile(
+                chat.localContentStore,
+                buildChatScopedProfile()
+            );
             chat.contextSummary = chat.contextSummary && typeof chat.contextSummary === 'object' ? chat.contextSummary : null;
             chat.contextSummaryAnchor = typeof chat.contextSummaryAnchor === 'string' ? chat.contextSummaryAnchor : '';
         });
-        safeState.localContentStore = globalFallbackStore;
+        safeState.localContentStore = legacyGlobalStore;
+        safeState.intelligenceBundle = window.AURA_INTELLIGENCE_BUNDLE.normalizeBundle(
+            safeState.intelligenceBundle
+        );
+        if (!hadIntelligenceBundle) {
+            safeState.intelligenceBundle = window.AURA_INTELLIGENCE_BUNDLE.migrateLegacyContext(
+                safeState.intelligenceBundle,
+                legacyGlobalStore
+            );
+        }
         const feedbackState = safeState.feedbackLearning &&
             typeof safeState.feedbackLearning === 'object'
             ? safeState.feedbackLearning
@@ -2860,6 +2845,7 @@ class ChatManager {
 
         this.advancePersonalContextEpoch();
         this.pendingResponseMetadata.clear();
+        this.behaviorAnalysisVersions.clear();
         clearAnalysisCaches();
         this.state = this.ensureStateShape(this.loadState() || this.getInitialState());
         if (!this.state.activeChatId) this.createNewChat();
@@ -2876,6 +2862,7 @@ class ChatManager {
         if (this.getActiveProfileId() !== previousActiveId) {
             this.advancePersonalContextEpoch();
             this.pendingResponseMetadata.clear();
+            this.behaviorAnalysisVersions.clear();
             clearAnalysisCaches();
             this.state = this.ensureStateShape(this.loadState() || this.getInitialState());
             if (!this.state.activeChatId) this.createNewChat();
@@ -2894,6 +2881,7 @@ class ChatManager {
         if (state !== previousState) {
             this.advancePersonalContextEpoch();
             this.pendingResponseMetadata.clear();
+            this.behaviorAnalysisVersions.clear();
             clearAnalysisCaches();
         }
         return state;
@@ -2957,6 +2945,11 @@ class ChatManager {
             ...this.state.feedbackLearning,
             entries: remainingFeedback
         });
+        this.state.intelligenceBundle = window.AURA_INTELLIGENCE_BUNDLE.removeChatContributions(
+            this.state.intelligenceBundle,
+            id
+        );
+        this.behaviorAnalysisVersions.delete(id);
         delete this.state.chats[id];
 
         const remainingChatIds = Object.keys(this.state.chats);
@@ -3005,14 +2998,9 @@ class ChatManager {
             chat.title = buildChatTitle(content);
         }
 
-        if (role === 'user' && !metadata.skipVectorization) {
+        if (role === 'user') {
             chat.lastUserMessageTimestamp = timestamp;
-            this.vectorizeData(content, {
-                role: 'user',
-                timestamp,
-                chatId: chat.id
-            });
-
+            this.recordExplicitPreferenceSignals(content, chat.id, message.id);
             const normalUserTurnCount = chat.history.filter((entry) => (
                 entry?.role === 'user' && entry.source !== 'feedback_retry'
             )).length;
@@ -3032,12 +3020,10 @@ class ChatManager {
     }
 
     async vectorizeData(text, metadata = {}) {
-        const vectorClassification = window.AURA_MODEL_ROUTING.classifyTurn({ message: text });
         if (
             !text ||
             !this.isPersonalIntelligenceActive() ||
-            window.AURA_FEEDBACK.isSensitiveAutomaticMemoryText(text) ||
-            vectorClassification.domain === 'medical'
+            metadata?.approval !== 'explicit'
         ) return false;
         const sourceProfileId = this.getActiveProfileId();
         const request = postJson(API_ENDPOINTS.storeMemory, {
@@ -3076,7 +3062,8 @@ class ChatManager {
         try {
             const data = await postJson(API_ENDPOINTS.searchMemory, {
                 profileId: sourceProfileId,
-                query
+                query,
+                approvedOnly: true
             });
             if (
                 sourceProfileId !== this.getActiveProfileId() ||
@@ -3110,6 +3097,8 @@ class ChatManager {
 
     async runBehaviorAnalyzer(chatId = this.state.activeChatId) {
         if (!this.isPersonalIntelligenceActive()) return;
+        const analysisVersion = (this.behaviorAnalysisVersions.get(chatId) || 0) + 1;
+        this.behaviorAnalysisVersions.set(chatId, analysisVersion);
         const sourceProfileId = this.getActiveProfileId();
         const sourceContextEpoch = this.getPersonalContextEpoch();
         const chat = this.state.chats[chatId];
@@ -3135,7 +3124,8 @@ class ChatManager {
         if (
             sourceProfileId !== this.getActiveProfileId() ||
             sourceContextEpoch !== this.getPersonalContextEpoch() ||
-            !this.isPersonalIntelligenceActive()
+            !this.isPersonalIntelligenceActive() ||
+            this.behaviorAnalysisVersions.get(chatId) !== analysisVersion
         ) return;
         const parsed = safeParseJson(response, null);
 
@@ -3151,31 +3141,13 @@ class ChatManager {
                 parsed.responsePreferences,
                 previousPreferences
             );
-            const durableResponse = await _callLLM(
-                PROMPTS.USER_MEMORY_ANALYZER
-                    .replace('%STORE%', JSON.stringify(this.getUserMemoryStore(), null, 2))
-                    .replace('%CHAT_PROFILE%', JSON.stringify(nextStore, null, 2))
-                    .replace('%HISTORY%', historyStr),
-                { format: 'json', callType: 'analysis', signal: null }
+            this.recordInteractionPreferenceSignals(
+                previousPreferences,
+                nextStore.responsePreferences,
+                chatId,
+                normalUserTurns[normalUserTurns.length - 1]?.id
             );
-            if (
-                sourceProfileId !== this.getActiveProfileId() ||
-                sourceContextEpoch !== this.getPersonalContextEpoch() ||
-                !this.isPersonalIntelligenceActive() ||
-                !this.state.chats[chatId]
-            ) return;
-            const durableParsed = safeParseJson(durableResponse, null);
             this.state.chats[chatId].localContentStore = nextStore;
-            if (durableParsed && typeof durableParsed === 'object') {
-                const filteredDurable = window.AURA_FEEDBACK.sanitizeAutomaticMemoryCandidate(
-                    this.getUserMemoryStore(),
-                    durableParsed
-                );
-                this.state.localContentStore = sanitizeChatScopedProfile(
-                    filteredDurable,
-                    this.getUserMemoryStore()
-                );
-            }
             this.saveState();
         }
     }
@@ -3209,7 +3181,81 @@ class ChatManager {
     }
 
     getUserMemoryStore() {
-        return sanitizeChatScopedProfile(this.state.localContentStore, buildChatScopedProfile());
+        const approvedMemories = window.AURA_INTELLIGENCE_BUNDLE.getActiveSignals(
+            this.state.intelligenceBundle,
+            { kind: 'approved_memory' }
+        ).map((signal) => signal.value);
+        return {
+            ...buildChatScopedProfile(),
+            behavioralFacts: approvedMemories,
+            responsePreferences: sanitizeResponsePreferences({
+                ...DEFAULT_RESPONSE_PREFERENCES,
+                ...window.AURA_INTELLIGENCE_BUNDLE.buildPreferenceOverrides(
+                    this.state.intelligenceBundle
+                )
+            }, DEFAULT_RESPONSE_PREFERENCES)
+        };
+    }
+
+    getProfileIntelligenceBundle() {
+        return window.AURA_INTELLIGENCE_BUNDLE.normalizeBundle(this.state.intelligenceBundle);
+    }
+
+    getLegacyMemoryReview() {
+        return window.AURA_INTELLIGENCE_BUNDLE.getReviewRequiredMemories(
+            this.state.intelligenceBundle
+        );
+    }
+
+    recordInteractionPreferenceSignals(previousPreferences, nextPreferences, chatId, messageId = '') {
+        if (!this.isPersonalIntelligenceActive()) return;
+        const previous = sanitizeResponsePreferences(previousPreferences, DEFAULT_RESPONSE_PREFERENCES);
+        const next = sanitizeResponsePreferences(nextPreferences, previous);
+        [
+            'detailLevel',
+            'reassuranceLevel',
+            'technicalLevel',
+            'structureLevel',
+            'directnessLevel',
+            'followUpLevel'
+        ].forEach((key) => {
+            if (next[key] === previous[key]) return;
+            this.state.intelligenceBundle = window.AURA_INTELLIGENCE_BUNDLE.recordSignal(
+                this.state.intelligenceBundle,
+                {
+                    kind: 'interaction_preference',
+                    key,
+                    value: next[key],
+                    confidence: 0.72,
+                    source: {
+                        type: 'behavior_analysis',
+                        chatId,
+                        messageId
+                    }
+                }
+            );
+        });
+    }
+
+    recordExplicitPreferenceSignals(message, chatId, messageId = '') {
+        if (!this.isPersonalIntelligenceActive()) return;
+        window.AURA_INTELLIGENCE_BUNDLE.inferExplicitPreferenceSignals(message)
+            .forEach((preference) => {
+                this.state.intelligenceBundle = window.AURA_INTELLIGENCE_BUNDLE.recordSignal(
+                    this.state.intelligenceBundle,
+                    {
+                        kind: 'interaction_preference',
+                        key: preference.key,
+                        value: preference.value,
+                        confidence: 0.99,
+                        source: {
+                            type: 'explicit_instruction',
+                            chatId,
+                            messageId
+                        }
+                    }
+                );
+            });
     }
 
     rememberUserFact(text) {
@@ -3217,9 +3263,34 @@ class ChatManager {
         const value = String(text || '').trim();
         if (!value) return false;
 
+        const chatId = this.state.activeChatId;
+        const latestUser = [...(this.getChat(chatId)?.history || [])]
+            .reverse()
+            .find((message) => message?.role === 'user');
+        this.state.intelligenceBundle = window.AURA_INTELLIGENCE_BUNDLE.recordSignal(
+            this.state.intelligenceBundle,
+            {
+                kind: 'approved_memory',
+                key: 'memory',
+                value,
+                confidence: 1,
+                consent: 'explicit',
+                source: {
+                    type: 'memory_request',
+                    chatId,
+                    messageId: latestUser?.id || ''
+                }
+            }
+        );
         const store = sanitizeChatScopedProfile(this.state.localContentStore, buildChatScopedProfile());
         store.behavioralFacts = mergeUniqueStrings(store.behavioralFacts, [value]).slice(0, 20);
         this.state.localContentStore = store;
+        this.vectorizeData(value, {
+            role: 'user',
+            timestamp: Date.now(),
+            sourceChatId: chatId,
+            approval: 'explicit'
+        });
         this.saveState();
         return true;
     }
@@ -3235,6 +3306,25 @@ class ChatManager {
     clearUserMemoryStore() {
         this.advancePersonalContextEpoch();
         this.state.localContentStore = buildChatScopedProfile();
+        this.state.intelligenceBundle = window.AURA_INTELLIGENCE_BUNDLE.clearApprovedMemories(
+            this.state.intelligenceBundle
+        );
+        this.saveState();
+    }
+
+    clearLearnedPreferences() {
+        this.advancePersonalContextEpoch();
+        this.state.intelligenceBundle = window.AURA_INTELLIGENCE_BUNDLE.clearInteractionPreferences(
+            this.state.intelligenceBundle
+        );
+        Object.values(this.state.chats).forEach((chat) => {
+            if (!chat || typeof chat !== 'object') return;
+            chat.localContentStore = {
+                ...sanitizeChatScopedProfile(chat.localContentStore, buildChatScopedProfile()),
+                responsePreferences: { ...DEFAULT_RESPONSE_PREFERENCES }
+            };
+        });
+        clearAnalysisCaches();
         this.saveState();
     }
 
@@ -3463,6 +3553,7 @@ class ChatManager {
         Object.values(STORAGE_KEYS).forEach((key) => localStorage.removeItem(key));
         this.pendingResponseMetadata.clear();
         this.pendingVectorWrites.clear();
+        this.behaviorAnalysisVersions.clear();
         this.state = this.getInitialState();
         this.createNewChat();
         this.saveState();
@@ -3478,6 +3569,9 @@ class ChatManager {
     getResponsePreferencesForChat(chatId = this.state.activeChatId) {
         return sanitizeResponsePreferences(
             {
+                ...window.AURA_INTELLIGENCE_BUNDLE.buildPreferenceOverrides(
+                    this.state.intelligenceBundle
+                ),
                 ...this.getStoredResponsePreferencesForChat(chatId),
                 ...this.getFeedbackPreferenceOverrides()
             },

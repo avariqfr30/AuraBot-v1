@@ -196,7 +196,8 @@
                         <input id="personalIntelligenceCheckbox" type="checkbox" class="mt-1 h-4 w-4 rounded border-gray-500 bg-gray-800 text-pink-600 focus:ring-pink-500" data-block-during-response="true">
                     </div>
                     <div id="personalIntelligenceStatusText" class="text-xs text-gray-400">Not enabled. Aura only uses the current chat.</div>
-                    <p class="text-xs text-gray-400">Sensitive details are remembered only when you explicitly ask Aura to remember them.</p>
+                    <p class="text-xs text-gray-400">Personal facts and sensitive details become cross-chat memory only when you explicitly ask Aura to remember them.</p>
+                    <button id="clearLearnedPreferencesButton" type="button" class="settings-secondary-button px-3 py-2 rounded-xl text-sm" data-block-during-response="true">Reset Conversation Preferences</button>
                 </div>
                 <div id="hostedAccountSettings" class="hidden space-y-3 rounded-2xl border border-white/10 p-4">
                     <h4 class="text-sm font-semibold text-gray-200">Your Aura Account</h4>
@@ -253,7 +254,7 @@
     <div id="insightsModal" class="hidden fixed inset-0 z-50 overflow-y-auto bg-black bg-opacity-75 flex items-center justify-center p-4">
         <div data-liquid role="dialog" aria-modal="true" aria-labelledby="insightsTitle" tabindex="-1" class="modal-panel relative liquid-glass liquid-panel rounded-3xl p-8 w-full max-w-2xl shadow-2xl border border-white/10">
             <h3 id="insightsTitle" class="text-2xl font-bold mb-2 text-gray-100">Aura's Context Notes</h3>
-            <p class="text-sm text-gray-400 mb-6">A compact view of the preferences and patterns Aura may use. It updates as you chat and is stored with your Aura data on this device.</p>
+            <p class="text-sm text-gray-400 mb-6">A compact view of the preferences and approved context Aura may use for this profile. It updates as you chat and follows the profile’s storage and sync settings.</p>
             <div id="insightsContent" class="space-y-4 text-gray-200"></div>
             <div class="mt-8 flex justify-end">
                 <button type="button" id="closeInsightsButton" class="px-4 py-2 rounded-xl transition duration-200">Close</button>
@@ -266,6 +267,7 @@
     <script src="js/config.js"></script>
     <script src="js/request-runtime.js"></script>
     <script src="js/personal-intelligence.js"></script>
+    <script src="js/intelligence-bundle.js"></script>
     <script src="js/model-routing.js"></script>
     <script src="js/turn-policy.js"></script>
     <script src="js/tool-artifacts.js"></script>

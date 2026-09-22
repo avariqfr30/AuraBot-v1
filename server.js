@@ -205,6 +205,12 @@ function accountWhere(profileId, chatId, accountId) {
         : where;
 }
 
+function approvedMemoryWhere(profileId, chatId, accountId) {
+    const where = accountWhere(profileId, chatId, accountId);
+    const conditions = Array.isArray(where?.$and) ? where.$and : [where];
+    return { $and: [...conditions, { approval: { $eq: 'explicit' } }] };
+}
+
 function hostedModels() {
     return [
         ...hostedConfig.localModels,
@@ -915,8 +921,8 @@ app.post('/api/store_memory', async (req, res) => {
         const { text, metadata, id } = req.body || {};
         const profileId = normalizeProfileId(req.body?.profileId);
 
-        if (!profileId || !String(text || '').trim()) {
-            return res.status(400).json({ error: 'A valid local profile and memory text are required' });
+        if (!profileId || !String(text || '').trim() || metadata?.approval !== 'explicit') {
+            return res.status(400).json({ error: 'A valid profile and explicitly approved memory are required' });
         }
 
         const collection = hostedConfig.enabled
@@ -940,7 +946,7 @@ app.post('/api/store_memory', async (req, res) => {
                 embeddings: await hostedRuntime.embeddingGenerate([text])
             }
             : {
-                ids: [id || `mem_${Date.now()}`],
+                ids: [memoryId],
                 metadatas: [scopedMetadata],
                 documents: [text]
             };
@@ -967,8 +973,9 @@ app.post('/api/search_memory', async (req, res) => {
         const rawChatId = req.body?.chatId;
         const chatId = normalizeChatId(rawChatId);
 
-        if (!profileId || !String(query || '').trim()) {
-            return res.status(400).json({ error: 'A valid local profile and search query are required' });
+        const approvedOnly = req.body?.approvedOnly === true;
+        if (!profileId || !String(query || '').trim() || !approvedOnly) {
+            return res.status(400).json({ error: 'A valid profile and approved-memory search are required' });
         }
         if (rawChatId !== undefined && !chatId) {
             return res.status(400).json({ error: 'Chat ID must be a valid local chat identifier' });
@@ -979,7 +986,7 @@ app.post('/api/search_memory', async (req, res) => {
             : await getMemoryCollection();
         const queryPayload = {
             nResults,
-            where: accountWhere(profileId, chatId, hostedConfig.enabled ? req.accountId : null),
+            where: approvedMemoryWhere(profileId, chatId, hostedConfig.enabled ? req.accountId : null),
             ...(hostedConfig.enabled
                 ? { queryEmbeddings: await hostedRuntime.embeddingGenerate([query]) }
                 : { queryTexts: [query] })

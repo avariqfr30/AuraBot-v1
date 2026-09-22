@@ -139,22 +139,32 @@ test('hosted API protects account state, profile memory, and cloud inference', a
         assert.equal(bobWrite.status, 200);
         assert.equal((await post('/api/store_memory', {
             profileId,
-            text: 'private memory plaintext',
+            text: 'unapproved memory',
             metadata: { chatId: 'chat1', role: 'user' }
+        }, { Cookie: a, 'X-Aura-CSRF': alice.csrfToken })).status, 400);
+        assert.equal((await post('/api/search_memory', {
+            profileId,
+            query: 'private'
+        }, { Cookie: a, 'X-Aura-CSRF': alice.csrfToken })).status, 400);
+        assert.equal(memoryAdds.length, 0);
+        assert.equal((await post('/api/store_memory', {
+            profileId,
+            text: 'private memory plaintext',
+            metadata: { chatId: 'chat1', role: 'user', approval: 'explicit' }
         }, { Cookie: a, 'X-Aura-CSRF': alice.csrfToken })).status, 200);
         assert.equal(memoryAdds[0].documents, undefined);
         assert.deepEqual(memoryAdds[0].embeddings, [[0.1, 0.2, 0.3]]);
         assert.doesNotMatch(JSON.stringify(memoryAdds[0].metadatas), /private memory plaintext/);
         assert.match(memoryAdds[0].metadatas[0].encryptedDocument, /"alg":"A256GCM"/);
-        const aliceMemory = await post('/api/search_memory', { profileId, query: 'private' }, { Cookie: a, 'X-Aura-CSRF': alice.csrfToken });
+        const aliceMemory = await post('/api/search_memory', { profileId, query: 'private', approvedOnly: true }, { Cookie: a, 'X-Aura-CSRF': alice.csrfToken });
         assert.equal(aliceMemory.status, 200);
         assert.equal((await aliceMemory.json()).matches[0].text, 'private memory plaintext');
-        const bobMemory = await post('/api/search_memory', { profileId, query: 'private' }, { Cookie: b, 'X-Aura-CSRF': bob.csrfToken });
+        const bobMemory = await post('/api/search_memory', { profileId, query: 'private', approvedOnly: true }, { Cookie: b, 'X-Aura-CSRF': bob.csrfToken });
         assert.equal(bobMemory.status, 200);
         assert.deepEqual((await bobMemory.json()).matches, []);
         assert.deepEqual(memoryQueries, [
-            { $and: [{ profileId: { $eq: profileId } }, { ownerId: { $eq: alice.accountId } }] },
-            { $and: [{ profileId: { $eq: profileId } }, { ownerId: { $eq: bob.accountId } }] }
+            { $and: [{ profileId: { $eq: profileId } }, { ownerId: { $eq: alice.accountId } }, { approval: { $eq: 'explicit' } }] },
+            { $and: [{ profileId: { $eq: profileId } }, { ownerId: { $eq: bob.accountId } }, { approval: { $eq: 'explicit' } }] }
         ]);
         const example = {
             id: 'personal-shared_12345678', domain: 'companion', risk: 'low',
@@ -199,7 +209,7 @@ test('hosted API protects account state, profile memory, and cloud inference', a
         const pendingWrite = post('/api/store_memory', {
             profileId,
             text: 'A pending memory write',
-            metadata: { chatId: 'chat1' }
+            metadata: { chatId: 'chat1', approval: 'explicit' }
         }, { Cookie: a, 'X-Aura-CSRF': alice.csrfToken });
         await memoryWriteBegan;
         let deletionFinished = false;
