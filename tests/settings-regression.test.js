@@ -9,6 +9,7 @@ const indexHtml = read('public/index.html');
 const configJs = read('public/js/config.js');
 const appJs = read('public/js/app.js');
 const chatLogicJs = read('public/js/chat-logic.js');
+const auraPromptsJs = read('public/js/aura-prompts.js');
 const uiJs = read('public/js/ui.js');
 const packageJson = JSON.parse(read('package.json'));
 
@@ -41,7 +42,7 @@ assert.match(indexHtml, /id="clearLearnedPreferencesButton"/);
 assert.match(indexHtml, /Reset Conversation Preferences/);
 assert.match(indexHtml, /not account authentication/i);
 assert.doesNotMatch(indexHtml, /Persistent Companion Memory/);
-assert.match(indexHtml, /<script src="js\/personal-intelligence\.js"><\/script>\s*<script src="js\/intelligence-bundle\.js"><\/script>\s*<script src="js\/model-routing\.js"><\/script>\s*<script src="js\/turn-policy\.js"><\/script>\s*<script src="js\/tool-artifacts\.js"><\/script>\s*<script src="js\/feedback-learning\.js"><\/script>\s*<script src="js\/hosted-client\.js"><\/script>\s*<script src="js\/chat-logic\.js"><\/script>/);
+assert.match(indexHtml, /<script src="js\/personal-intelligence\.js"><\/script>\s*<script src="js\/intelligence-bundle\.js"><\/script>\s*<script src="js\/model-routing\.js"><\/script>\s*<script src="js\/turn-policy\.js"><\/script>\s*<script src="js\/response-adaptation\.js"><\/script>\s*<script src="js\/tool-decision\.js"><\/script>\s*<script src="js\/tool-artifacts\.js"><\/script>\s*<script src="js\/chat-tool-state\.js"><\/script>\s*<script src="js\/feedback-learning\.js"><\/script>\s*<script src="js\/hosted-client\.js"><\/script>\s*<script src="js\/aura-prompts\.js"><\/script>\s*<script src="js\/response-sanitizer\.js"><\/script>\s*<script src="js\/evidence-utils\.js"><\/script>\s*<script src="js\/chat-logic\.js"><\/script>/);
 assert.match(indexHtml, /<option value="auto">Auto/);
 assert.match(packageJson.scripts.check, /node --check lib\/memory-results\.js/);
 assert.match(packageJson.scripts.check, /node --check public\/js\/turn-policy\.js/);
@@ -125,9 +126,9 @@ assert.match(
     chatLogicJs,
     /runBehaviorAnalyzer[\s\S]*normalUserTurns[\s\S]*normalUserTurns\.length < 2/
 );
-assert.match(chatLogicJs, /BEHAVIOR_ANALYZER:[\s\S]*current chat only/i);
-assert.match(chatLogicJs, /BEHAVIOR_ANALYZER:[\s\S]*Do not diagnose/i);
-assert.match(chatLogicJs, /BEHAVIOR_ANALYZER:[\s\S]*explicit evidence/i);
+assert.match(auraPromptsJs, /BEHAVIOR_ANALYZER:[\s\S]*current chat only/i);
+assert.match(auraPromptsJs, /BEHAVIOR_ANALYZER:[\s\S]*Do not diagnose/i);
+assert.match(auraPromptsJs, /BEHAVIOR_ANALYZER:[\s\S]*explicit evidence/i);
 assert.match(
     chatLogicJs,
     /getInferenceContentStore[\s\S]*?responsePreferences:\s*getStoredExperienceResponsePreferences\(\)[\s\S]*?\n    }\n\n    getUserMemoryStore/

@@ -249,6 +249,10 @@ Thinking Mode is model-aware:
 
 Reasoning traces are not displayed or stored. Medical responses remain informational and require appropriate professional verification.
 
+## Current-turn response adaptation
+
+Aura applies a bounded, ephemeral response policy before composing each reply. It distinguishes informational questions, venting, active distress, requests for action, explicit directness or gentleness, limited cognitive bandwidth, and preparation for professional support. Current-turn needs override learned presentation preferences: venting is not rushed into solutions, actionable requests receive usable structure, ordinary educational questions do not trigger emotional overcorrection, and professional support is treated as a bridge rather than something Aura replaces. This turn-level assessment is not stored as personal memory.
+
 ## Response Example RAG
 
 Aura keeps reusable response examples separate from personal context inside the same ChromaDB server:
