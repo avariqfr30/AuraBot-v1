@@ -282,6 +282,7 @@ app.use(helmet({
             defaultSrc: ["'self'"],
             scriptSrc: ["'self'"],
             styleSrc: ["'self'", "'unsafe-inline'"],
+            upgradeInsecureRequests: hostedConfig.enabled ? [] : null,
             imgSrc: ["'self'", 'data:'],
             connectSrc: ["'self'"],
             frameAncestors: ["'self'"],

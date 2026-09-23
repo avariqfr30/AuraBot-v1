@@ -93,7 +93,9 @@ test('root and expected browser assets are public', async () => {
 
 test('browser responses set security headers and do not allow framing', async () => {
     const response = await fetch(`${baseUrl}/`);
-    assert.match(response.headers.get('content-security-policy') || '', /default-src 'self'/);
+    const contentSecurityPolicy = response.headers.get('content-security-policy') || '';
+    assert.match(contentSecurityPolicy, /default-src 'self'/);
+    assert.doesNotMatch(contentSecurityPolicy, /upgrade-insecure-requests/);
     assert.equal(response.headers.get('x-content-type-options'), 'nosniff');
     assert.equal(response.headers.get('x-frame-options'), 'SAMEORIGIN');
     assert.equal(response.headers.get('referrer-policy'), 'no-referrer');
