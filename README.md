@@ -99,6 +99,8 @@ The signed-in account owns profiles, chats, feedback, Personal Intelligence stat
 
 When Personal Intelligence is active, every chat room in the same profile contributes to one profile-wide intelligence bundle. Explicit communication preferences apply immediately; inferred non-sensitive response preferences require supporting evidence across multiple chats, carry provenance and confidence, decay when unconfirmed, and yield to later explicit corrections. Deleting a chat removes its unsupported preference evidence. Personal facts and sensitive details become cross-chat memories only through an explicit remember request, remain separate from silently learned interaction preferences, and can be forgotten independently. Different profiles never share intelligence bundles.
 
+For each reply, Aura selects a bounded context package from relevant approved memories across the profile, current-chat facts and open threads, and response examples. Ranking considers topic match, vector distance, confidence, recency, and source; contradicted or unapproved memories stay out. Current-chat summaries do not become cross-chat memories. Pausing Personal Intelligence removes personal context and personal response examples from new prompts, while curated examples remain available.
+
 Saved context from an earlier Aura version is retained in a review-only quarantine during migration and is not supplied to the model automatically. It remains visible in Context Notes so the user can explicitly approve an item again or delete profile memory.
 
 GPT-OSS 120B Cloud remains Aura's primary model through the local Ollama API. The hosted UI discloses that inference is remote and links to Ollama's privacy policy. Ollama currently states that prompts and responses use zero data retention, are never logged, and are never used for training. The server allows only explicitly configured model IDs. Personal Intelligence and per-memory approval remain separate controls over what Aura adds to a prompt. Model availability, regional processing, policy changes, quotas, and the Ollama account used by the deployment must be reviewed before accepting clients.
@@ -283,6 +285,10 @@ The feedback loop is deliberately bounded:
 4. A Helpful, low-risk, non-medical response can be explicitly promoted into the isolated personal-example collection. Raw feedback, comments, medical replies, and high-risk replies are never auto-promoted.
 
 Deleting a chat removes its local feedback authority, clearing Feedback Learning removes all active personal examples, and Delete All Data resets the local feedback profile. No feedback is sent to a shared dataset or used for automatic weight training.
+
+## Tool Support
+
+Aura creates a supported tool for a clear request or immediate grounding need. Other relevant tools are offered first; informational questions, venting, active duplicates, and recent refusals do not trigger optional offers. Generated tool data is checked against the card's required structure, and a creation failure leaves the conversational reply available without a broken card.
 
 ## Notes
 

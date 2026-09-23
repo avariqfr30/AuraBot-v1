@@ -44,7 +44,7 @@ assert.match(indexHtml, /id="clearLearnedPreferencesButton"/);
 assert.match(indexHtml, /Reset Conversation Preferences/);
 assert.match(indexHtml, /not account authentication/i);
 assert.doesNotMatch(indexHtml, /Persistent Companion Memory/);
-assert.match(indexHtml, /<script src="js\/personal-intelligence\.js"><\/script>\s*<script src="js\/intelligence-bundle\.js"><\/script>\s*<script src="js\/model-routing\.js"><\/script>\s*<script src="js\/turn-policy\.js"><\/script>\s*<script src="js\/response-adaptation\.js"><\/script>\s*<script src="js\/tool-decision\.js"><\/script>\s*<script src="js\/tool-artifacts\.js"><\/script>\s*<script src="js\/chat-tool-state\.js"><\/script>\s*<script src="js\/feedback-learning\.js"><\/script>\s*<script src="js\/chat-feedback-state\.js"><\/script>\s*<script src="js\/hosted-client\.js"><\/script>\s*<script src="js\/aura-prompts\.js"><\/script>\s*<script src="js\/response-sanitizer\.js"><\/script>\s*<script src="js\/model-request\.js"><\/script>\s*<script src="js\/evidence-utils\.js"><\/script>\s*<script src="js\/chat-logic\.js"><\/script>/);
+assert.match(indexHtml, /<script src="js\/personal-intelligence\.js"><\/script>\s*<script src="js\/intelligence-bundle\.js"><\/script>\s*<script src="js\/model-routing\.js"><\/script>\s*<script src="js\/turn-policy\.js"><\/script>\s*<script src="js\/profile-rag\.js"><\/script>\s*<script src="js\/response-adaptation\.js"><\/script>\s*<script src="js\/tool-decision\.js"><\/script>\s*<script src="js\/tool-follow-up\.js"><\/script>\s*<script src="js\/tool-artifacts\.js"><\/script>\s*<script src="js\/chat-tool-state\.js"><\/script>\s*<script src="js\/feedback-learning\.js"><\/script>\s*<script src="js\/chat-feedback-state\.js"><\/script>\s*<script src="js\/hosted-client\.js"><\/script>\s*<script src="js\/aura-prompts\.js"><\/script>\s*<script src="js\/response-sanitizer\.js"><\/script>\s*<script src="js\/model-request\.js"><\/script>\s*<script src="js\/evidence-utils\.js"><\/script>\s*<script src="js\/chat-logic\.js"><\/script>/);
 assert.match(indexHtml, /<option value="auto">Auto/);
 assert.match(packageJson.scripts.check, /node --check lib\/memory-results\.js/);
 assert.match(packageJson.scripts.check, /node --check public\/js\/turn-policy\.js/);
@@ -121,7 +121,7 @@ assert.match(chatLogicJs, /getFeedbackProfileId\(\)\s*\{\s*return this\.getActiv
 assert.match(chatLogicJs, /profileId:\s*sourceProfileId/);
 assert.match(
     chatLogicJs,
-    /searchRelevantVectorData[\s\S]*if \(!query \|\| !this\.isPersonalIntelligenceActive\(\)\) return ''/
+    /searchApprovedMemoryMatches[\s\S]*if \(!query \|\| !this\.isPersonalIntelligenceActive\(\)\) return \[\]/
 );
 assert.match(chatLogicJs, /analysisCaches\[[^\]]+\]\.clear\(\)/);
 assert.match(chatLogicJs, /sourceProfileId\s*!==\s*this\.getActiveProfileId\(\)/);
@@ -153,7 +153,7 @@ assert.doesNotMatch(
     /function applyExperienceStyle[\s\S]*?updateResponsePreferences[\s\S]*?window\.applyExperienceStyle/
 );
 assert.match(chatLogicJs, /activeProfile:\s*chatManager\.getInferenceContentStore\(chatId\)/);
-assert.match(chatLogicJs, /includeDurable:\s*isUserMemoryEnabled\(\)/);
+assert.match(chatLogicJs, /AURA_PROFILE_RAG\.selectContext\(\{[\s\S]*?personalIntelligenceActive:\s*personalContextStillValid/);
 assert.match(
     chatLogicJs,
     /runPreferenceAgent[\s\S]*?chatManager\.getInferenceResponsePreferences\(chatId\)[\s\S]*?\n}\n\nfunction runEvidenceDecisionAgent/
@@ -180,7 +180,7 @@ assert.match(
 );
 assert.match(
     chatLogicJs,
-    /searchRelevantVectorData[\s\S]*?const sourceProfileId = this\.getActiveProfileId\(\)[\s\S]*?await postJson[\s\S]*?sourceProfileId !== this\.getActiveProfileId\(\)/
+    /searchApprovedMemoryMatches[\s\S]*?const sourceProfileId = this\.getActiveProfileId\(\)[\s\S]*?await postJson[\s\S]*?sourceProfileId !== this\.getActiveProfileId\(\)/
 );
 assert.match(
     chatLogicJs,
@@ -229,7 +229,7 @@ assert.match(
 ].forEach((pattern) => assert.match(chatLogicJs, pattern));
 assert.match(
     chatLogicJs,
-    /searchRelevantVectorData[\s\S]*?sourceContextEpoch = this\.getPersonalContextEpoch\(\)[\s\S]*?sourceContextEpoch !== this\.getPersonalContextEpoch\(\)/
+    /searchApprovedMemoryMatches[\s\S]*?sourceContextEpoch = this\.getPersonalContextEpoch\(\)[\s\S]*?sourceContextEpoch !== this\.getPersonalContextEpoch\(\)/
 );
 assert.match(
     chatLogicJs,

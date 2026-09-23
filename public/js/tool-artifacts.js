@@ -126,11 +126,44 @@
         return null;
     }
 
+    function isUsableToolData(type, value) {
+        if (!TOOL_TYPES.has(type) || !value || typeof value !== 'object' || Array.isArray(value)) return false;
+        if (value.type !== type || typeof value.id !== 'string' || !value.id.trim() ||
+            typeof value.title !== 'string' || !value.title.trim()) return false;
+        const stringList = (items) => Array.isArray(items) && items.length > 0 &&
+            items.every((item) => typeof item === 'string' && item.trim());
+        const itemList = (items, keys) => Array.isArray(items) && items.length > 0 && items.every((item) => (
+            item && typeof item === 'object' && keys.every((key) => (
+                typeof item[key] === 'string' && item[key].trim()
+            ))
+        ));
+
+        switch (type) {
+            case 'mood_tracker': return stringList(value.options);
+            case 'checklist': return itemList(value.items, ['text']);
+            case 'thought_record': return typeof value.situation === 'string';
+            case 'affirmation_card': return stringList(value.text);
+            case 'breathing_exercise': return Boolean(value.cycle) && ['inhale', 'hold', 'exhale'].every((key) => (
+                Number.isFinite(Number(value.cycle[key])) && Number(value.cycle[key]) > 0
+            ));
+            case 'safety_plan': return [
+                'warningSigns', 'groundingSteps', 'saferEnvironment', 'professionalSupport', 'reasonsToStay'
+            ].every((key) => stringList(value[key])) && itemList(value.peopleToContact, ['name', 'contact']);
+            case 'medication_checklist': return typeof value.medicationName === 'string' &&
+                itemList(value.checks, ['text']);
+            case 'appointment_prep': return stringList(value.symptomTimeline) &&
+                stringList(value.questions) && stringList(value.medsToMention);
+            case 'follow_up_plan': return itemList(value.checkpoints, ['when', 'action']);
+            default: return false;
+        }
+    }
+
     return {
         TOOL_TYPES,
         parseToolArtifacts,
         createToolOffer,
         normalizeToolOffer,
-        transitionToolOffer
+        transitionToolOffer,
+        isUsableToolData
     };
 });

@@ -158,15 +158,15 @@ function renderEmptyState() {
 function renderChecklistInModal(checklist, container) {
     const section = document.createElement('div');
     section.className = 'checklist-card tool-card';
-    let html = `<h4 class="text-xl font-bold mb-3 text-gray-200">${checklist.title}</h4><div class="checklist-scroll-container"><ul class="checklist-columns space-y-3">`;
-    (checklist.items || []).forEach((item, index) => {
+    let html = `<h4 class="text-xl font-bold mb-3 text-gray-200">${escapeHTML(checklist.title)}</h4><div class="checklist-scroll-container"><ul class="checklist-columns space-y-3">`;
+    (Array.isArray(checklist.items) ? checklist.items : []).forEach((item, index) => {
         html += `
             <li class="flex items-center">
-                <input type="checkbox" id="modal-${checklist.id}-item-${index}"
+                <input type="checkbox" id="modal-${escapeHTML(checklist.id)}-item-${index}"
                        class="h-5 w-5 rounded border-gray-500 bg-gray-800 text-pink-600 focus:ring-pink-500 mr-4 shrink-0"
-                       data-tool-type="checklist" data-tool-id="${checklist.id}" data-item-index="${index}" ${item.done ? 'checked' : ''}>
-                <label for="modal-${checklist.id}-item-${index}" class="transition-colors duration-200 text-lg ${item.done ? 'line-through text-gray-500' : 'text-gray-200'}">
-                    ${item.text}
+                       data-tool-type="checklist" data-tool-id="${escapeHTML(checklist.id)}" data-item-index="${index}" ${item.done ? 'checked' : ''}>
+                <label for="modal-${escapeHTML(checklist.id)}-item-${index}" class="transition-colors duration-200 text-lg ${item.done ? 'line-through text-gray-500' : 'text-gray-200'}">
+                    ${escapeHTML(item.text)}
                 </label>
             </li>`;
     });
@@ -176,11 +176,14 @@ function renderChecklistInModal(checklist, container) {
 function renderBreathingExerciseInModal(exercise, container) {
     const section = document.createElement('div');
     section.className = 'breathing-exercise-container tool-card';
+    const cycle = exercise.cycle && typeof exercise.cycle === 'object'
+        ? exercise.cycle
+        : { inhale: 4, hold: 4, exhale: 6 };
     section.innerHTML = `
-        <h4 class="text-xl font-bold mb-2 text-gray-200">${exercise.title}</h4>
+        <h4 class="text-xl font-bold mb-2 text-gray-200">${escapeHTML(exercise.title)}</h4>
         <div class="breathing-pacer"></div>
         <div class="breathing-status">Press Start</div>
-        <button class="tool-button mt-4" data-action="start_breathing" data-tool-type="breathing_exercise" data-cycle-inhale="${exercise.cycle.inhale}" data-cycle-hold="${exercise.cycle.hold}" data-cycle-exhale="${exercise.cycle.exhale}">Start</button>`;
+        <button class="tool-button mt-4" data-action="start_breathing" data-tool-type="breathing_exercise" data-cycle-inhale="${escapeHTML(cycle.inhale)}" data-cycle-hold="${escapeHTML(cycle.hold)}" data-cycle-exhale="${escapeHTML(cycle.exhale)}">Start</button>`;
     container.appendChild(section);
 }
 
@@ -188,10 +191,10 @@ function renderAffirmationCardInModal(card, container) {
     const section = document.createElement('div');
     section.className = 'affirmation-card tool-card';
     let affirmationHTML = Array.isArray(card.text)
-        ? `<ul class="space-y-2 list-disc list-outside ml-5 affirmation-text">${card.text.map(t => `<li>"${t}"</li>`).join('')}</ul>`
-        : `<p class="affirmation-text">"${card.text || ''}"</p>`;
+        ? `<ul class="space-y-2 list-disc list-outside ml-5 affirmation-text">${card.text.map(t => `<li>"${escapeHTML(t)}"</li>`).join('')}</ul>`
+        : `<p class="affirmation-text">"${escapeHTML(card.text || '')}"</p>`;
     section.innerHTML = `
-        <h4 class="text-xl font-bold mb-3 text-gray-200">${card.title || "Your Affirmation"}</h4>
+        <h4 class="text-xl font-bold mb-3 text-gray-200">${escapeHTML(card.title || "Your Affirmation")}</h4>
         ${affirmationHTML}
         <button class="tool-button mt-4" data-action="commit_affirmation" data-tool-type="affirmation_card">I will remember this.</button>`;
     container.appendChild(section);
@@ -202,7 +205,7 @@ function renderMoodTrackerInModal(tracker, container) {
     section.className = 'mood-tracker-card tool-card';
     const emojis = { "Happy": '😊', "Okay": '🙂', "Neutral": '😐', "Sad": '😔', "Angry": '😠' };
     let buttonsHTML = '<div class="flex flex-wrap justify-center gap-3 mb-4">';
-    (tracker.options || ["Happy", "Okay", "Neutral", "Sad", "Angry"]).forEach(option => { buttonsHTML += `<button class="mood-button text-3xl p-2 rounded-full hover:bg-gray-700 transition" data-action="log_mood" data-mood="${option}" title="${option}">${emojis[option] || '❓'}</button>`; });
+    (Array.isArray(tracker.options) ? tracker.options : ["Happy", "Okay", "Neutral", "Sad", "Angry"]).forEach(option => { buttonsHTML += `<button class="mood-button text-3xl p-2 rounded-full hover:bg-gray-700 transition" data-action="log_mood" data-mood="${escapeHTML(option)}" title="${escapeHTML(option)}">${emojis[option] || '❓'}</button>`; });
     buttonsHTML += '</div>';
     let historyHTML = '<div class="mt-4"><h5 class="text-lg font-semibold text-gray-300 mb-2">Recent Moods</h5>';
     if (tracker.history?.length > 0) {
@@ -210,13 +213,13 @@ function renderMoodTrackerInModal(tracker, container) {
         tracker.history.slice(-5).reverse().forEach(entry => {
             const date = new Date(entry.timestamp);
             const formattedDate = date.toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
-            historyHTML += `<li class="flex justify-between items-center"><span>${emojis[entry.mood]} ${entry.mood}</span> <span class="text-xs">${formattedDate}</span></li>`;
+            historyHTML += `<li class="flex justify-between items-center"><span>${emojis[entry.mood] || '❓'} ${escapeHTML(entry.mood)}</span> <span class="text-xs">${escapeHTML(formattedDate)}</span></li>`;
         });
         historyHTML += '</ul>';
     } else { historyHTML += '<p class="text-gray-500 text-sm">No moods logged yet.</p>'; }
     historyHTML += '</div>';
     section.innerHTML = `
-        <h4 class="text-xl font-bold mb-3 text-gray-200">${tracker.title || 'Your Mood Tracker'}</h4>
+        <h4 class="text-xl font-bold mb-3 text-gray-200">${escapeHTML(tracker.title || 'Your Mood Tracker')}</h4>
         <p class="text-gray-400 mb-4">How are you feeling right now?</p>${buttonsHTML}${historyHTML}`;
     container.appendChild(section);
 }
@@ -327,12 +330,12 @@ function renderThoughtRecordInModal(record, container) {
 
     const createTextarea = (idSuffix, label, value) => `
         <div class="mb-3">
-            <label for="${record.id}-${idSuffix}" class="block text-sm font-medium text-gray-300 mb-1">${label}</label>
-            <textarea id="${record.id}-${idSuffix}" data-field="${idSuffix}" rows="3" class="w-full p-2 bg-gray-800 rounded-md focus:outline-none focus:ring-2 focus:ring-pink-500 text-gray-200">${escapeHTML(value)}</textarea>
+            <label for="${escapeHTML(record.id)}-${idSuffix}" class="block text-sm font-medium text-gray-300 mb-1">${label}</label>
+            <textarea id="${escapeHTML(record.id)}-${idSuffix}" data-field="${idSuffix}" rows="3" class="w-full p-2 bg-gray-800 rounded-md focus:outline-none focus:ring-2 focus:ring-pink-500 text-gray-200">${escapeHTML(value)}</textarea>
         </div>`;
     
     section.innerHTML = `
-        <h4 class="text-xl font-bold mb-4 text-gray-200">${record.title || 'Thought Record'}</h4>
+        <h4 class="text-xl font-bold mb-4 text-gray-200">${escapeHTML(record.title || 'Thought Record')}</h4>
         <div class="thought-record-columns">
             ${createTextarea('situation', 'Situation (What happened?)', record.situation)}
             ${createTextarea('automaticThoughts', 'Automatic Thoughts', record.automaticThoughts)}
@@ -343,7 +346,7 @@ function renderThoughtRecordInModal(record, container) {
             ${createTextarea('balancedThought', 'Balanced Thought', record.balancedThought)}
             ${createTextarea('outcomeEmotions', 'Outcome (Rate 0-100)', record.outcomeEmotions)}
         </div>
-        <button class="tool-button mt-3" data-action="save_thought_record" data-tool-id="${record.id}">Save Record</button>
+        <button class="tool-button mt-3" data-action="save_thought_record" data-tool-id="${escapeHTML(record.id)}">Save Record</button>
         <p class="text-xs text-gray-500 mt-2">Your record is saved locally in this chat.</p>
         <a href="#" class="content-link text-xs text-pink-400 hover:underline mt-1 block" data-topic="thought-record-info">Learn more about Thought Records</a>`;
     container.appendChild(section);

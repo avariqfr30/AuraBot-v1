@@ -56,12 +56,17 @@ assert.equal(
 assert.equal(turnPolicy.isExplicitToolRequest('What is a safety plan?'), false);
 assert.equal(turnPolicy.isExplicitToolRequest('I need a safety plan for tonight.'), true);
 assert.equal(turnPolicy.isExplicitToolRequest('Please make me a packing checklist.'), true);
+assert.equal(turnPolicy.isExplicitToolRequest('Can you explain what a safety plan is?'), false);
+assert.equal(turnPolicy.isExplicitToolRequest('Please ground me.'), true);
+assert.equal(turnPolicy.isExplicitToolRequest('Please prepare questions for my psychiatrist.'), true);
 assert.equal(turnPolicy.hasToolRefusal('I am overwhelmed, but no tool—just answer.'), true);
 assert.equal(turnPolicy.hasToolRefusal("I don't want a tool. Please listen."), true);
 assert.equal(turnPolicy.hasToolRefusal("Don't give me a checklist."), true);
 assert.equal(turnPolicy.hasToolRefusal('Please create a checklist for me.'), false);
 assert.equal(turnPolicy.hasImmediateGroundingNeed("I'm having a panic attack."), true);
 assert.equal(turnPolicy.hasImmediateGroundingNeed('I had a panic attack last month.'), false);
+assert.equal(turnPolicy.hasImmediateGroundingNeed('I was hyperventilating yesterday, but I am okay now.'), false);
+assert.equal(turnPolicy.hasImmediateGroundingNeed('I was hyperventilating yesterday and cannot breathe right now.'), true);
 assert.equal(
     turnPolicy.hasContextRejection('Stop connecting this to my old relationship. This is someone new.'),
     true

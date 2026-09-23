@@ -829,20 +829,37 @@ document.addEventListener('DOMContentLoaded', async () => {
     async function processToolTags(rawResponse, chatId = chatManager.getActiveChatId()) {
         responseRuntime.throwIfAborted();
         const artifacts = window.AURA_TOOL_ARTIFACTS.parseToolArtifacts(rawResponse);
+        let failedCreates = 0;
 
         if (artifacts.creates.length > 0) {
             artifacts.creates.forEach((entry) => addToolStatusMessage(entry.type));
         }
 
-        for (const entry of artifacts.creates) {
-            const toolData = await createToolByType(entry.type, entry.theme);
-            responseRuntime.throwIfAborted();
-            if (toolData) chatManager.addOrUpdateToolInChat(chatId, entry.type, toolData);
+        try {
+            for (const entry of artifacts.creates) {
+                try {
+                    const toolData = await createToolByType(entry.type, entry.theme);
+                    responseRuntime.throwIfAborted();
+                    if (toolData) {
+                        chatManager.addOrUpdateToolInChat(chatId, entry.type, toolData);
+                    } else {
+                        failedCreates += 1;
+                    }
+                } catch (error) {
+                    responseRuntime.throwIfAborted();
+                    if (error.name === 'AbortError' || error.name === 'TimeoutError') throw error;
+                    console.warn('Tool creation unavailable:', error.name);
+                    failedCreates += 1;
+                }
+            }
+        } finally {
+            removeToolStatusMessages();
         }
 
-        removeToolStatusMessages();
         return {
-            content: artifacts.content,
+            content: failedCreates
+                ? artifacts.content + "\n\nI couldn't open that tool just now. We can still work through it here."
+                : artifacts.content,
             toolOffer: artifacts.offer
                 ? window.AURA_TOOL_ARTIFACTS.createToolOffer(artifacts.offer, {
                     id: `offer-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
@@ -911,7 +928,9 @@ document.addEventListener('DOMContentLoaded', async () => {
         } catch (error) {
             if (!handleResponseInterruption(error)) {
                 console.error('Tool follow-up failed:', error);
-                if (responseStatus) responseStatus.textContent = 'Could not finish this reply. Please try again.';
+                const fallback = window.AURA_TOOL_FOLLOW_UP.resolve(followUp).fallback;
+                addAssistantArtifact({ content: fallback }, '', requestChatId);
+                refreshUI();
             }
         } finally {
             hideTypingIndicator();

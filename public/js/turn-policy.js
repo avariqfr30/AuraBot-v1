@@ -64,6 +64,13 @@
         ).length;
     }
 
+    function scoreContextRelevance(query, value) {
+        const links = countTopicLinks(query, [{ content: value }]);
+        if (links) return Math.min(1, links / 2);
+        if (matchesShortNamedEntity(query, value)) return 0.6;
+        return 0;
+    }
+
     function matchesProfileTopicGroup(query, value) {
         const queryTokens = getProfileTokens(query);
         const valueTokens = getProfileTokens(value);
@@ -226,9 +233,12 @@
         const toolNoun = /\b(checklist|check list|tracker|mood log|thought record|affirmation card|breathing exercise|breathing reset|grounding exercise|safety plan|crisis plan|medication checklist|meds checklist|appointment prep|follow-?up plan|check-?in plan|support card|tool)\b/;
         const directAction = /\b(make|create|build|set up|open|start|add|prepare|give me)\b/;
         const requestLead = /\b(can you|could you|can we|could we|please|let'?s|i need|i want|i would like|i'd like|help me)\b/;
+        if (/\b(what is|what are|explain|define|understand|tell me about)\b/.test(text) &&
+            !/\b(make|create|build|set up|open|start|add)\b/.test(text)) return false;
 
         if (directAction.test(text) && toolNoun.test(text)) return true;
         if (requestLead.test(text) && toolNoun.test(text)) return true;
+        if (requestLead.test(text) && /\b(ground me|calm me down|prepare questions.*(?:doctor|therapist|psychiatrist|clinician)|track my mood)\b/.test(text)) return true;
         return /\b(can we|could we|please|help me)\b.*\b(track|log|monitor|keep track)\b/.test(text);
     }
 
@@ -248,6 +258,9 @@
     function hasImmediateGroundingNeed(message = '') {
         const text = String(message || '').toLowerCase().trim();
         if (!text) return false;
+        const pastEpisode = /\b(?:was|had|used to|earlier|yesterday|last (?:night|week|month|year))\b/.test(text);
+        const currentEpisodeSignal = /\b(?:right now|currently|at this moment|cannot breathe|can't breathe|heart is racing|i'm panicking|i am panicking|calm me down|ground me)\b/.test(text);
+        if (pastEpisode && !currentEpisodeSignal) return false;
 
         const directSignals = [
             /\b(?:can(?:not|'t)|unable to)\s+breathe\b/,
@@ -463,6 +476,7 @@
         hasToolRefusal,
         hasImmediateGroundingNeed,
         hasContextRejection,
+        scoreContextRelevance,
         resolveInitiative,
         selectRelevantMemories,
         buildRelevantProfileBundle,

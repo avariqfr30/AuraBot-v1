@@ -107,4 +107,20 @@ assert.deepEqual(
 );
 assert.equal(toolArtifacts.normalizeToolOffer({ type: 'unknown' }), null);
 
+assert.equal(toolArtifacts.isUsableToolData('checklist', {
+    type: 'checklist', id: 'list-1', title: 'Steps', items: [{ text: 'Start here', done: false }]
+}), true);
+assert.equal(toolArtifacts.isUsableToolData('checklist', {
+    type: 'thought_record', id: 'list-1', title: 'Steps', items: [{ text: 'Start here' }]
+}), false);
+assert.equal(toolArtifacts.isUsableToolData('checklist', {
+    type: 'checklist', id: 'list-1', title: 'Steps', items: 'not a list'
+}), false);
+assert.equal(toolArtifacts.isUsableToolData('checklist', {
+    type: 'checklist', id: 'list-1', title: 'Steps', items: []
+}), false);
+assert.equal(toolArtifacts.isUsableToolData('breathing_exercise', {
+    type: 'breathing_exercise', id: 'breath-1', title: 'Breathe', cycle: null
+}), false);
+
 console.log('tool artifact tests passed');

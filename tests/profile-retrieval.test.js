@@ -6,6 +6,10 @@ const chatLogic = fs.readFileSync(
     path.resolve(__dirname, '..', 'public', 'js', 'chat-logic.js'),
     'utf8'
 );
+const profileRag = fs.readFileSync(
+    path.resolve(__dirname, '..', 'public', 'js', 'profile-rag.js'),
+    'utf8'
+);
 const app = fs.readFileSync(
     path.resolve(__dirname, '..', 'public', 'js', 'app.js'),
     'utf8'
@@ -17,13 +21,13 @@ const server = fs.readFileSync(
 
 assert.match(
     chatLogic,
-    /searchRelevantVectorData[\s\S]*?postJson\(API_ENDPOINTS\.searchMemory,\s*\{\s*profileId:\s*sourceProfileId,\s*query,\s*approvedOnly:\s*true\s*\}\)/
+    /searchApprovedMemoryMatches[\s\S]*?postJson\(API_ENDPOINTS\.searchMemory,\s*\{\s*profileId:\s*sourceProfileId,\s*query,\s*approvedOnly:\s*true\s*\}\)/
 );
 assert.match(
     chatLogic,
-    /searchRelevantVectorData[\s\S]*?selectRelevantMemories\(\{\s*query,\s*matches,\s*explicitRecall,/
+    /buildAuraAgentContext[\s\S]*?AURA_PROFILE_RAG\.selectContext\(\{[\s\S]*?approvedSignals:[\s\S]*?vectorMatches: memory\.vectorMatches/
 );
-assert.match(chatLogic, /source: personal conversation memory/);
+assert.match(profileRag, /source: approved personal memory/);
 assert.match(
     server,
     /function approvedMemoryWhere[\s\S]*?approval:\s*\{\s*\$eq:\s*'explicit'\s*\}/
@@ -33,6 +37,7 @@ assert.match(
     /app\.post\('\/api\/search_memory'[\s\S]*?approvedOnly[\s\S]*?where:\s*approvedMemoryWhere/
 );
 assert.doesNotMatch(chatLogic, /source: current conversation memory/);
+assert.match(chatLogic, /getContentStoreForChat[\s\S]*?sanitizeChatScopedProfile\(chat\?\.localContentStore, buildChatScopedProfile\(\)\)/);
 assert.match(chatLogic, /this\.pendingVectorWrites = new Map\(\)/);
 assert.doesNotMatch(
     chatLogic,
@@ -53,7 +58,7 @@ assert.match(
 );
 assert.match(
     chatLogic,
-    /searchRelevantVectorData[\s\S]*?postJson[\s\S]*?approvedOnly:\s*true/
+    /searchApprovedMemoryMatches[\s\S]*?postJson[\s\S]*?approvedOnly:\s*true/
 );
 assert.match(chatLogic, /getPromotedExampleIdsForChat\(chatId\)/);
 [

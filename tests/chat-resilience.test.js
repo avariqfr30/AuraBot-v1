@@ -37,9 +37,13 @@ function harness({ fetchImpl, retrievalTimeoutMs = 15 } = {}) {
             getElementById: element, querySelectorAll: () => [], body: element('body'),
             addEventListener: (_event, fn) => fn()
         },
-        window: { chatManager: manager, AURA_TOOL_ARTIFACTS: {
-            parseToolArtifacts: (content) => ({ content, creates: [], offer: null })
-        } },
+        window: {
+            chatManager: manager,
+            AURA_TOOL_FOLLOW_UP: require('../public/js/tool-follow-up'),
+            AURA_TOOL_ARTIFACTS: {
+                parseToolArtifacts: (content) => ({ content, creates: [], offer: null })
+            }
+        },
         addMessage() {}, showTypingIndicator() {}, hideTypingIndicator() {}, updateTypingIndicator() {},
         removeToolStatusMessages() {}, addToolStatusMessage() {},
         getOllamaResponse: async () => (await runtime.fetchJson('/generate')).data.response,
@@ -109,6 +113,16 @@ test('a stalled model request releases the UI with a timeout message', async () 
     assert.equal(h.messages.length, 0);
 });
 
+test('a failed model follow-up acknowledges the recorded tool action', async () => {
+    const h = harness();
+    h.sandbox.getOllamaResponse = async () => { throw new Error('model unavailable'); };
+    await h.triggerAIFollowUp({ type: 'mood_logged', mood: 'Sad' });
+    assert.equal(h.messages.length, 1);
+    assert.match(h.messages[0].content, /logged feeling Sad/i);
+    assert.doesNotMatch(h.messages[0].content, /progress|nice work/i);
+    assert.equal(h.nodes.get('sendButton').disabled, false);
+});
+
 test('optional retrieval failure allows a reply and reports reduced context', async () => {
     const h = harness();
     h.sandbox.getOllamaResponse = async () => {
@@ -136,4 +150,19 @@ test('tool results arriving after stop cannot be persisted', async () => {
     await rejected;
     assert.equal(h.tools.length, 0);
     h.setResponseInFlight(false);
+});
+
+test('failed tool creation keeps the conversational reply without a broken card', async () => {
+    const h = harness();
+    h.sandbox.window.AURA_TOOL_ARTIFACTS.parseToolArtifacts = () => ({
+        content: 'We can start with one manageable step.',
+        creates: [{ type: 'checklist', theme: 'Small steps' }],
+        offer: null
+    });
+    h.sandbox.createToolByType = async () => { throw new Error('tool generation unavailable'); };
+    const artifact = await h.processToolTags('reply');
+    assert.match(artifact.content, /one manageable step/);
+    assert.match(artifact.content, /couldn't open/i);
+    assert.equal(h.tools.length, 0);
+    assert.equal(artifact.toolOffer, null);
 });

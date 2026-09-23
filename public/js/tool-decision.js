@@ -10,6 +10,10 @@ const TOOL_TYPES = new Set([
 ]);
 const LOW_RISK_PROACTIVE_TYPES = new Set(TOOL_TYPES);
 const CRISIS_ROUTE_PROACTIVE_TYPES = new Set(['breathing_exercise', 'checklist', 'safety_plan']);
+const THEME_FILLER_WORDS = new Set([
+    'please', 'make', 'create', 'build', 'open', 'give', 'checklist', 'tracker',
+    'this', 'that', 'them', 'these', 'those', 'with', 'could', 'would', 'tomorrow'
+]);
 
 function sanitizeToolTheme(theme, fallback = 'Quick support') {
     const clean = String(theme || '')
@@ -35,7 +39,7 @@ function sanitizeToolOpportunity(candidate) {
     const confidence = Number.isFinite(rawConfidence) ? Math.max(0, Math.min(1, rawConfidence)) : 0;
 
     return {
-        shouldUseTool: Boolean(safe.shouldUseTool) && TOOL_TYPES.has(type) && LOW_RISK_PROACTIVE_TYPES.has(type),
+        shouldUseTool: Boolean(safe.shouldUseTool) && TOOL_TYPES.has(safe.type) && LOW_RISK_PROACTIVE_TYPES.has(type),
         type,
         theme: sanitizeToolTheme(safe.theme, base.theme),
         reason: typeof safe.reason === 'string' ? safe.reason.trim().slice(0, 240) : '',
@@ -60,7 +64,10 @@ function inferToolThemeFromConversation(
     fallback = 'Quick support',
     recentConversationText = ''
 ) {
-    const text = `${String(userMessage || '').toLowerCase()} ${String(recentConversationText || '').toLowerCase()}`;
+    const current = String(userMessage || '').toLowerCase();
+    const topicWords = (current.match(/[a-z]{4,}/g) || []).filter((word) => !THEME_FILLER_WORDS.has(word));
+    const useRecent = topicWords.length === 0 && /\b(this|that|it|them|these|those)\b/.test(current);
+    const text = current + (useRecent ? ' ' + String(recentConversationText || '').toLowerCase() : '');
 
     if (/\bpanic|anxiety attack|breath|heart racing\b/.test(text)) return 'Panic support';
     if (/\badhd|focus|executive|task|procrastinat\b/.test(text)) return 'ADHD support';
@@ -72,9 +79,51 @@ function inferToolThemeFromConversation(
     return fallback;
 }
 
+function applyApprovedToolPreferences(
+    candidate,
+    signals = [],
+    { personalIntelligenceActive = false, explicitToolRequest = false, immediateSupportNeed = false } = {}
+) {
+    if (!candidate?.shouldUseTool || !personalIntelligenceActive ||
+        explicitToolRequest || immediateSupportNeed) return candidate;
+    const typeWords = {
+        checklist: /\bchecklists?\b/,
+        mood_tracker: /\b(?:mood trackers?|mood logs?)\b/,
+        thought_record: /\b(?:thought records?|thought logs?)\b/,
+        affirmation_card: /\b(?:affirmations?|encouragement cards?|support cards?)\b/,
+        breathing_exercise: /\b(?:breathing exercises?|breathing resets?|breathwork)\b/,
+        safety_plan: /\b(?:safety plans?|crisis plans?)\b/,
+        medication_checklist: /\b(?:medication|meds|pill) checklists?\b/,
+        appointment_prep: /\b(?:appointment|doctor|therapist) prep\b/,
+        follow_up_plan: /\b(?:follow[- ]?up|check[- ]?in) plans?\b/
+    };
+    const target = typeWords[candidate.type];
+    if (!target) return candidate;
+    const avoided = (Array.isArray(signals) ? signals : []).some((signal) => {
+        if (signal?.kind !== 'approved_memory' || signal.consent !== 'explicit' ||
+            signal.status !== 'active') return false;
+        const text = String(signal.value || '').toLowerCase();
+        const mention = target.exec(text);
+        if (!mention) return false;
+        const before = text.slice(Math.max(0, mention.index - 70), mention.index);
+        const after = text.slice(mention.index + mention[0].length, mention.index + mention[0].length + 45);
+        const directAvoidance =
+            /\b(?:do not|don't|never|prefer not to)\b.{0,40}\b(?:offer|suggest|make|create|use|show|open|give|want|need)\b.{0,20}$/.test(before) ||
+            /\bavoid\b.{0,20}$/.test(before);
+        const negativeExperience = /\b(?:not helpful|overwhelms? me|stresses? me out|makes? me anxious)\b/.test(after);
+        return directAvoidance || negativeExperience;
+    });
+    return avoided ? null : candidate;
+}
+
 function deriveExplicitToolRequest(userMessage, recentConversationText = '') {
     const text = String(userMessage || '').toLowerCase();
     if (!text.trim()) return sanitizeToolOpportunity(null);
+    if (isInformationalExplanationRequest(userMessage) &&
+        !/\b(make|create|build|set up|open|start|add|prepare questions)\b/.test(text) &&
+        !/\bprepare\b.{0,45}\b(?:doctor|therapist|psychiatrist|clinician|appointment)\b/.test(text)) {
+        return sanitizeToolOpportunity(null);
+    }
 
     const explicitAction = /\b(can you|could you|can we|could we|please|let'?s|make|create|build|set up|open|give me|start|add|prepare|prep|i need|i want|i would like|i'd like|help me make|help me create|help me set up|help me prepare|help me prep)\b/;
     const wantsShared = /\b(share|send|them|together|track it together|track together|use together)\b/.test(text);
@@ -134,7 +183,7 @@ function deriveExplicitToolRequest(userMessage, recentConversationText = '') {
         );
     }
 
-    if (explicitAction.test(text) && /\b(affirmation|affirmation card|encouragement card|self-worth card|kind reminder)\b/.test(text)) {
+    if (explicitAction.test(text) && /\b(affirmation|affirmation card|encouragement card|support card|self-worth card|kind reminder)\b/.test(text)) {
         return makeToolOpportunity(
             'affirmation_card',
             'Grounding encouragement',
@@ -180,7 +229,8 @@ function deriveExplicitToolRequest(userMessage, recentConversationText = '') {
 function deriveHeuristicToolOpportunity(
     userMessage,
     route,
-    recentConversationText = ''
+    recentConversationText = '',
+    { immediateSupportNeed = false } = {}
 ) {
     const text = String(userMessage || '').toLowerCase();
 
@@ -218,7 +268,7 @@ function deriveHeuristicToolOpportunity(
         });
     }
 
-    if (/\b(panic|panic attack|anxiety attack|can't breathe|hyperventilat|heart racing right now|calm down right now)\b/.test(text)) {
+    if (immediateSupportNeed) {
         return sanitizeToolOpportunity({
             shouldUseTool: true,
             type: 'breathing_exercise',
@@ -347,6 +397,9 @@ function isInformationalExplanationRequest(userMessage) {
         /\bdefine\b/,
         /\btell me about\b/,
         /\bhelp me understand\b/,
+        /\b(?:i need|i want) to understand\b/,
+        /\bhow do i (?:recognize|identify|spot|tell if)\b/,
+        /\bwhat (?:are|were) the (?:signs|symptoms)\b/,
         /\bresearch\b/,
         /\bsource-backed\b/,
         /\bwith sources\b/,
@@ -394,11 +447,20 @@ function hasActionableToolIntent(userMessage) {
     ].some((pattern) => pattern.test(text));
 }
 
-function shouldSuppress({ message = '', route = '', explicitToolRequest = false, toolRefusal = false } = {}) {
+function shouldSuppress({
+    message = '', route = '', explicitToolRequest = false,
+    immediateSupportNeed = false, toolRefusal = false
+} = {}) {
     const actionable = hasActionableToolIntent(message);
     if (toolRefusal) return true;
-    if ((route.includes('Search') || route.includes('Knowledge')) && !actionable && !hasActivePersonalNeedSignal(message)) return true;
-    if (isInformationalExplanationRequest(message) && !explicitToolRequest && !hasActivePersonalNeedSignal(message)) return true;
+    if (explicitToolRequest || immediateSupportNeed) return false;
+    if (/\b(?:just (?:need|want) to vent|let me vent|just listen|no advice|no solutions|don't need (?:advice|solutions))\b/i.test(message)) return true;
+    if (isInformationalExplanationRequest(message)) return true;
+    if (route.includes('Search') || route.includes('Knowledge')) return true;
+    const currentNeed = /\b(?:right now|currently|i feel|i'm (?:struggling|overwhelmed|panicking|anxious|sad)|i am (?:struggling|overwhelmed|panicking|anxious|sad))\b/i.test(message);
+    if (/\b(?:yesterday|last (?:night|week|month|year)|used to|back then|in the past)\b/i.test(message) &&
+        !actionable && !currentNeed) return true;
+    if (!actionable && !hasActivePersonalNeedSignal(message)) return true;
     return false;
 }
 
@@ -410,6 +472,7 @@ return {
     sanitizeOpportunity: sanitizeToolOpportunity,
     deriveExplicit: deriveExplicitToolRequest,
     deriveCandidate: deriveHeuristicToolOpportunity,
+    applyApprovedToolPreferences,
     isInformationalExplanationRequest,
     hasActivePersonalNeedSignal,
     hasActionableToolIntent,

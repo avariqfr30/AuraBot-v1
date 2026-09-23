@@ -11,7 +11,7 @@ const chatLogic = read('public/js/chat-logic.js');
 const auraPrompts = read('public/js/aura-prompts.js');
 const packageJson = JSON.parse(read('package.json'));
 
-assert.match(index, /turn-policy\.js"><\/script>\s*<script src="js\/response-adaptation\.js"><\/script>/);
+assert.match(index, /turn-policy\.js"><\/script>\s*<script src="js\/profile-rag\.js"><\/script>\s*<script src="js\/response-adaptation\.js"><\/script>/);
 assert.match(packageJson.scripts.check, /node --check public\/js\/response-adaptation\.js/);
 assert.match(packageJson.scripts.check, /node tests\/response-adaptation\.test\.js/);
 assert.match(packageJson.scripts.check, /node tests\/response-adaptation-integration\.test\.js/);
