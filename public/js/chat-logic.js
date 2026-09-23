@@ -454,36 +454,6 @@ function getModelGenerationOptions(modelName, format = null, callType = 'default
     };
 }
 
-function isLikelyIncompleteReply(text) {
-    const value = normalizeReplyWhitespace(text);
-    if (!value) return false;
-    if (value.length < 60) return false;
-    if (/[.!?]"?$/.test(value)) return false;
-    if (/[,:;]\s*$/.test(value)) return true;
-    if (/\b(and|or|but|because|while|which|that|with|including|such as|like)\s*$/i.test(value)) return true;
-    if (/\.\.\.|…/.test(value)) return true;
-    return true;
-}
-
-function buildContinuationPrompt(prompt, partialReply) {
-    return `${prompt}
-
-[Previous reply was cut off. Continue from exactly where it stopped.]
-- Do not restart from the beginning.
-- Do not repeat earlier sentences.
-- Continue naturally with the same tone and topic.
-
-[Partial reply]
-${partialReply}`;
-}
-
-function buildFinalAnswerRetryPrompt(prompt) {
-    return `${prompt}
-
-The previous attempt did not produce a visible final answer.
-Return only Aura's final user-facing answer now.
-Do not include thought, analysis, planning, labels, or hidden notes.`;
-}
 
 function buildChatTitle(content) {
     if (!content) return 'New Chat';
@@ -1539,82 +1509,18 @@ async function searchResponseExamples({
     }
 }
 
-async function _callLLM(prompt, {
-    modelName = getBackgroundModelName(),
-    format = null,
-    callType = 'default',
-    thinkingMode = getThinkingModeKey(),
-    routeDecision = null,
-    signal = responseRuntime.getTurnSignal()
-} = {}) {
-    const inferencePolicy = window.AURA_MODEL_ROUTING.resolveInferencePolicy({
-        modelName,
-        requestedMode: thinkingMode,
-        callType: format === 'json' ? 'json' : callType,
-        routeDecision
-    });
-    const options = {
-        ...getModelGenerationOptions(modelName, format, callType),
-        num_predict: inferencePolicy.maxTokens
-    };
-
-    try {
-        const data = await postJson(API_ENDPOINTS.ollamaGenerate, {
-            model: modelName,
-            prompt,
-            stream: false,
-            ...(inferencePolicy.think ? { think: inferencePolicy.think } : {}),
-            ...(Object.keys(options).length ? { options } : {}),
-            ...(format ? { format } : {})
-        }, { signal });
-
-        let rawReply = data.response?.trim() || null;
-        const doneReason = String(data.done_reason || data.doneReason || '').toLowerCase();
-        const allowContinuation = !format && callType === 'default';
-
-        const firstVisibleReply = stripModelReasoningTokens(rawReply);
-        const needsReasoningContinuation = rawReply && !firstVisibleReply && /<unused94>\s*thought/i.test(rawReply);
-
-        const visibleWordCount = firstVisibleReply
-            ? firstVisibleReply.split(/\s+/).filter(Boolean).length
-            : 0;
-        const visibleLooksCutOff = firstVisibleReply && visibleWordCount < 60 && isLikelyIncompleteReply(firstVisibleReply);
-
-        if (allowContinuation && rawReply && (needsReasoningContinuation || doneReason === 'length' || visibleLooksCutOff)) {
-            let attempts = 0;
-            while (attempts < 3) {
-                const visibleSoFar = stripModelReasoningTokens(rawReply);
-                const stillHiddenOnly = rawReply && !visibleSoFar && /<unused94>\s*thought/i.test(rawReply);
-                const shouldContinue =
-                    stillHiddenOnly ||
-                    (attempts === 0 && (doneReason === 'length' || visibleLooksCutOff));
-                if (!shouldContinue) break;
-
-                const continuationData = await postJson(API_ENDPOINTS.ollamaGenerate, {
-                    model: modelName,
-                    prompt: stillHiddenOnly
-                        ? buildFinalAnswerRetryPrompt(prompt)
-                        : buildContinuationPrompt(prompt, rawReply),
-                    stream: false,
-                    ...(inferencePolicy.think ? { think: inferencePolicy.think } : {}),
-                    ...(Object.keys(options).length ? { options } : {})
-                }, { signal });
-                const continuation = continuationData.response?.trim() || '';
-                if (!continuation) break;
-                rawReply = normalizeReplyWhitespace(`${rawReply} ${continuation}`);
-                if (stripModelReasoningTokens(rawReply)) break;
-                attempts += 1;
-            }
-        }
-
-        const reply = stripModelReasoningTokens(rawReply);
-        return reply;
-    } catch (error) {
-        if (error.name === 'AbortError' || error.name === 'TimeoutError') throw error;
-        console.error('LLM Call Failed:', error);
-        return null;
-    }
-}
+const modelRequest = window.AURA_MODEL_REQUEST.createClient({
+    postJson,
+    endpoint: API_ENDPOINTS.ollamaGenerate,
+    responseRuntime,
+    modelRouting: window.AURA_MODEL_ROUTING,
+    getBackgroundModelName,
+    getThinkingModeKey,
+    getModelGenerationOptions,
+    normalizeReplyWhitespace,
+    stripModelReasoningTokens
+});
+const _callLLM = modelRequest.callLLM;
 
 async function fetchMarkdownContent(slug) {
     const mapping = {
@@ -1916,17 +1822,8 @@ class ChatManager {
     deleteChat(id) {
         if (!this.state.chats[id]) return [];
         this.advancePersonalContextEpoch();
-        const promotedExampleIds = Object.values(this.state.feedbackLearning.entries)
-            .filter((entry) => entry.chatId === id && entry.promotedExampleId)
-            .map((entry) => entry.promotedExampleId);
-        const remainingFeedback = Object.fromEntries(
-            Object.entries(this.state.feedbackLearning.entries)
-                .filter(([, entry]) => entry.chatId !== id)
-        );
-        this.state.feedbackLearning = window.AURA_FEEDBACK.normalizeState({
-            ...this.state.feedbackLearning,
-            entries: remainingFeedback
-        });
+        const feedbackResult = window.AURA_CHAT_FEEDBACK_STATE.removeChat(this.state.feedbackLearning, id);
+        this.state.feedbackLearning = feedbackResult.state;
         this.state.intelligenceBundle = window.AURA_INTELLIGENCE_BUNDLE.removeChatContributions(
             this.state.intelligenceBundle,
             id
@@ -1939,7 +1836,7 @@ class ChatManager {
 
         if (!this.state.activeChatId) this.createNewChat();
         this.saveState();
-        return promotedExampleIds;
+        return feedbackResult.promotedExampleIds;
     }
 
     addMessageToActiveChat(role, content, metadata = {}) {
@@ -2331,8 +2228,7 @@ class ChatManager {
     }
 
     getResponseFeedback(chatId, messageId) {
-        const entry = this.state.feedbackLearning.entries[String(messageId || '')];
-        return entry?.chatId === chatId ? { ...entry } : null;
+        return window.AURA_CHAT_FEEDBACK_STATE.getEntry(this.state.feedbackLearning, chatId, messageId);
     }
 
     getFeedbackSummary() {
@@ -2350,45 +2246,22 @@ class ChatManager {
     }
 
     findRelatedUserMessage(chatId, assistantMessage) {
-        const chat = this.getChat(chatId);
-        if (!chat || !assistantMessage) return null;
-        const originalAssistant = assistantMessage.retryOfMessageId
-            ? chat.history.find((message) => message.id === assistantMessage.retryOfMessageId)
-            : assistantMessage;
-        const assistantIndex = chat.history.findIndex((message) => message.id === originalAssistant?.id);
-        if (assistantIndex < 0) return null;
-
-        for (let index = assistantIndex - 1; index >= 0; index -= 1) {
-            const message = chat.history[index];
-            if (message?.role === 'user' && message.source !== 'feedback_retry') return message;
-        }
-        return null;
+        return window.AURA_CHAT_FEEDBACK_STATE.findRelatedUserMessage(
+            this.getChat(chatId), assistantMessage
+        );
     }
 
     saveResponseFeedback(chatId, messageId, patch = {}) {
         const chat = this.getChat(chatId);
-        const assistantMessage = chat?.history?.find((message) => message.id === messageId);
-        if (!assistantMessage || assistantMessage.role !== 'ai') return null;
-        const existing = this.getResponseFeedback(chatId, messageId);
-        const userMessage = this.findRelatedUserMessage(chatId, assistantMessage);
-        const routeSnapshot = assistantMessage.routeSnapshot || existing?.routeSnapshot;
-
-        this.state.feedbackLearning = window.AURA_FEEDBACK.upsertFeedback(
+        const nextState = window.AURA_CHAT_FEEDBACK_STATE.upsert(
             this.state.feedbackLearning,
-            {
-                ...existing,
-                ...patch,
-                chatId,
-                messageId,
-                learningEligible: window.AURA_FEEDBACK.resolveFeedbackLearningEligibility(
-                    existing?.learningEligible,
-                    this.isPersonalIntelligenceActive(),
-                    routeSnapshot
-                ),
-                userMessageId: userMessage?.id || existing?.userMessageId || '',
-                routeSnapshot
-            }
+            chat,
+            messageId,
+            patch,
+            this.isPersonalIntelligenceActive()
         );
+        if (!nextState) return null;
+        this.state.feedbackLearning = nextState;
         this.saveState();
         return this.getResponseFeedback(chatId, messageId);
     }
@@ -2405,19 +2278,9 @@ class ChatManager {
     }
 
     getFeedbackRetryContext(chatId, messageId) {
-        const chat = this.getChat(chatId);
-        const assistantMessage = chat?.history?.find((message) => message.id === messageId);
-        const feedback = this.getResponseFeedback(chatId, messageId);
-        const userMessage = this.findRelatedUserMessage(chatId, assistantMessage);
-        const request = window.AURA_FEEDBACK.buildRetryRequest(feedback, userMessage?.content);
-        if (!assistantMessage || !feedback || !request) return null;
-
-        return {
-            assistantMessage,
-            feedback,
-            userMessage,
-            ...request
-        };
+        return window.AURA_CHAT_FEEDBACK_STATE.getRetryContext(
+            this.state.feedbackLearning, this.getChat(chatId), messageId
+        );
     }
 
     markFeedbackRetried(chatId, messageId, retryMessageId) {
@@ -2431,27 +2294,12 @@ class ChatManager {
     }
 
     getPersonalExampleCandidate(chatId, messageId) {
-        if (!this.isPersonalIntelligenceActive()) return null;
-        const chat = this.getChat(chatId);
-        const assistantMessage = chat?.history?.find((message) => message.id === messageId);
-        const feedback = this.getResponseFeedback(chatId, messageId);
-        const userMessage = this.findRelatedUserMessage(chatId, assistantMessage);
-        if (!window.AURA_FEEDBACK.canPromotePersonalExample({
-            feedback,
-            userMessage: userMessage?.content,
-            assistantMessage: assistantMessage?.content
-        })) return null;
-
-        return {
-            id: `personal-${messageId}`,
-            task: feedback.routeSnapshot.task || 'conversation',
-            route: feedback.routeSnapshot.route,
-            domain: 'companion',
-            risk: 'low',
-            preferredModel: 'either',
-            userMessage: String(userMessage.content || '').slice(0, 4000),
-            idealResponse: String(assistantMessage.content || '').slice(0, 8000)
-        };
+        return window.AURA_CHAT_FEEDBACK_STATE.getPersonalExampleCandidate(
+            this.state.feedbackLearning,
+            this.getChat(chatId),
+            messageId,
+            this.isPersonalIntelligenceActive()
+        );
     }
 
     canPromoteResponseFeedback(chatId, messageId) {
@@ -2478,20 +2326,13 @@ class ChatManager {
     }
 
     getActivePersonalExampleIds() {
-        return Object.values(this.state.feedbackLearning.entries)
-            .filter((entry) => (
-                entry.learningEligible &&
-                window.AURA_FEEDBACK.isFeedbackLearningRouteEligible(entry.routeSnapshot)
-            ))
-            .map((entry) => entry.promotedExampleId)
-            .filter(Boolean);
+        return window.AURA_CHAT_FEEDBACK_STATE.getActivePersonalExampleIds(this.state.feedbackLearning);
     }
 
     getPromotedExampleIdsForChat(chatId) {
-        return Object.values(this.state.feedbackLearning.entries)
-            .filter((entry) => entry.chatId === String(chatId || ''))
-            .map((entry) => entry.promotedExampleId)
-            .filter(Boolean);
+        return window.AURA_CHAT_FEEDBACK_STATE.getPromotedExampleIdsForChat(
+            this.state.feedbackLearning, chatId
+        );
     }
 
     isPersonalExampleActive(exampleId) {

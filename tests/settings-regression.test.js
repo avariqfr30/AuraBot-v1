@@ -9,6 +9,8 @@ const indexHtml = read('public/index.html');
 const configJs = read('public/js/config.js');
 const appJs = read('public/js/app.js');
 const chatLogicJs = read('public/js/chat-logic.js');
+const chatFeedbackStateJs = read('public/js/chat-feedback-state.js');
+const modelRequestJs = read('public/js/model-request.js');
 const auraPromptsJs = read('public/js/aura-prompts.js');
 const uiJs = read('public/js/ui.js');
 const packageJson = JSON.parse(read('package.json'));
@@ -42,7 +44,7 @@ assert.match(indexHtml, /id="clearLearnedPreferencesButton"/);
 assert.match(indexHtml, /Reset Conversation Preferences/);
 assert.match(indexHtml, /not account authentication/i);
 assert.doesNotMatch(indexHtml, /Persistent Companion Memory/);
-assert.match(indexHtml, /<script src="js\/personal-intelligence\.js"><\/script>\s*<script src="js\/intelligence-bundle\.js"><\/script>\s*<script src="js\/model-routing\.js"><\/script>\s*<script src="js\/turn-policy\.js"><\/script>\s*<script src="js\/response-adaptation\.js"><\/script>\s*<script src="js\/tool-decision\.js"><\/script>\s*<script src="js\/tool-artifacts\.js"><\/script>\s*<script src="js\/chat-tool-state\.js"><\/script>\s*<script src="js\/feedback-learning\.js"><\/script>\s*<script src="js\/hosted-client\.js"><\/script>\s*<script src="js\/aura-prompts\.js"><\/script>\s*<script src="js\/response-sanitizer\.js"><\/script>\s*<script src="js\/evidence-utils\.js"><\/script>\s*<script src="js\/chat-logic\.js"><\/script>/);
+assert.match(indexHtml, /<script src="js\/personal-intelligence\.js"><\/script>\s*<script src="js\/intelligence-bundle\.js"><\/script>\s*<script src="js\/model-routing\.js"><\/script>\s*<script src="js\/turn-policy\.js"><\/script>\s*<script src="js\/response-adaptation\.js"><\/script>\s*<script src="js\/tool-decision\.js"><\/script>\s*<script src="js\/tool-artifacts\.js"><\/script>\s*<script src="js\/chat-tool-state\.js"><\/script>\s*<script src="js\/feedback-learning\.js"><\/script>\s*<script src="js\/chat-feedback-state\.js"><\/script>\s*<script src="js\/hosted-client\.js"><\/script>\s*<script src="js\/aura-prompts\.js"><\/script>\s*<script src="js\/response-sanitizer\.js"><\/script>\s*<script src="js\/model-request\.js"><\/script>\s*<script src="js\/evidence-utils\.js"><\/script>\s*<script src="js\/chat-logic\.js"><\/script>/);
 assert.match(indexHtml, /<option value="auto">Auto/);
 assert.match(packageJson.scripts.check, /node --check lib\/memory-results\.js/);
 assert.match(packageJson.scripts.check, /node --check public\/js\/turn-policy\.js/);
@@ -99,9 +101,10 @@ assert.match(chatLogicJs, /RESPONSE_DETAIL:\s*'aura_response_detail'/);
 assert.match(chatLogicJs, /function getEffectiveSystemPrompt/);
 assert.match(chatLogicJs, /buildResponseSystemPrompt\(getEffectiveSystemPrompt\(\), activeModel\)/);
 assert.match(chatLogicJs, /function getModelPreference/);
-assert.match(chatLogicJs, /async function _callLLM\(prompt, \{/);
-assert.match(chatLogicJs, /\.\.\.\(inferencePolicy\.think \? \{ think: inferencePolicy\.think \} : \{\}\)/);
-assert.match(chatLogicJs, /num_predict:\s*inferencePolicy\.maxTokens/);
+assert.match(chatLogicJs, /const _callLLM = modelRequest\.callLLM/);
+assert.match(modelRequestJs, /async function callLLM\(prompt, \{/);
+assert.match(modelRequestJs, /\.\.\.\(inferencePolicy\.think \? \{ think: inferencePolicy\.think \} : \{\}\)/);
+assert.match(modelRequestJs, /num_predict:\s*inferencePolicy\.maxTokens/);
 assert.match(chatLogicJs, /function runModelRoutingAgent/);
 assert.match(chatLogicJs, /modelDecision:\s*modelRouting\.modelDecision/);
 assert.match(chatLogicJs, /MEDICAL_RESPONSE_REVIEW/);
@@ -172,8 +175,8 @@ assert.match(
     /hasOwnProperty\.call\(candidate,\s*'learningEligible'\)[\s\S]*resolveFeedbackLearningEligibility/
 );
 assert.match(
-    chatLogicJs,
-    /learningEligible:\s*window\.AURA_FEEDBACK\.resolveFeedbackLearningEligibility\(\s*existing\?\.learningEligible/
+    chatFeedbackStateJs,
+    /learningEligible:\s*feedback\.resolveFeedbackLearningEligibility\(\s*existing\?\.learningEligible/
 );
 assert.match(
     chatLogicJs,
@@ -188,7 +191,7 @@ assert.doesNotMatch(
     /runBehaviorAnalyzer[\s\S]*?PROMPTS\.USER_MEMORY_ANALYZER/
 );
 assert.match(
-    chatLogicJs,
+    chatFeedbackStateJs,
     /getActivePersonalExampleIds[\s\S]*?learningEligible[\s\S]*?isFeedbackLearningRouteEligible/
 );
 assert.match(
