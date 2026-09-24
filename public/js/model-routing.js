@@ -33,7 +33,8 @@
         const route = String(effectiveRoute || '');
         const riskIds = (highRiskRecommendations || []).map((entry) => entry?.id).filter(Boolean);
         const medical = MEDICAL_TERMS.test(medicalInput) || /medical|health/i.test(route);
-        const medicalDocument = Boolean(documentText) && medical && MEDICAL_DOCUMENT_TERMS.test(text);
+        const medicalDocument = Boolean(documentText) && medical &&
+            (MEDICAL_DOCUMENT_TERMS.test(text) || MEDICAL_TERMS.test(documentSample));
         const highRisk = riskIds.some((id) => ['acute_medical_emergency', 'poison_or_overdose'].includes(id));
         const complex = medical && (highRisk || COMPLEX_MEDICAL_TERMS.test(text));
         const needsCurrentInformation = FRESHNESS_TERMS.test(text);
@@ -45,12 +46,6 @@
             complex,
             needsCurrentInformation
         };
-    }
-
-    function pickAvailable(preferred, availableModels, fallback) {
-        const available = normalizeModels(availableModels);
-        if (!available.length || available.includes(preferred)) return preferred;
-        return available.includes(fallback) ? fallback : (available[0] || fallback || preferred);
     }
 
     function resolveModelRoute({
@@ -75,7 +70,7 @@
 
         if (classification.risk === 'high') {
             return {
-                primaryModel: pickAvailable(gptModel, available, medModel),
+                primaryModel: gptModel,
                 reviewerModel: null,
                 recommendedEffort: 'medium',
                 source: 'safety',
@@ -86,7 +81,7 @@
 
         if (preference && preference !== AUTO_MODEL_PREFERENCE) {
             return {
-                primaryModel: pickAvailable(preference, available, gptModel),
+                primaryModel: preference,
                 reviewerModel: null,
                 recommendedEffort: classification.complex ? 'high' : 'medium',
                 source: 'manual',
@@ -100,15 +95,14 @@
         let reason = 'General conversation, reasoning, or tool use.';
 
         if (classification.task === 'medical_document') {
-            primaryModel = medModel;
-            reason = 'Medical document interpretation matches MedGemma specialization.';
+            reviewerModel = medModel;
+            reason = 'The conversational model answers; MedGemma reviews the medical document response.';
         } else if (classification.domain === 'medical' && (classification.complex || classification.needsCurrentInformation)) {
             primaryModel = gptModel;
             reviewerModel = medModel;
             reason = 'Complex or current medical request uses GPT-OSS synthesis with MedGemma review.';
         }
 
-        primaryModel = pickAvailable(primaryModel, available, gptModel);
         reviewerModel = reviewerModel && reviewerModel !== primaryModel && (!available.length || available.includes(reviewerModel))
             ? reviewerModel
             : null;

@@ -35,6 +35,19 @@ function makeClient(responses, calls) {
     assert.equal(calls[1].options.signal, 'turn-signal');
     assert.match(calls[1].body.prompt, /Continue from exactly where it stopped/);
 
+    const emptyCalls = [];
+    const emptyClient = makeClient([
+        { response: '', thinking: 'private reasoning', done_reason: 'length' },
+        { response: 'We can take one small step toward your goal today.' }
+    ], emptyCalls);
+    assert.equal(await emptyClient.callLLM('Help with the current goal', { signal: 'same-turn' }),
+        'We can take one small step toward your goal today.');
+    assert.equal(emptyCalls.length, 2);
+    assert.match(emptyCalls[1].body.prompt, /Help with the current goal/);
+    assert.match(emptyCalls[1].body.prompt, /visible final answer/);
+    assert.doesNotMatch(emptyCalls[1].body.prompt, /private reasoning/);
+    assert.equal(emptyCalls[1].options.signal, 'same-turn');
+
     const jsonCalls = [];
     const jsonClient = makeClient([{ response: '{"ok":true}', done_reason: 'length' }], jsonCalls);
     assert.equal(await jsonClient.callLLM('Classify', { format: 'json' }), '{"ok":true}');

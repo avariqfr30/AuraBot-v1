@@ -126,6 +126,13 @@
             };
         }
 
+        if (hasConversationRepair(text)) {
+            return {
+                mode: 'follow_up', confidence: 0.98, usePriorTurn: true, repair: true,
+                reason: 'The user is correcting Aura. Re-anchor to the user’s account, not the rejected reply.'
+            };
+        }
+
         if (/\b(new topic|different question|something else|unrelated|change(?:ing)? the subject)\b/i.test(text)) {
             return {
                 mode: 'new_topic',
@@ -144,11 +151,13 @@
             };
         }
 
-        const topicLinks = countTopicLinks(text, priorHistory);
+        const topicLinks = countTopicLinks(text, priorHistory.filter((entry) => entry?.role === 'user'));
         const ambiguousReference = /\b(it|this|that|them|those|these|they|there|the same)\b/i.test(text);
         const explicitFollowUp = /^(and|also|but|so|then|what about|how about|why|how come|go on|tell me more)\b/i.test(text);
         const shortQuestionFollowUp = /^(who|what|when|where|why|how)\??$/i.test(text);
         const continuationRequest = /\b(continue|expand|elaborate|more detail|what next|next step)\b/i.test(text);
+        const openHelpRequest = /^(?:i (?:need|could use) (?:some )?help|(?:can|could) you help me|i (?:don't|do not) know where to start)[?.!]?$/i.test(text);
+        const dependentToolRequest = /\b(?:tool|plan|checklist)\s+(?:to help[?.!](?:\s|$)|for (?:this|that|it)\b)/i.test(text);
         const dependentQuestion =
             /^(what|how|where|when|which)\s+(should|could|can|do|would)\s+(i|we|it|that)\b/i.test(text) &&
             text.split(/\s+/).length <= 12;
@@ -158,6 +167,8 @@
             explicitFollowUp ||
             shortQuestionFollowUp ||
             continuationRequest ||
+            openHelpRequest ||
+            dependentToolRequest ||
             dependentQuestion ||
             (ambiguousReference && text.split(/\s+/).length <= 18)
         ) {
@@ -177,6 +188,20 @@
             usePriorTurn: false,
             reason: `No reliable link to the recent topic${lower.endsWith('?') ? ' was found' : ''}.`
         };
+    }
+
+    function getActiveThreadHistory(history = []) {
+        const entries = Array.isArray(history) ? history : [];
+        let start = 0;
+        for (let index = 0; index < entries.length; index += 1) {
+            if (entries[index]?.role !== 'user') continue;
+            const continuity = resolveContinuity({
+                message: entries[index].content,
+                history: entries.slice(Math.max(start, index - 8), index)
+            });
+            if (!continuity.usePriorTurn) start = index;
+        }
+        return entries.slice(start);
     }
 
     function resolveStance({ message = '', route = '' } = {}) {
@@ -277,11 +302,24 @@
         return directSignals || currentEpisode;
     }
 
+    function hasConversationRepair(message = '') {
+        const text = String(message || '').replace(/’/g, "'");
+        if (/\bwe were talking about\b/i.test(text) &&
+            /\b(?:last time|earlier|previously)\b/i.test(text)) return false;
+        return [
+            /\bwhat does (?:that|this) have to do with\b/i,
+            /\bhow is (?:that|this) (?:relevant|related)\b/i,
+            /\b(?:that|this)(?:'s| is) (?:unrelated|irrelevant|not relevant)\b/i,
+            /\b(?:that|this) (?:isn't|is not) what i (?:meant|asked|was asking)\b/i,
+            /\b(?:you (?:misunderstood|missed (?:my|the) point)|not what i (?:meant|asked)|we were talking about)\b/i
+        ].some((pattern) => pattern.test(text));
+    }
+
     function hasContextRejection(message = '') {
         const text = String(message || '').toLowerCase().trim();
         if (!text) return false;
 
-        return [
+        return hasConversationRepair(text) || [
             /\bstop\s+(?:connecting|linking|relating|comparing|bringing)\b/,
             /\b(?:do not|don't|dont)\s+(?:connect|link|relate|compare|use|mention|bring up)\b/,
             /\bleave\s+(?:the\s+)?(?:old|past|previous|earlier)\b.*\bout\b/,
@@ -470,6 +508,8 @@
 
     return {
         resolveContinuity,
+        getActiveThreadHistory,
+        hasConversationRepair,
         resolveStance,
         excludeCurrentTurn,
         isExplicitToolRequest,

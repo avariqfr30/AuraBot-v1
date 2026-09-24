@@ -78,17 +78,20 @@ Do not include thought, analysis, planning, labels, or hidden notes.`;
                 const allowContinuation = !format && callType === 'default';
                 const firstVisibleReply = stripModelReasoningTokens(rawReply);
                 const needsReasoningContinuation = rawReply && !firstVisibleReply && /<unused94>\s*thought/i.test(rawReply);
+                const needsFinalAnswer = !firstVisibleReply && (
+                    needsReasoningContinuation || Boolean(data.thinking?.trim()) || doneReason === 'length'
+                );
                 const visibleWordCount = firstVisibleReply
                     ? firstVisibleReply.split(/\s+/).filter(Boolean).length
                     : 0;
                 const visibleLooksCutOff = firstVisibleReply && visibleWordCount < 60 &&
                     isLikelyIncompleteReply(firstVisibleReply, normalizeReplyWhitespace);
 
-                if (allowContinuation && rawReply && (needsReasoningContinuation || doneReason === 'length' || visibleLooksCutOff)) {
+                if (allowContinuation && (needsFinalAnswer || (rawReply && (doneReason === 'length' || visibleLooksCutOff)))) {
                     let attempts = 0;
                     while (attempts < 3) {
                         const visibleSoFar = stripModelReasoningTokens(rawReply);
-                        const stillHiddenOnly = rawReply && !visibleSoFar && /<unused94>\s*thought/i.test(rawReply);
+                        const stillHiddenOnly = !visibleSoFar && needsFinalAnswer;
                         const shouldContinue = stillHiddenOnly ||
                             (attempts === 0 && (doneReason === 'length' || visibleLooksCutOff));
                         if (!shouldContinue) break;
@@ -104,7 +107,7 @@ Do not include thought, analysis, planning, labels, or hidden notes.`;
                         }, { signal });
                         const continuation = continuationData.response?.trim() || '';
                         if (!continuation) break;
-                        rawReply = normalizeReplyWhitespace(`${rawReply} ${continuation}`);
+                        rawReply = normalizeReplyWhitespace(stillHiddenOnly ? continuation : `${rawReply} ${continuation}`);
                         if (stripModelReasoningTokens(rawReply)) break;
                         attempts += 1;
                     }

@@ -15,11 +15,12 @@ const auraPromptsJs = read('public/js/aura-prompts.js');
 const uiJs = read('public/js/ui.js');
 const packageJson = JSON.parse(read('package.json'));
 
-assert.match(configJs, /defaultModel:\s*'medgemma1\.5:4b'/);
+assert.match(configJs, /defaultModel:\s*'gpt-oss:120b-cloud'/);
 assert.match(configJs, /'gpt-oss:120b-cloud'/);
 assert.match(configJs, /defaultModelPreference:\s*'auto'/);
 assert.match(configJs, /gptModel:\s*'gpt-oss:120b-cloud'/);
 assert.match(configJs, /medModel:\s*'medgemma1\.5:4b'/);
+assert.match(indexHtml, /Auto uses the conversational model for replies/i);
 
 assert.doesNotMatch(indexHtml, /<label[^>]+for="systemPromptTextarea"[^>]*>\s*System Prompt\s*<\/label>/);
 assert.match(indexHtml, /id="auraStyleSelect"/);

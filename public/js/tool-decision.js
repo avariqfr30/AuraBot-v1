@@ -9,6 +9,10 @@ const TOOL_TYPES = new Set([
     'appointment_prep', 'follow_up_plan'
 ]);
 const LOW_RISK_PROACTIVE_TYPES = new Set(TOOL_TYPES);
+const ADAPTIVE_OFFER_TYPES = new Set([
+    'thought_record', 'checklist', 'mood_tracker', 'affirmation_card',
+    'breathing_exercise', 'follow_up_plan', 'appointment_prep'
+]);
 const CRISIS_ROUTE_PROACTIVE_TYPES = new Set(['breathing_exercise', 'checklist', 'safety_plan']);
 const THEME_FILLER_WORDS = new Set([
     'please', 'make', 'create', 'build', 'open', 'give', 'checklist', 'tracker',
@@ -119,13 +123,18 @@ function applyApprovedToolPreferences(
 function deriveExplicitToolRequest(userMessage, recentConversationText = '') {
     const text = String(userMessage || '').toLowerCase();
     if (!text.trim()) return sanitizeToolOpportunity(null);
+    if (/\b(?:no|not|never|don't|do not|rather not|instead of)\b/.test(text) &&
+        /\b(?:thought record|thought log|thought worksheet)\b/.test(text)) {
+        return sanitizeToolOpportunity(null);
+    }
     if (isInformationalExplanationRequest(userMessage) &&
         !/\b(make|create|build|set up|open|start|add|prepare questions)\b/.test(text) &&
+        !/\b(?:can|could) (?:we|i) (?:try|use|do)\b|\b(?:let'?s|let us|please) (?:try|use|do)\b/.test(text) &&
         !/\bprepare\b.{0,45}\b(?:doctor|therapist|psychiatrist|clinician|appointment)\b/.test(text)) {
         return sanitizeToolOpportunity(null);
     }
 
-    const explicitAction = /\b(can you|could you|can we|could we|please|let'?s|make|create|build|set up|open|give me|start|add|prepare|prep|i need|i want|i would like|i'd like|help me make|help me create|help me set up|help me prepare|help me prep)\b/;
+    const explicitAction = /\b(can you|could you|can we|could we|could i|may i|please|let'?s|let us|make|create|build|set up|set (?:me|us) up|open|give me|start|add|prepare|prep|i need|i want|i would like|i'd like|help me make|help me create|help me set up|help me prepare|help me prep)\b/;
     const wantsShared = /\b(share|send|them|together|track it together|track together|use together)\b/.test(text);
 
     if (explicitAction.test(text) && /\b(medication checklist|med checklist|meds checklist|pill checklist|track meds|medication tracker)\b/.test(text)) {
@@ -173,7 +182,16 @@ function deriveExplicitToolRequest(userMessage, recentConversationText = '') {
         );
     }
 
-    if (explicitAction.test(text) && /\b(thought record|thought log|reframe|challenge my thought|challenge these thoughts|cognitive distortion)\b/.test(text)) {
+    const acceptedThoughtTool = /\b(?:thought records?|thought logs?|thought worksheets?)\b/.test(text) &&
+        /\b(?:sounds? (?:pretty |really )?(?:good|helpful|useful|great)|would be (?:pretty |really )?(?:good|helpful|useful|great|cool)|let'?s (?:do|try)|let us (?:do|try)|try (?:it|one|that)|do (?:it|one|that))\b/.test(text);
+    const contextualWorksheet = /\b(?:thought records?|thought logs?|thought worksheets?)\b/.test(
+        String(recentConversationText || '').toLowerCase()
+    ) && /\b(?:table|worksheet|form)\b/.test(text) &&
+        /\b(?:fill(?:able)?|blanks?|complete|write in)\b/.test(text) &&
+        /\b(?:can|could|may|want|like|would|might|please|give|make|create|have)\b/.test(text) &&
+        !/\b(?:for|about)\s+(?:my|the|a|an)\s+(?!thought|feeling|situation|conversation)\w+/.test(text);
+    if ((explicitAction.test(text) && /\b(thought record|thought log|thought worksheet|reframe|challenge my thought|challenge these thoughts|cognitive distortion)\b/.test(text)) ||
+        acceptedThoughtTool || contextualWorksheet) {
         return makeToolOpportunity(
             'thought_record',
             'Thought reframing',
@@ -223,7 +241,35 @@ function deriveExplicitToolRequest(userMessage, recentConversationText = '') {
         );
     }
 
+    if (explicitAction.test(text) && /\btool\b/.test(text) &&
+        /\b(?:daily|every day|each day|come back|check[- ]?in)\b/.test(text)) {
+        const goal = sanitizeToolTheme(recentConversationText || userMessage).slice(0, 240);
+        return makeToolOpportunity(
+            'follow_up_plan',
+            `Daily follow-up: ${goal}`,
+            'The user requested a tool for recurring steps toward the current goal.',
+            0.95,
+            'I’ll set up a follow-up plan you can return to each day. It won’t send automatic reminders.'
+        );
+    }
+
     return sanitizeToolOpportunity(null);
+}
+
+function resolvePendingOfferAcceptance(userMessage, history = []) {
+    const text = String(userMessage || '').replace(/’/g, "'").toLowerCase().trim();
+    if (!text || text.split(/\s+/).length > 16 || /\b(?:no|not|never|don't|do not|rather|instead|only|what|why|how)\b/.test(text)) return null;
+    const affirmative = /^(?:yes|yeah|yep|sure|okay|ok|alright|absolutely|please|let's|let us|that sounds|sounds good)\b/.test(text);
+    const action = /\b(?:please|do it|try it|try that|give it a (?:go|try)|sounds? (?:good|helpful|useful|great)|let'?s (?:do|try)|let us (?:do|try))\b/.test(text);
+    if (!affirmative || !action) return null;
+    const latestAssistant = [...(Array.isArray(history) ? history : [])].reverse()
+        .find((entry) => entry?.role === 'ai');
+    const offer = latestAssistant?.toolOffer;
+    if (offer?.status !== 'pending' || !TOOL_TYPES.has(offer.type)) return null;
+    return makeToolOpportunity(
+        offer.type, offer.theme, 'The user accepted the pending tool offer.', 0.99,
+        'I’ll open it now.'
+    );
 }
 
 function deriveHeuristicToolOpportunity(
@@ -447,6 +493,24 @@ function hasActionableToolIntent(userMessage) {
     ].some((pattern) => pattern.test(text));
 }
 
+function shouldConsiderAdaptiveOffer({ message = '', route = '', recentConversationText = '', toolRefusal = false } = {}) {
+    const text = String(message || '').replace(/’/g, "'").toLowerCase().trim();
+    if (!text || toolRefusal || /\b(?:no|without) (?:a |any )?(?:tool|card|checklist|tracker|plan)\b/.test(text)) return false;
+    if (/\b(?:do not|don't|dont)\s+(?:want|need|suggest|offer|make|create|use|give)\b.{0,45}\b(?:tool|card|checklist|tracker|plan)\b/.test(text)) return false;
+    if (/\b(?:just (?:need|want) to vent|let me vent|just listen|no advice|no solutions|don't need (?:advice|solutions))\b/.test(text)) return false;
+    if (isInformationalExplanationRequest(text) || /(?:Search|Knowledge|Crisis)/.test(route)) return false;
+    if (/\b(?:last year|last month|used to|back then|in the past|i am fine now|i'm fine now)\b/.test(text) &&
+        !/\b(?:right now|still|again|currently)\b/.test(text)) return false;
+
+    const personal = /\b(?:i|my|me|we|our)\b/.test(text) ||
+        (Boolean(recentConversationText) && /\b(?:it|this|that)\b/.test(text));
+    const seeking = /\b(?:help|try|do|start|work through|untangle|figure out|something|anything|way forward|next step|stuck)\b/.test(text);
+    const unresolved = /\b(?:still|again|keep|keeps|replay|replaying|circling|stuck|can't stop|cannot stop|nothing helps|same worry)\b/.test(text);
+    const concreteAsk = /\b(?:something|anything|tool|exercise|way forward|next step)\b/.test(text) &&
+        /\b(?:can|could|need|want|try|help)\b/.test(text);
+    return personal && seeking && (unresolved || concreteAsk);
+}
+
 function shouldSuppress({
     message = '', route = '', explicitToolRequest = false,
     immediateSupportNeed = false, toolRefusal = false
@@ -467,15 +531,18 @@ function shouldSuppress({
 return {
     TOOL_TYPES,
     LOW_RISK_PROACTIVE_TYPES,
+    ADAPTIVE_OFFER_TYPES,
     CRISIS_ROUTE_PROACTIVE_TYPES,
     sanitizeToolTheme,
     sanitizeOpportunity: sanitizeToolOpportunity,
     deriveExplicit: deriveExplicitToolRequest,
+    resolvePendingOfferAcceptance,
     deriveCandidate: deriveHeuristicToolOpportunity,
     applyApprovedToolPreferences,
     isInformationalExplanationRequest,
     hasActivePersonalNeedSignal,
     hasActionableToolIntent,
+    shouldConsiderAdaptiveOffer,
     shouldSuppress
 };
 });

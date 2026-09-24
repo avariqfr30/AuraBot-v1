@@ -91,6 +91,49 @@ const history = [
     { role: 'ai', content: 'Let us separate what you know from what anxiety is predicting.' }
 ];
 
+const griefHistory = [
+    { role: 'user', content: 'I am grieving my past relationship. I keep missing my former partner.' },
+    { role: 'ai', content: 'That loss sounds painful. We can take this at your pace.' }
+];
+const dailyToolRequest = 'Could you set me up a tool to help? I want to come back each day and work through one small step.';
+assert.equal(turnPolicy.resolveContinuity({ message: dailyToolRequest, history: griefHistory }).usePriorTurn, true);
+const repairHistory = [...griefHistory,
+    { role: 'user', content: dailyToolRequest },
+    { role: 'ai', content: 'Handle the immediate symptoms and seek professional help.' }
+];
+const repairPolicy = turnPolicy.resolveContinuity({
+    message: 'How is that relevant to what we were discussing?', history: repairHistory
+});
+assert.equal(repairPolicy.usePriorTurn, true);
+assert.equal(repairPolicy.repair, true);
+assert.equal(turnPolicy.hasContextRejection('How is that relevant to what we were discussing?'), true);
+assert.equal(turnPolicy.resolveContinuity({
+    message: "That's unrelated to what I told you.", history: repairHistory
+}).repair, true);
+assert.equal(turnPolicy.resolveContinuity({
+    message: 'Can you set me up a daily tool for learning Spanish?', history: griefHistory
+}).usePriorTurn, false);
+assert.equal(turnPolicy.resolveContinuity({
+    message: 'Could you create a tool to help me learn Spanish every day?', history: griefHistory
+}).usePriorTurn, false);
+for (const message of [
+    "That isn't what I was asking about.", 'You missed my point.',
+    'What does this have to do with what I said?'
+]) {
+    assert.equal(turnPolicy.resolveContinuity({ message, history: repairHistory }).repair, true);
+}
+assert.deepEqual(turnPolicy.getActiveThreadHistory([
+    { role: 'user', content: 'What are panic symptoms?' },
+    { role: 'ai', content: 'Panic can involve a racing heart.' },
+    ...repairHistory
+]), repairHistory);
+for (const message of ['I need help.', 'Could you help me?', "I don't know where to start."]) {
+    assert.equal(turnPolicy.resolveContinuity({ message, history: griefHistory }).usePriorTurn, true);
+    assert.deepEqual(turnPolicy.getActiveThreadHistory([...griefHistory, { role: 'user', content: message }]),
+        [...griefHistory, { role: 'user', content: message }]);
+}
+assert.equal(turnPolicy.hasConversationRepair('We were talking about my trip last time.'), false);
+
 const standalone = turnPolicy.resolveTurnPolicy({
     message: 'What is photosynthesis?',
     route: 'KnowledgeAgent',

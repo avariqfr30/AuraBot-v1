@@ -842,6 +842,17 @@ document.addEventListener('DOMContentLoaded', async () => {
                     responseRuntime.throwIfAborted();
                     if (toolData) {
                         chatManager.addOrUpdateToolInChat(chatId, entry.type, toolData);
+                        const history = chatManager.getChatHistory(chatId);
+                        const pendingOfferIndex = history.findLastIndex((message) =>
+                            message?.toolOffer?.type === entry.type &&
+                            message.toolOffer.status === 'pending'
+                        );
+                        if (pendingOfferIndex >= 0 &&
+                            chatManager.transitionToolOffer(chatId, pendingOfferIndex, 'create')) {
+                            chatManager.transitionToolOffer(
+                                chatId, pendingOfferIndex, 'created', toolData.id || null
+                            );
+                        }
                     } else {
                         failedCreates += 1;
                     }
@@ -1425,7 +1436,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             }
 
             modelSelectDropdown.innerHTML = [
-                `<option value="${AUTO_MODEL_OPTION}">Auto (GPT-OSS + MedGemma)</option>`,
+                `<option value="${AUTO_MODEL_OPTION}">Auto (GPT-OSS primary)</option>`,
                 ...uniqueModels.map((modelName) => {
                     const isPreferred = getPinnedModelNames().includes(modelName);
                     const label = isPreferred ? `${modelName} (Preferred)` : modelName;
@@ -1442,7 +1453,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                 ])
             ]);
             modelSelectDropdown.innerHTML = [
-                `<option value="${AUTO_MODEL_OPTION}">Auto (GPT-OSS + MedGemma)</option>`,
+                `<option value="${AUTO_MODEL_OPTION}">Auto (GPT-OSS primary)</option>`,
                 ...fallbackModels.map((modelName) => `<option value="${escapeOptionValue(modelName)}">${escapeOptionValue(modelName)}</option>`)
             ].join('');
         } finally {
@@ -1579,7 +1590,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         syncBehaviorControls();
         const defaultPreference = window.AURA_CONFIG.defaultModelPreference || AUTO_MODEL_OPTION;
         localStorage.setItem(STORAGE_KEYS.MODEL, defaultPreference);
-        modelSelectDropdown.innerHTML = `<option value="${AUTO_MODEL_OPTION}">Auto (GPT-OSS + MedGemma)</option>`;
+        modelSelectDropdown.innerHTML = `<option value="${AUTO_MODEL_OPTION}">Auto (GPT-OSS primary)</option>`;
         modelSelectDropdown.value = defaultPreference;
         syncThinkingModeControls('auto');
         if (locationAccessCheckbox) locationAccessCheckbox.checked = false;

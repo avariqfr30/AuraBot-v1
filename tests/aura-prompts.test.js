@@ -11,6 +11,7 @@ const expectedKeys = [
     'RESPONSE_STYLE_CONTRACT',
     'MEDGEMMA_CLINICAL_APPENDIX',
     'AURA_COMPANION_CONTRACT',
+    'TOOL_OPPORTUNITY',
     'AURA_DIRECT_REPLY',
     'AURA_EVIDENCE_REPLY',
     'MEDICAL_RESPONSE_REVIEW',
@@ -25,9 +26,16 @@ const expectedKeys = [
 
 assert.deepEqual(Object.keys(prompts), expectedKeys);
 assert.equal(Object.isFrozen(prompts), true);
+assert.match(prompts.RESPONSE_STYLE_CONTRACT, /Do not end every reply with a question/i);
+assert.match(prompts.RESPONSE_STYLE_CONTRACT, /Do not repeatedly suggest the same tool/i);
+assert.match(prompts.RESPONSE_STYLE_CONTRACT, /respond to the specific feeling/i);
+assert.match(prompts.RESPONSE_STYLE_CONTRACT, /hypothetical details as known facts/i);
+assert.match(prompts.AURA_COMPANION_CONTRACT, /tentative pattern/i);
+assert.match(prompts.AURA_COMPANION_CONTRACT, /user-stated details/i);
+assert.match(prompts.AURA_COMPANION_CONTRACT, /known facts from interpretation/i);
 assert.equal(
     crypto.createHash('sha256').update(JSON.stringify(prompts)).digest('hex'),
-    '6015cb82a0d2e47306d8d07b3cccc02d961c5901647587525160263c17f2a030',
+    'af67fa5b573df74ba0e662cb99cccfc737ea3324b9e85475aee1a7158b377d59',
     'prompt extraction must preserve every prompt byte-for-byte'
 );
 

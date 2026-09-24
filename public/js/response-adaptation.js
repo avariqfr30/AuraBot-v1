@@ -46,6 +46,7 @@
         if (/\b(?:more|deeper|elaborate|expand|go on)\b/.test(text)) followUpIntent = 'deepen';
         if (/\b(?:i mean|to be clear|clarify|what i meant)\b/.test(text)) followUpIntent = 'clarify';
         if (/\b(?:not quite|that'?s wrong|incorrect|i meant)\b/.test(text)) followUpIntent = 'correct';
+        if (continuity?.repair) followUpIntent = 'correct';
         if (/\b(?:are you sure|but isn'?t|that seems wrong|why would)\b/.test(text)) followUpIntent = 'challenge';
         if (continuity?.usePriorTurn && followUpIntent === 'new_topic' && previousAi) followUpIntent = 'continue';
         const topicShift = continuity?.mode === 'new_topic' && Boolean(previousAi);

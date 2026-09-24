@@ -21,6 +21,15 @@ const fallback = evidence.buildDeterministicSearchFallback(
 );
 assert.match(fallback, /sudden shift|panic symptoms/i);
 assert.match(fallback, /Sources:/);
-assert.match(evidence.buildHumanFallbackAnswer('How do I recognize panic warning signs?'), /urgent help/i);
+for (const message of [
+    'Could you set me up a tool to help? I want to come back each day and work through one small step.',
+    'How is that relevant to what we were discussing?',
+    'Why did my relationship end?',
+    'How do I recognize panic warning signs?'
+]) {
+    const failedReply = evidence.buildHumanFallbackAnswer(message);
+    assert.match(failedReply, /couldn.t.*reply|unable/i);
+    assert.doesNotMatch(failedReply, /symptoms|panic|biology|clinician|diagnos/i);
+}
 
 console.log('evidence utility tests passed');

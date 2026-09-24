@@ -30,7 +30,7 @@ Suggested embedding model:
 ollama pull bge-m3:latest
 ```
 
-The app now prefers MedGemma for chat and ships with `medgemma1.5:4b` as the default model name. If your Ollama setup exposes a different MedGemma tag, you can switch to it in Settings. The model picker also prioritizes common MedGemma tag variants automatically.
+Auto routing uses `gpt-oss:120b-cloud` as the conversational model. `medgemma1.5:4b` is the configured medical review model. If your Ollama setup exposes different tags, update `public/js/config.js` or choose a specific conversational model in Settings.
 
 On a host with MedGemma installed, verify the tag with:
 
@@ -237,7 +237,7 @@ Aura’s search path now does more than a single query:
 Aura defaults to automatic model routing:
 
 - GPT-OSS 120B Cloud handles general conversation, planning, tool use, search synthesis, and complex reasoning.
-- MedGemma 1.5 handles medical-document interpretation and can review complex or current non-emergency medical responses.
+- MedGemma 1.5 can review medical-document interpretations and complex or current non-emergency medical responses; the conversational model writes the answer.
 - Complex medical turns may use both models. Auto routing can therefore send message content to GPT-OSS Cloud.
 - Acute emergency signals skip the reviewer so deterministic urgent guidance is not delayed.
 - Selecting a specific model in Settings disables automatic switching and cross-model review, except for the urgent safety fallback.

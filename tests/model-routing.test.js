@@ -18,6 +18,10 @@ assert.equal(classifyTurn({
     message: 'Extract the values from this lab report.',
     documentText: 'Hemoglobin 13.2 g/dL\nHbA1c 8.4%'
 }).task, 'medical_document');
+assert.equal(classifyTurn({
+    message: 'Can you help me make sense of this?',
+    documentText: 'Blood test report: HbA1c 8.4%'
+}).task, 'medical_document');
 
 const general = resolveModelRoute({
     preference: AUTO_MODEL_PREFERENCE,
@@ -37,7 +41,8 @@ const medicalDocument = resolveModelRoute({
     message: 'Extract the abnormal values from this lab report.',
     documentText: 'HbA1c 8.4%'
 });
-assert.equal(medicalDocument.primaryModel, MED);
+assert.equal(medicalDocument.primaryModel, GPT);
+assert.equal(medicalDocument.reviewerModel, MED);
 
 const highRiskMedical = resolveModelRoute({
     preference: AUTO_MODEL_PREFERENCE,
@@ -83,6 +88,17 @@ const medUnavailable = resolveModelRoute({
 });
 assert.equal(medUnavailable.primaryModel, GPT);
 assert.equal(medUnavailable.reviewerModel, null);
+
+const onlyHelperAvailable = resolveModelRoute({
+    preference: AUTO_MODEL_PREFERENCE,
+    availableModels: [MED],
+    gptModel: GPT,
+    medModel: MED,
+    message: 'I need help talking through a difficult day.'
+});
+assert.equal(onlyHelperAvailable.primaryModel, GPT,
+    'Auto must not silently promote the medical helper into the conversational role');
+assert.equal(onlyHelperAvailable.reviewerModel, null);
 
 assert.deepEqual(
     resolveInferencePolicy({ modelName: GPT, requestedMode: 'fast', callType: 'default' }),

@@ -4,13 +4,17 @@
     if (root) root.AURA_RESPONSE_SANITIZER = api;
 })(typeof globalThis !== 'undefined' ? globalThis : this, function createResponseSanitizer() {
 const TOOL_TAG_PATTERN = /<tool_(?:create|offer)\b[^>]*\/?>/gi;
+const MODEL_TOOL_PAYLOAD_PATTERN = /<(mood_tracker|checklist|thought_record|affirmation_card|breathing_exercise|safety_plan|medication_checklist|appointment_prep|follow_up_plan)\b[^>]*>[\s\S]*?<\/\1\s*>/gi;
 
 function extractToolTags(text) {
     return [...String(text || '').matchAll(TOOL_TAG_PATTERN)].map((match) => match[0]);
 }
 
 function stripToolTags(text) {
-    return String(text || '').replace(TOOL_TAG_PATTERN, ' ').trim();
+    return String(text || '')
+        .replace(MODEL_TOOL_PAYLOAD_PATTERN, ' ')
+        .replace(TOOL_TAG_PATTERN, ' ')
+        .trim();
 }
 
 function normalizeReplyWhitespace(text) {
@@ -75,6 +79,7 @@ function stripPlanningScaffold(text) {
     const filtered = lines.filter((line) => {
         const trimmed = line.trim();
         if (!trimmed) return true;
+        if (/^step\s*\d+\b/i.test(trimmed)) return true;
 
         return ![
             /^\[[^\]]*(?:thought|analysis|reasoning|plan|思考|分析|推理|计划|計劃)[^\]]*\]\s*/i,

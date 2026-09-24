@@ -207,31 +207,8 @@ function buildSourcesLineFromEvidenceIds(evidenceIds, evidenceCatalog) {
     return `Sources: ${links.join(', ')}`;
 }
 
-function buildHumanFallbackAnswer(userMessage, route = 'GeneralFriendAgent') {
-    const focus = getQuestionFocus(userMessage);
-    const text = String(userMessage || '').toLowerCase();
-
-    if (focus === 'signs') {
-        return "Look for a sudden change from the person’s normal state. With panic or intense anxiety, that can look like fast breathing, shaking, sweating, chest tightness, dizziness, nausea, a racing heart, feeling trapped, or saying they feel like they might die or lose control.\n\nThe most helpful response is usually calm and simple: stay with them, lower stimulation if you can, remind them it will pass, and help them slow their breathing. If symptoms look medically serious, especially chest pain, fainting, one-sided weakness, severe shortness of breath, or this is new for them, treat it as a medical concern and get urgent help.";
-    }
-
-    if (focus === 'causes') {
-        return "It is usually not one single cause. A better way to think about it is vulnerability plus triggers: biology, family history, sleep, stress, substances, health changes, and life events can all interact.\n\nThat matters because it means the goal is not blame. The useful move is to look for patterns: when it happens, what changed beforehand, how sleep has been, what stressors are active, and whether anything makes it better or worse.";
-    }
-
-    if (focus === 'types') {
-        return "The cleanest way to answer is to separate the main categories first, then explain what makes each one different. In mental-health topics, those categories usually depend on the pattern, duration, severity, and how much daily life is affected.\n\nA clinician would not rely on the label alone. They would look at the timeline, symptoms, sleep, functioning, risk, and whether there have been episodes before.";
-    }
-
-    if (focus === 'care') {
-        return "The practical approach is usually two-part: handle what is happening right now, then reduce the chance it keeps happening. That can mean calming the immediate symptoms, tracking patterns, protecting sleep, reducing obvious triggers, and getting professional help when symptoms are recurring, risky, or disrupting daily life.";
-    }
-
-    if (route.includes('Search')) {
-        return "I do not want to pretend certainty where details matter. The safest way to answer is to separate what is stable from what needs checking: the broad pattern can be explained, but anything current, local, legal, or very specific should be verified before acting on it.";
-    }
-
-    return "The useful way to think about it is to stay with the actual pattern rather than jump to a label. What changed, how intense it is, how long it lasts, what makes it better or worse, and whether it affects safety or daily life usually matter more than a quick one-line answer.";
+function buildHumanFallbackAnswer() {
+    return "I couldn't generate a useful reply this time. Your message is still here; please try again.";
 }
 
 function buildDeterministicSearchFallback(userMessage, evidenceCatalog, _preferences = null) {
