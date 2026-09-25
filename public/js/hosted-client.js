@@ -41,6 +41,8 @@
         let accountId = '';
         let searchConsent = false;
         let allowedModels = [];
+        let primaryModel = '';
+        let medicalModel = '';
 
         async function json(url, options = {}) {
             const response = await fetchImpl(url, {
@@ -111,6 +113,8 @@
             get version() { return version; },
             get searchConsent() { return searchConsent; },
             get allowedModels() { return [...allowedModels]; },
+            get primaryModel() { return primaryModel; },
+            get medicalModel() { return medicalModel; },
             get accountId() { return accountId; },
             get csrfToken() { return csrfToken; },
             get error() { return failure; },
@@ -135,6 +139,11 @@
                 version = data.version;
                 searchConsent = data.searchConsent === true;
                 allowedModels = Array.isArray(data.models) ? data.models.map(String).filter(Boolean) : [];
+                primaryModel = String(data.primaryModel || '');
+                medicalModel = String(data.medicalModel || primaryModel);
+                if (!allowedModels.includes(primaryModel) || !allowedModels.includes(medicalModel)) {
+                    throw new Error('Aura returned an invalid model configuration.');
+                }
                 values = new Map(Object.entries(data.storage || {}));
                 client.settingsStorage = deviceSettingsStorage(localStorage, accountId);
                 enabled = true;

@@ -632,6 +632,21 @@ button:disabled {
     color: var(--accent) !important;
 }
 
+.save-chat-button {
+    flex-shrink: 0;
+    border: 0;
+    border-radius: 8px;
+    padding: 4px 6px;
+    background: var(--accent-faint);
+    color: var(--text-strong);
+    font-size: 0.72rem;
+    font-weight: 700;
+}
+
+.save-chat-button:hover {
+    background: var(--button-bg-hover);
+}
+
 .workspace-stage {
     display: flex;
     flex: 1;
@@ -815,6 +830,26 @@ button:disabled {
     border-color: var(--bubble-ai-border);
     color: var(--text-main);
     border-bottom-left-radius: 10px;
+}
+
+.chat-bubble.ai > * + * {
+    margin-top: 0.9rem;
+}
+
+.chat-bubble.ai :is(ul, ol) {
+    padding-left: 1.4em;
+}
+
+.chat-bubble.ai ul {
+    list-style: disc;
+}
+
+.chat-bubble.ai ol {
+    list-style: decimal;
+}
+
+.chat-bubble.ai li + li {
+    margin-top: 0.45rem;
 }
 
 :root[data-theme="light"] .chat-bubble.user {

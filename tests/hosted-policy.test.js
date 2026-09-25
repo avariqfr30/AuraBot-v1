@@ -18,6 +18,8 @@ const CONFIG = {
     OIDC_CLIENT_SECRET: 'not-a-real-secret',
     AURA_LOCAL_MODELS: 'medgemma1.5:4b',
     AURA_CLOUD_MODELS: 'gpt-oss:120b-cloud',
+    AURA_PRIMARY_MODEL: 'gpt-oss:120b-cloud',
+    AURA_MEDICAL_MODEL: 'medgemma1.5:4b',
     OLLAMA_URL: 'http://127.0.0.1:11434',
     CHROMA_URL: 'http://127.0.0.1:8000',
     EMBEDDING_MODEL: 'bge-m3:latest',
@@ -39,6 +41,8 @@ test('hosted mode fails closed without identity, database, and HTTPS configurati
 
 test('model catalog is explicit and treats Ollama cloud aliases as cloud', () => {
     const config = resolveHostedConfig(CONFIG);
+    assert.equal(config.primaryModel, 'gpt-oss:120b-cloud');
+    assert.equal(config.medicalModel, 'medgemma1.5:4b');
     assert.equal(authorizeModel(config, 'medgemma1.5:4b', false), 'local');
     assert.equal(authorizeModel(config, 'gpt-oss:120b-cloud'), 'cloud');
     assert.equal(authorizeModel(config, 'bge-m3:latest'), null);
@@ -58,6 +62,23 @@ test('model catalog is explicit and treats Ollama cloud aliases as cloud', () =>
     assert.deepEqual(filterHostedModels(config, tags, true).models.map((model) => model.name), [
         'medgemma1.5:4b', 'gpt-oss:120b-cloud'
     ]);
+});
+
+test('each client can configure a local conversational model without cloud inference', () => {
+    const localConfig = {
+        ...CONFIG,
+        AURA_LOCAL_MODELS: 'large-local:120b,medgemma1.5:4b',
+        AURA_CLOUD_MODELS: '',
+        AURA_PRIMARY_MODEL: 'large-local:120b'
+    };
+    const resolved = resolveHostedConfig(localConfig);
+    assert.equal(resolved.primaryModel, 'large-local:120b');
+    assert.equal(resolved.medicalModel, 'medgemma1.5:4b');
+    assert.equal(authorizeModel(resolved, 'large-local:120b'), 'local');
+    assert.equal(authorizeModel(resolved, 'gpt-oss:120b-cloud'), null);
+    assert.throws(() => resolveHostedConfig({ ...localConfig, AURA_PRIMARY_MODEL: 'unlisted:120b' }), /AURA_PRIMARY_MODEL/);
+    assert.throws(() => resolveHostedConfig({ ...localConfig, AURA_PRIMARY_MODEL: 'medgemma1.5:4b' }), /AURA_PRIMARY_MODEL/);
+    assert.throws(() => resolveHostedConfig({ ...localConfig, AURA_MEDICAL_MODEL: 'unlisted:medical' }), /AURA_MEDICAL_MODEL/);
 });
 
 test('profile access requires membership in the authenticated account', () => {

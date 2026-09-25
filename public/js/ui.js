@@ -130,6 +130,10 @@ function showSourcesModal(links = []) {
 }
 
 function renderEmptyState() {
+    const activeChat = window.chatManager?.getChat(window.chatManager.getActiveChatId());
+    const retentionNote = activeChat?.retention === 'saved'
+        ? 'This chat is saved to your profile.'
+        : 'This chat is temporary and disappears when you leave or reload. Use Save on its tab if you want to keep it.';
     chatMessages.classList.add('is-empty');
     chatMessages.innerHTML = `
         <section class="empty-state-panel" aria-label="Start a new conversation">
@@ -145,7 +149,7 @@ function renderEmptyState() {
                 </svg>
             </div>
             <h2 class="empty-state-title">What do you want to work through?</h2>
-            <p class="empty-state-subtitle">Talk naturally. Aura will stay with the current topic, use personal context only when it fits, and offer practical help without pushing it.</p>
+            <p class="empty-state-subtitle">${retentionNote}</p>
             <div class="prompt-chip-grid">
                 <button type="button" class="prompt-chip" data-prompt-suggestion="I want to talk through something that has been on my mind.">Talk something through</button>
                 <button type="button" class="prompt-chip" data-prompt-suggestion="Help me make a calm, realistic plan for what I need to do.">Make a calm plan</button>
@@ -672,9 +676,24 @@ function renderChatList(chats, activeChatId) {
         selectButton.tabIndex = chat.id === activeChatId ? 0 : -1;
 
         const chatTitle = document.createElement('span');
-        chatTitle.textContent = chat.title;
+        chatTitle.textContent = chat.retention === 'temporary'
+            ? `${chat.title} · Temporary`
+            : chat.title;
         chatTitle.className = 'chat-tab-title';
         selectButton.appendChild(chatTitle);
+
+        if (chat.retention === 'temporary') {
+            const saveBtn = document.createElement('button');
+            saveBtn.type = 'button';
+            saveBtn.className = 'save-chat-button';
+            saveBtn.dataset.chatId = chat.id;
+            saveBtn.setAttribute('aria-label', `Save ${chat.title}`);
+            saveBtn.textContent = 'Save';
+            chatTab.appendChild(selectButton);
+            chatTab.appendChild(saveBtn);
+        } else {
+            chatTab.appendChild(selectButton);
+        }
 
         const deleteBtn = document.createElement('button');
         deleteBtn.type = 'button';
@@ -683,7 +702,6 @@ function renderChatList(chats, activeChatId) {
         deleteBtn.setAttribute('aria-label', `Delete ${chat.title}`);
         deleteBtn.innerHTML = `<svg class="h-4 w-4" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clip-rule="evenodd" /></svg>`;
 
-        chatTab.appendChild(selectButton);
         chatTab.appendChild(deleteBtn);
         chatList.appendChild(chatTab);
     });

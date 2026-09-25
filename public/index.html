@@ -202,7 +202,7 @@
                 <div id="hostedAccountSettings" class="hidden space-y-3 rounded-2xl border border-white/10 p-4">
                     <h4 class="text-sm font-semibold text-gray-200">Your Aura Account</h4>
                     <p class="text-xs text-gray-400">Chats and approved memories sync to your signed-in Aura account. Personal Intelligence remains optional.</p>
-                    <p class="text-xs text-gray-400">GPT-OSS 120B Cloud is Aura’s primary model and runs remotely through the local Ollama API. Ollama states that cloud prompts and responses use zero data retention and are never logged or used for training. <a href="https://ollama.com/privacy" target="_blank" rel="noopener noreferrer" class="content-link">Read Ollama’s privacy policy</a>.</p>
+                    <p class="text-xs text-gray-400">This deployment chooses which Ollama models Aura can use. Local models process prompts on the client’s Ollama server. An Ollama Cloud model sends prompts and responses to Ollama Cloud for transient processing; Ollama says it does not keep that content beyond the request or train on it, while limited usage metadata may be retained. <a href="https://ollama.com/privacy" target="_blank" rel="noopener noreferrer" class="content-link">Read Ollama’s privacy policy</a>.</p>
                     <label class="flex items-start justify-between gap-4 text-sm" for="externalResearchConsentCheckbox">
                         <span>Allow external web research through Serper</span>
                         <input id="externalResearchConsentCheckbox" type="checkbox" class="mt-1 h-4 w-4 rounded" data-block-during-response="true">
@@ -278,6 +278,7 @@
     <script src="js/chat-tool-state.js"></script>
     <script src="js/feedback-learning.js"></script>
     <script src="js/chat-feedback-state.js"></script>
+    <script src="js/chat-retention.js"></script>
     <script src="js/hosted-client.js"></script>
     <script src="js/aura-prompts.js"></script>
     <script src="js/response-sanitizer.js"></script>

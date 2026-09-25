@@ -3,6 +3,13 @@
     if (typeof module === 'object' && module.exports) module.exports = api;
     if (root) root.AURA_RESPONSE_ADAPTATION = api;
 })(typeof globalThis !== 'undefined' ? globalThis : this, function createResponseAdaptation() {
+    function isUncertainAccessQuestion(message = '', route = '') {
+        const text = String(message || '').toLowerCase();
+        return !String(route || '').includes('Search') &&
+            /\b(?:event|registration|workshop|class|course|session|program)\b/.test(text) &&
+            /\b(?:can i (?:still )?(?:attend|join|register|sign up|enroll)|is it too late to (?:attend|join|register|sign up|enroll)|is there (?:still )?(?:a|any) (?:way|chance) to (?:attend|join|register|sign up|enroll)|do i (?:still )?have (?:a|any) chance to (?:attend|join|register|sign up|enroll))\b/.test(text);
+    }
+
     function resolve({ message = '', route = '', history = [], continuity = null, stance = null } = {}) {
         const text = String(message || '').toLowerCase().trim();
         const previousAi = [...(Array.isArray(history) ? history : [])]
@@ -11,19 +18,22 @@
         const informational = /\b(?:what is|what are|explain|define|tell me about|how does|why does)\b/.test(text) &&
             !/\b(?:i feel|i'm|i am|my|me right now)\b/.test(text);
         const explicitVenting = /\b(?:just need to vent|let me vent|just listen|need you to listen|don'?t need (?:advice|solutions)|no (?:advice|solutions))\b/.test(text);
+        const declinedExercise = /\b(?:don'?t|do not|no|not looking for)\b.{0,30}\b(?:worksheet|exercise|tool|coping list|tips|advice)\b/.test(text);
+        const noAssumedCause = /\b(?:don'?t|do not) (?:assume|guess) (?:why|the cause|what caused it)\b/.test(text);
         const actionRequest = /\b(?:help me (?:make|build|organize|prepare|start)|make (?:me )?a plan|what should i do|next steps?|step[- ]by[- ]step|organize what|prepare what)\b/.test(text);
         const historical = /\b(?:last year|last month|years? ago|used to|back then|in the past|i am okay now|i'm okay now)\b/.test(text);
         const acuteDistress = !historical && (
             /\b(?:right now|currently|at this moment)\b.*\b(?:panic|panicking|spiral|can'?t cope|heart racing|can'?t breathe)\b/.test(text) ||
             /\b(?:i'm|i am) panicking\b|\bheart is racing\b|\bhelp me (?:calm down|slow down|breathe)\b/.test(text)
         );
-        const emotionalDisclosure = !informational && /\b(?:i feel|i'm|i am|feeling|lonely|sad|hurt|afraid|scared|anxious|stressed|overwhelmed|hopeless)\b/.test(text);
+        const emotionalDisclosure = !informational && /\b(?:i feel|i felt|i'm|i am|feeling|lonely|sad|hurt|afraid|scared|anxious|stressed|overwhelmed|hopeless|embarrassed|ashamed)\b/.test(text);
         const lowBandwidth = acuteDistress || /\b(?:overwhelmed|too much|can'?t focus|cannot focus|exhausted|drained|one thing at a time|simple plan)\b/.test(text);
         const explicitDirect = /\b(?:be direct|tell me straight|straight answer|don'?t sugarcoat|do not sugarcoat|just tell me)\b/.test(text);
         const explicitGentle = /\b(?:be gentle|go easy on me|soften the answer)\b/.test(text);
         const noQuestions = explicitVenting || /\b(?:don'?t ask|do not ask|no questions|just answer)\b/.test(text);
         const clinicianContext = /\b(?:psychiatrist|therapist|psychologist|doctor|clinician|pharmacist|appointment)\b/.test(text);
         const urgentProfessional = /\b(?:hurt myself|kill myself|can'?t stay safe|cannot stay safe|overdose|severe chest pain)\b/.test(text);
+        const uncertainAccess = isUncertainAccessQuestion(message, route);
 
         let primaryMode = route.includes('Search') ? 'research' : 'clarify';
         let secondaryMode = 'none';
@@ -71,12 +81,15 @@
         const responseGoals = [];
         if (primaryMode === 'research') responseGoals.push('Answer with evidence-backed clarity');
         if (primaryMode === 'clarify') responseGoals.push('Explain directly in plain language');
+        if (uncertainAccess) responseGoals.push('State what is known and what access rule is unknown first; give one concrete check, without a list of speculative options');
         if (primaryMode === 'soothe') responseGoals.push('Help stabilize the immediate moment before expanding');
         if (primaryMode === 'reflect') responseGoals.push(
             explicitVenting
                 ? 'Make space for the user without rushing into solutions'
-                : 'Show specific understanding before offering guidance'
+                : 'Explore the user’s own meaning from their stated examples; avoid a generic psychology lecture'
         );
+        if (declinedExercise) responseGoals.push('Continue conversationally; do not offer an exercise, tool, coping list, or disguised list of tips');
+        if (noAssumedCause) responseGoals.push('Do not infer a cause or personal history; ask for a concrete example if needed');
         if (primaryMode === 'coach') responseGoals.push('Turn the answer into a manageable next step');
         if (followUpIntent !== 'new_topic') responseGoals.push('Continue the thread without restarting it');
         if (structureNeed === 'high') responseGoals.push('Keep the structure easy to follow');
@@ -103,5 +116,5 @@
         };
     }
 
-    return { resolve };
+    return { resolve, isUncertainAccessQuestion };
 });

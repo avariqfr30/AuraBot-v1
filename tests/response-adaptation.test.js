@@ -20,6 +20,14 @@ assert.equal(venting.secondaryMode, 'none');
 assert.equal(venting.questioningLevel, 'none');
 assert.ok(venting.responseGoals.includes('Make space for the user without rushing into solutions'));
 
+const reflectiveBoundary = adaptation.resolve({
+    message: "I felt embarrassed. I don't want a worksheet, and don't assume why this keeps happening.",
+    route: 'GeneralFriendAgent'
+});
+assert.equal(reflectiveBoundary.primaryMode, 'reflect');
+assert.ok(reflectiveBoundary.responseGoals.some((goal) => /do not offer an exercise/i.test(goal)));
+assert.ok(reflectiveBoundary.responseGoals.some((goal) => /Do not infer a cause/i.test(goal)));
+
 const planning = adaptation.resolve({
     message: 'I feel overwhelmed. Help me make a simple plan for tomorrow.',
     route: 'PlannerAgent'
@@ -58,5 +66,18 @@ const historicalEmotion = adaptation.resolve({
     route: 'GeneralFriendAgent'
 });
 assert.notEqual(historicalEmotion.distressLevel, 'high');
+
+for (const message of [
+    'The event says registration is closed. Can I still attend?',
+    'I declined a workshop. Is it too late to join?',
+    'The class form is closed. Is there still a way to enroll?',
+    'The workshop is full. Do I have any chance to attend?'
+]) {
+    const uncertainAccess = adaptation.resolve({ message, route: 'GeneralFriendAgent' });
+    assert.equal(uncertainAccess.primaryMode, 'clarify');
+    assert.ok(uncertainAccess.responseGoals.some((goal) => /one concrete check/i.test(goal)), message);
+    assert.equal(adaptation.isUncertainAccessQuestion(message, 'GeneralFriendAgent'), true);
+}
+assert.equal(adaptation.isUncertainAccessQuestion('What is a workshop?', 'KnowledgeAgent'), false);
 
 console.log('response adaptation tests passed');

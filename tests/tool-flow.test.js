@@ -40,12 +40,27 @@ const sandbox = { window, chatManager: manager, console };
 vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../public/js/chat-logic.js'), 'utf8') + `
     globalThis.api = {
         deriveExplicitToolRequest, runToolUseAgent, finalizeReplyWithProactiveTool,
-        reviewMedicalReplyIfNeeded
+        reviewMedicalReplyIfNeeded, getConfiguredRoutingModels, getModelPreference,
+        calibrateUncertainAccessReply, deriveHeuristicRoute, deriveHeuristicSourceNeed,
+        runEvidenceDecisionAgent
     };
 `, sandbox);
 const api = sandbox.api;
 
 (async () => {
+    for (const message of [
+        "I keep replaying a meeting where my manager criticized my report. I felt embarrassed. Can you help me understand what's happening?",
+        "I felt ashamed after my friend cancelled. I'm telling myself they dislike me. Why am I taking it this way?",
+        "I keep replaying what I said at dinner. What might I be assuming?",
+        "I wasn't invited to one team lunch, and I thought my coworkers dislike me. I don't have enough evidence for that. Why did I make that leap?"
+    ]) {
+        const route = api.deriveHeuristicRoute(message);
+        assert.notEqual(api.runEvidenceDecisionAgent(message, route).effectiveRoute, 'SearchAgent');
+    }
+    assert.equal(api.runEvidenceDecisionAgent('I felt embarrassed. Can you find research on this?', 'GeneralFriendAgent').effectiveRoute, 'SearchAgent');
+    assert.equal(api.runEvidenceDecisionAgent('Find evidence for this claim in published studies.', 'GeneralFriendAgent').effectiveRoute, 'SearchAgent');
+    assert.equal(api.deriveHeuristicSourceNeed('What are the current clinical guidelines for insomnia?', 'KnowledgeAgent').needsSources, true);
+
     history = [
         { role: 'user', content: 'I keep replaying what I said at dinner.' },
         { role: 'ai', content: 'A thought record could help us separate the facts from the worry.',
@@ -160,5 +175,83 @@ const api = sandbox.api;
     assert.equal(reviewed, 'Draft interpretation.');
     assert.equal(modelCalls.at(-1).options.modelName, 'medgemma1.5:4b');
     assert.match(modelCalls.at(-1).prompt, /Synthetic potassium value: 4\.1 mmol\/L/);
+
+    window.AURA_HOSTED = {
+        enabled: true,
+        primaryModel: 'client-large:70b',
+        medicalModel: 'medgemma1.5:4b',
+        allowedModels: ['client-large:70b', 'medgemma1.5:4b'],
+        settingsStorage: { getItem: () => 'gpt-oss:120b-cloud' }
+    };
+    assert.equal(api.getConfiguredRoutingModels().gptModel, 'client-large:70b');
+    assert.equal(api.getConfiguredRoutingModels().medModel, 'medgemma1.5:4b');
+    assert.equal(api.getModelPreference(), 'auto', 'an old cloud override must not escape this client allowlist');
+
+    const listeningTurn = { primaryMode: 'reflect', questioningLevel: 'none' };
+    const listened = await api.finalizeReplyWithProactiveTool(
+        'Blanking in front of colleagues can feel exposing. It makes sense that the moment stayed with you.\n\nIf you want to share more, I’m here to listen. Whatever you need, I’m with you.',
+        'I just need you to listen.', null, 'GeneralFriendAgent', undefined,
+        listeningTurn, 'chat-1'
+    );
+    assert.match(listened, /Blanking in front of colleagues can feel exposing/);
+    assert.doesNotMatch(listened, /If you want to share more|Whatever you need/);
+    const sameParagraphClosing = await api.finalizeReplyWithProactiveTool(
+        'Freezing during rehearsal felt exposing. It makes sense that it stayed with you. You asked to be heard, and I’m here to hold space for it.',
+        'I just need you to listen.', null, 'GeneralFriendAgent', undefined,
+        listeningTurn, 'chat-1'
+    );
+    assert.match(sameParagraphClosing, /Freezing during rehearsal felt exposing/);
+    assert.doesNotMatch(sameParagraphClosing, /hold space|I’m here/);
+    const ordinaryReply = await api.finalizeReplyWithProactiveTool(
+        'A concrete answer.\n\nIf you want to share more, I’m here to listen.',
+        'What else can I do?', null, 'GeneralFriendAgent', undefined,
+        { primaryMode: 'coach', questioningLevel: 'one_if_needed' }, 'chat-1'
+    );
+    assert.match(ordinaryReply, /If you want to share more/);
+    modelReply = "I can't tell whether late entry is allowed from a closed sign-up form. Ask the organizer if they still accept participants or keep a waitlist.";
+    const calibrated = await api.calibrateUncertainAccessReply({
+        draft: 'Most classes have options.\n- Try a waitlist\n- Search social media',
+        userMessage: 'The class sign-up form is closed. Can I still join?',
+        route: 'GeneralFriendAgent', activeModel: 'gpt-oss:120b-cloud'
+    });
+    assert.match(calibrated, /closed sign-up form/i);
+    assert.match(calibrated, /can't tell whether late entry is allowed/i);
+    assert.match(calibrated, /Ask the organizer/i);
+    assert.match(calibrated, /feel|wonder|disappoint|regret/i);
+    modelReply = 'Most classes usually have several ways in.\n- Ask around\n- Try social media';
+    const fallback = await api.calibrateUncertainAccessReply({
+        draft: modelReply,
+        userMessage: 'The event registration is closed. Can I still attend?',
+        route: 'GeneralFriendAgent', activeModel: 'gpt-oss:120b-cloud'
+    });
+    assert.doesNotMatch(fallback, /Most|usually|\n-/);
+    assert.match(fallback, /can't tell/i);
+    assert.match(fallback, /feel|wonder|disappoint|regret/i);
+    modelReply = "Seeing the form closed can feel discouraging. You missed the registration deadline, but I can't tell if late entry is allowed. Ask the organizer.";
+    const unsupportedDeadline = await api.calibrateUncertainAccessReply({
+        draft: modelReply,
+        userMessage: 'The workshop signup is closed. Can I still attend?',
+        route: 'GeneralFriendAgent', activeModel: 'gpt-oss:120b-cloud'
+    });
+    assert.doesNotMatch(unsupportedDeadline, /missed.*deadline/i);
+    assert.match(unsupportedDeadline, /feel|wonder|disappoint/i);
+    modelReply = "It’s frustrating to find a sign-up form closed when you wanted the class. You missed the deadline, but ask around.";
+    const preservedWarmth = await api.calibrateUncertainAccessReply({
+        draft: modelReply,
+        userMessage: 'The class sign-up form is closed. Can I still join?',
+        route: 'GeneralFriendAgent', activeModel: 'gpt-oss:120b-cloud'
+    });
+    assert.match(preservedWarmth, /frustrating to find a sign-up form closed/i);
+    assert.doesNotMatch(preservedWarmth, /missed the deadline/i);
+    assert.match(preservedWarmth, /can't tell/i);
+    const alreadyGood = "Seeing the form closed can feel discouraging. I can't tell whether late entry is allowed. Ask the organizer whether you can still join.";
+    const callsBeforeGoodDraft = modelCalls.length;
+    const unchanged = await api.calibrateUncertainAccessReply({
+        draft: alreadyGood,
+        userMessage: 'The event sign-up form is closed. Can I still attend?',
+        route: 'GeneralFriendAgent', activeModel: 'gpt-oss:120b-cloud'
+    });
+    assert.equal(unchanged, alreadyGood);
+    assert.equal(modelCalls.length, callsBeforeGoodDraft, 'a safe, human reply needs no second model call');
     console.log('tool flow tests passed');
 })().catch((error) => { console.error(error); process.exitCode = 1; });

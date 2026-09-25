@@ -103,7 +103,7 @@ For each reply, Aura selects a bounded context package from relevant approved me
 
 Saved context from an earlier Aura version is retained in a review-only quarantine during migration and is not supplied to the model automatically. It remains visible in Context Notes so the user can explicitly approve an item again or delete profile memory.
 
-GPT-OSS 120B Cloud remains Aura's primary model through the local Ollama API. The hosted UI discloses that inference is remote and links to Ollama's privacy policy. Ollama currently states that prompts and responses use zero data retention, are never logged, and are never used for training. The server allows only explicitly configured model IDs. Personal Intelligence and per-memory approval remain separate controls over what Aura adds to a prompt. Model availability, regional processing, policy changes, quotas, and the Ollama account used by the deployment must be reviewed before accepting clients.
+Each hosted client deployment selects its conversational model with `AURA_PRIMARY_MODEL` and an optional local medical reviewer with `AURA_MEDICAL_MODEL`; both must be in the configured model allowlists. Ollama Cloud can reduce the client's GPU requirement, but a cloud selection sends prompts and responses outside the client's servers for inference. Ollama's current policy says cloud content is processed transiently and is not kept beyond the request or used for training; limited usage metadata remains possible. The hosted UI links to that policy. Personal Intelligence and per-memory approval remain separate controls over what Aura adds to a prompt. Model availability, regional processing, policy changes, quotas, and the Ollama account used by each deployment must be reviewed before accepting clients.
 
 The hosted code has controlled two-account tests, but has not been exercised against a real OIDC provider, PostgreSQL deployment, Chroma service, or HTTPS browser session. Do not open it to clients until the hosted checks in [release verification](docs/release-verification.md) are complete. Deployment, backup, retention, and threat-boundary guidance is in [hosted security operations](docs/hosted-security-operations.md). Serper web-search requests have a separate account-level opt-in because derived search terms leave Aura for another service.
 
@@ -239,6 +239,7 @@ Aura defaults to automatic model routing:
 - GPT-OSS 120B Cloud handles general conversation, planning, tool use, search synthesis, and complex reasoning.
 - MedGemma 1.5 can review medical-document interpretations and complex or current non-emergency medical responses; the conversational model writes the answer.
 - Complex medical turns may use both models. Auto routing can therefore send message content to GPT-OSS Cloud.
+- Hosted client deployments can choose another allowlisted Ollama primary model, local or Ollama Cloud; Auto uses that deployment's configured primary.
 - Acute emergency signals skip the reviewer so deterministic urgent guidance is not delayed.
 - Selecting a specific model in Settings disables automatic switching and cross-model review, except for the urgent safety fallback.
 
@@ -289,6 +290,10 @@ Deleting a chat removes its local feedback authority, clearing Feedback Learning
 ## Tool Support
 
 Aura creates a supported tool for a clear request or immediate grounding need. Other relevant tools are offered first; informational questions, venting, active duplicates, and recent refusals do not trigger optional offers. Generated tool data is checked against the card's required structure, and a creation failure leaves the conversational reply available without a broken card.
+
+## Chat retention
+
+New chats are temporary by default. They stay available in the current page session but are excluded from saved local and hosted profile snapshots; reloading or leaving the page discards them. Use **Save** on a chat tab to keep that chat, its tools, and feedback. Chats created before this change remain saved. An explicit "remember this" request is a separate opt-in memory action and can persist a fact even from a temporary chat.
 
 ## Notes
 

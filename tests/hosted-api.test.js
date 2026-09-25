@@ -5,6 +5,9 @@ const { test } = require('node:test');
 const { newDb } = require('pg-mem');
 const { createHostedStore } = require('../lib/hosted-store');
 const { createDataCipher } = require('../lib/data-crypto');
+const chatRetention = require('../public/js/chat-retention');
+const feedback = require('../public/js/feedback-learning');
+const intelligence = require('../public/js/intelligence-bundle');
 
 Object.assign(process.env, {
     AURA_MODE: 'hosted',
@@ -15,6 +18,11 @@ Object.assign(process.env, {
     OIDC_CLIENT_SECRET: 'test-secret',
     AURA_LOCAL_MODELS: 'medgemma1.5:4b',
     AURA_CLOUD_MODELS: 'gpt-oss:120b-cloud',
+    AURA_PRIMARY_MODEL: 'gpt-oss:120b-cloud',
+    AURA_MEDICAL_MODEL: 'medgemma1.5:4b',
+    EMBEDDING_MODEL: 'bge-m3:latest',
+    OLLAMA_URL: 'http://127.0.0.1:11434',
+    CHROMA_URL: 'http://127.0.0.1:8000',
     SERPER_API_KEY: '',
     AURA_DATA_ENCRYPTION_KEY: Buffer.alloc(32, 5).toString('base64')
 });
@@ -113,6 +121,8 @@ test('hosted API protects account state, profile memory, and cloud inference', a
         const a = await signIn(base, 'alice');
         const b = await signIn(base, 'bob');
         const alice = await (await fetch(`${base}/api/account/bootstrap`, { headers: { Cookie: a } })).json();
+        assert.equal(alice.primaryModel, 'gpt-oss:120b-cloud');
+        assert.equal(alice.medicalModel, 'medgemma1.5:4b');
         aliceAccountId = alice.accountId;
         const bob = await (await fetch(`${base}/api/account/bootstrap`, { headers: { Cookie: b } })).json();
         assert.notEqual(alice.accountId, bob.accountId);
@@ -137,6 +147,50 @@ test('hosted API protects account state, profile memory, and cloud inference', a
             body: JSON.stringify({ version: bob.version, storage: snapshot })
         });
         assert.equal(bobWrite.status, 200);
+        const temporaryCanary = 'TEMPORARY_HOSTED_CANARY';
+        const chatState = {
+            chats: {
+                saved: { id: 'saved', history: [{ role: 'user', content: 'Existing saved chat' }] },
+                temporary: { id: 'temporary', retention: 'temporary', history: [{ role: 'user', content: temporaryCanary }] }
+            },
+            activeChatId: 'temporary',
+            feedbackLearning: feedback.createState(),
+            intelligenceBundle: intelligence.createBundle()
+        };
+        const stateKey = `aura_profile_state_v1:${profileId}`;
+        const aliceBeforeTemporarySync = await (await fetch(`${base}/api/account/bootstrap`, { headers: { Cookie: a } })).json();
+        const temporaryWrite = await fetch(`${base}/api/account/state`, {
+            method: 'PUT',
+            headers: { Cookie: a, Origin: 'https://aura.example', 'X-Aura-CSRF': alice.csrfToken, 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                version: aliceBeforeTemporarySync.version,
+                storage: { ...snapshot, [stateKey]: JSON.stringify(chatRetention.projectForPersistence(chatState)) }
+            })
+        });
+        assert.equal(temporaryWrite.status, 200);
+        const afterTemporarySync = await (await fetch(`${base}/api/account/bootstrap`, { headers: { Cookie: a } })).json();
+        assert.doesNotMatch(afterTemporarySync.storage[stateKey], /TEMPORARY_HOSTED_CANARY/);
+        assert.match(afterTemporarySync.storage[stateKey], /Existing saved chat/);
+        const savedWrite = await fetch(`${base}/api/account/state`, {
+            method: 'PUT',
+            headers: { Cookie: a, Origin: 'https://aura.example', 'X-Aura-CSRF': alice.csrfToken, 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                version: afterTemporarySync.version,
+                storage: {
+                    ...snapshot,
+                    [stateKey]: JSON.stringify(chatRetention.projectForPersistence({
+                        ...chatState,
+                        chats: {
+                            ...chatState.chats,
+                            temporary: { ...chatState.chats.temporary, retention: 'saved' }
+                        }
+                    }))
+                }
+            })
+        });
+        assert.equal(savedWrite.status, 200);
+        const afterExplicitSave = await (await fetch(`${base}/api/account/bootstrap`, { headers: { Cookie: a } })).json();
+        assert.match(afterExplicitSave.storage[stateKey], /TEMPORARY_HOSTED_CANARY/);
         assert.equal((await post('/api/store_memory', {
             profileId,
             text: 'unapproved memory',

@@ -30,12 +30,16 @@ assert.match(prompts.RESPONSE_STYLE_CONTRACT, /Do not end every reply with a que
 assert.match(prompts.RESPONSE_STYLE_CONTRACT, /Do not repeatedly suggest the same tool/i);
 assert.match(prompts.RESPONSE_STYLE_CONTRACT, /respond to the specific feeling/i);
 assert.match(prompts.RESPONSE_STYLE_CONTRACT, /hypothetical details as known facts/i);
+assert.match(prompts.RESPONSE_STYLE_CONTRACT, /availability, deadlines, or policies/i);
 assert.match(prompts.AURA_COMPANION_CONTRACT, /tentative pattern/i);
 assert.match(prompts.AURA_COMPANION_CONTRACT, /user-stated details/i);
 assert.match(prompts.AURA_COMPANION_CONTRACT, /known facts from interpretation/i);
+assert.match(prompts.AURA_COMPANION_CONTRACT, /If the user asks only to be heard/i);
+assert.match(prompts.AURA_COMPANION_CONTRACT, /instead of inventing a personal history/i);
+assert.match(prompts.AURA_COMPANION_CONTRACT, /If the user declines an exercise or tool/i);
 assert.equal(
     crypto.createHash('sha256').update(JSON.stringify(prompts)).digest('hex'),
-    'af67fa5b573df74ba0e662cb99cccfc737ea3324b9e85475aee1a7158b377d59',
+    'd5f044ac35eac9200ad1c694f4e5f0d8e412634805c78e7de1f047be95a4287d',
     'prompt extraction must preserve every prompt byte-for-byte'
 );
 

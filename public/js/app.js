@@ -219,6 +219,11 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
 
     function getPinnedModelNames() {
+        if (window.AURA_HOSTED?.enabled) {
+            const allowed = new Set(window.AURA_HOSTED.allowedModels);
+            return [window.AURA_HOSTED.primaryModel, window.AURA_HOSTED.medicalModel]
+                .filter((model, index, models) => allowed.has(model) && models.indexOf(model) === index);
+        }
         const models = [...new Set([
             window.AURA_CONFIG.defaultModel,
             ...(window.AURA_CONFIG.preferredModels || []),
@@ -247,6 +252,11 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     function resolvePreferredStoredModel(storedModel, availableModels = []) {
         if (storedModel === AUTO_MODEL_OPTION) return AUTO_MODEL_OPTION;
+        if (window.AURA_HOSTED?.enabled) {
+            return window.AURA_HOSTED.allowedModels.includes(storedModel)
+                ? storedModel
+                : AUTO_MODEL_OPTION;
+        }
 
         const preferredModels = getPinnedModelNames();
         const availableSet = new Set(availableModels);
@@ -260,6 +270,12 @@ document.addEventListener('DOMContentLoaded', async () => {
         const preferredAvailableModel = preferredModels.find((modelName) => availableSet.has(modelName) || pinnedSet.has(modelName));
 
         return preferredAvailableModel || storedModel || window.AURA_CONFIG.defaultModel;
+    }
+
+    function getAutoModelLabel() {
+        return window.AURA_HOSTED?.enabled
+            ? `Auto (${window.AURA_HOSTED.primaryModel})`
+            : 'Auto (GPT-OSS primary)';
     }
 
     function isLocationSharingEnabled() {
@@ -658,6 +674,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     function getProgressMessage(message, hasFile = false) {
         const text = String(message || '').toLowerCase();
         if (hasFile) return 'Aura is reading the attachment.';
+        if (/\b(?:just (?:need|want) (?:you )?to listen|just listen|need you to listen|don't need (?:steps|advice|an exercise)|no (?:advice|solutions))\b/.test(text)) {
+            return 'Aura is listening carefully.';
+        }
         if (/\b(source|sources|research|verify|fact-check|citation|latest|current|news)\b/.test(text)) {
             return 'Aura is checking sources quietly.';
         }
@@ -1436,7 +1455,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             }
 
             modelSelectDropdown.innerHTML = [
-                `<option value="${AUTO_MODEL_OPTION}">Auto (GPT-OSS primary)</option>`,
+                `<option value="${AUTO_MODEL_OPTION}">${escapeOptionValue(getAutoModelLabel())}</option>`,
                 ...uniqueModels.map((modelName) => {
                     const isPreferred = getPinnedModelNames().includes(modelName);
                     const label = isPreferred ? `${modelName} (Preferred)` : modelName;
@@ -1446,21 +1465,25 @@ document.addEventListener('DOMContentLoaded', async () => {
         } catch (error) {
             console.error('Failed to load models:', error);
             window.AURA_AVAILABLE_MODELS = [];
+            const fallbackModel = resolvePreferredStoredModel(storedModel, []);
             const fallbackModels = getPrioritizedModels([
                 ...new Set([
-                    ...(storedModel === AUTO_MODEL_OPTION ? [] : [storedModel]),
+                    ...(fallbackModel === AUTO_MODEL_OPTION ? [] : [fallbackModel]),
                     ...getPinnedModelNames()
                 ])
             ]);
             modelSelectDropdown.innerHTML = [
-                `<option value="${AUTO_MODEL_OPTION}">Auto (GPT-OSS primary)</option>`,
+                `<option value="${AUTO_MODEL_OPTION}">${escapeOptionValue(getAutoModelLabel())}</option>`,
                 ...fallbackModels.map((modelName) => `<option value="${escapeOptionValue(modelName)}">${escapeOptionValue(modelName)}</option>`)
             ].join('');
         } finally {
             window.clearTimeout(timeoutId);
         }
 
-        modelSelectDropdown.value = localStorage.getItem(STORAGE_KEYS.MODEL) || storedModel;
+        modelSelectDropdown.value = resolvePreferredStoredModel(
+            localStorage.getItem(STORAGE_KEYS.MODEL) || storedModel,
+            window.AURA_AVAILABLE_MODELS || []
+        );
     }
 
     function refreshProfileScopedUI({ clearStatus = false } = {}) {
@@ -1590,7 +1613,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         syncBehaviorControls();
         const defaultPreference = window.AURA_CONFIG.defaultModelPreference || AUTO_MODEL_OPTION;
         localStorage.setItem(STORAGE_KEYS.MODEL, defaultPreference);
-        modelSelectDropdown.innerHTML = `<option value="${AUTO_MODEL_OPTION}">Auto (GPT-OSS primary)</option>`;
+        modelSelectDropdown.innerHTML = `<option value="${AUTO_MODEL_OPTION}">${escapeOptionValue(getAutoModelLabel())}</option>`;
         modelSelectDropdown.value = defaultPreference;
         syncThinkingModeControls('auto');
         if (locationAccessCheckbox) locationAccessCheckbox.checked = false;
@@ -1748,12 +1771,26 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     chatListContainer.addEventListener('click', async (event) => {
         if (responseInFlight || profileOperationInFlight) return;
+        const saveButton = event.target.closest('.save-chat-button');
         const deleteButton = event.target.closest('.delete-chat-button');
         const chatTab = event.target.closest('[data-chat-id]');
+
+        if (saveButton) {
+            if (!chatManager.saveChat(saveButton.dataset.chatId)) {
+                alert('Could not save this chat. It remains temporary.');
+            }
+            refreshUI();
+            return;
+        }
 
         if (deleteButton) {
             if (confirm('Delete chat?')) {
                 const chatId = deleteButton.dataset.chatId;
+                if (!window.AURA_CHAT_RETENTION.isSavedChat(chatManager.getChat(chatId))) {
+                    chatManager.deleteChat(chatId);
+                    refreshUI();
+                    return;
+                }
                 const profileId = chatManager.getActiveProfileId();
                 const promotedExampleIds = chatManager.getPromotedExampleIdsForChat(chatId);
                 setProfileOperationInFlight(true);

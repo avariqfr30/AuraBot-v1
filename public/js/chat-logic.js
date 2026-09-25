@@ -195,15 +195,22 @@ function buildSessionCacheKey(parts = []) {
 }
 
 function getModelPreference() {
-    return localStorage.getItem(STORAGE_KEYS.MODEL) ||
+    const preference = localStorage.getItem(STORAGE_KEYS.MODEL) ||
         window.AURA_CONFIG.defaultModelPreference ||
         'auto';
+    if (window.AURA_HOSTED?.enabled && preference !== 'auto' &&
+        !window.AURA_HOSTED.allowedModels.includes(preference)) return 'auto';
+    return preference;
 }
 
 function getConfiguredRoutingModels() {
     return {
-        gptModel: window.AURA_CONFIG.modelRouting?.gptModel || 'gpt-oss:120b-cloud',
-        medModel: window.AURA_CONFIG.modelRouting?.medModel || window.AURA_CONFIG.defaultModel
+        gptModel: window.AURA_HOSTED?.enabled
+            ? window.AURA_HOSTED.primaryModel
+            : (window.AURA_CONFIG.modelRouting?.gptModel || 'gpt-oss:120b-cloud'),
+        medModel: window.AURA_HOSTED?.enabled
+            ? window.AURA_HOSTED.medicalModel
+            : (window.AURA_CONFIG.modelRouting?.medModel || window.AURA_CONFIG.defaultModel)
     };
 }
 
@@ -496,6 +503,11 @@ function isEmotionalSupportIntent(message) {
 
     const emotionalSignals = [
         /\bi feel\b/,
+        /\bi felt (?:embarrassed|ashamed|guilty|hurt|anxious|scared|sad|lonely|overwhelmed)\b/,
+        /\bi keep replaying\b/,
+        /\bi(?:'m| am) telling myself\b/,
+        /\bi (?:immediately )?thought\b/,
+        /\bi (?:want|need|would like) to understand (?:why i|my reaction|that leap)\b/,
         /\bi'm feeling\b/,
         /\bi am feeling\b/,
         /\bi'm anxious\b/,
@@ -516,7 +528,6 @@ function isEmotionalSupportIntent(message) {
         /\bhow does\b/,
         /\bresearch\b/,
         /\bcitations?\b/,
-        /\bevidence\b/,
         /\bsource-backed\b/,
         /\blatest\b/,
         /\bcurrent\b/
@@ -538,7 +549,8 @@ function requiresSourceBackedRouting(message) {
         /\bresearch\b/,
         /\bverify\b/,
         /\bfact-check\b/,
-        /\bevidence\b/,
+        /\b(?:find|show|give|provide|cite|look up|search for) (?:me )?(?:the )?evidence\b/,
+        /\b(?:scientific|clinical|published) evidence\b/,
         /\blatest\b/,
         /\bcurrent\b/,
         /\bnews\b/
@@ -776,6 +788,25 @@ function stripRedundantToolInvitation(reply, allowEmpty = false) {
     if (invitation && toolReference && (boundary >= 0 || paragraphs.length > 1 || allowEmpty)) {
         if (boundary >= 0) paragraphs[paragraphs.length - 1] = last.slice(0, boundary + 1);
         else paragraphs.pop();
+    }
+    return normalizeReplyWhitespace(paragraphs.join('\n\n'));
+}
+
+function trimListenOnlyClosing(reply) {
+    const paragraphs = normalizeReplyWhitespace(reply).split(/\n{2,}/);
+    const ending = paragraphs[paragraphs.length - 1].replace(/’/g, "'").trim();
+    if (paragraphs.length > 1 &&
+        /^(?:if you(?:'d like| want)|you can|i'm here|whatever you need)\b/i.test(ending) &&
+        /\b(?:share|talk|tell|listen|with you|anything)\b/i.test(ending)) {
+        paragraphs.pop();
+    } else {
+        const last = paragraphs[paragraphs.length - 1];
+        const boundary = Math.max(last.lastIndexOf('. '), last.lastIndexOf('! '), last.lastIndexOf('? '));
+        const finalSentence = (boundary >= 0 ? last.slice(boundary + 2) : last).replace(/’/g, "'");
+        if (boundary >= 0 && finalSentence.length <= 240 &&
+            /\b(?:i'm here|i'm with you|whatever you need|hold space|feel free to|you can tell me)\b/i.test(finalSentence)) {
+            paragraphs[paragraphs.length - 1] = last.slice(0, boundary + 1);
+        }
     }
     return normalizeReplyWhitespace(paragraphs.join('\n\n'));
 }
@@ -1627,6 +1658,7 @@ class ChatManager {
         return {
             chats: {},
             activeChatId: null,
+            lastSavedChatId: null,
             localContentStore: buildChatScopedProfile(),
             intelligenceBundle: window.AURA_INTELLIGENCE_BUNDLE.createBundle(),
             feedbackLearning: window.AURA_FEEDBACK.createState()
@@ -1645,6 +1677,7 @@ class ChatManager {
         );
         Object.values(safeState.chats).forEach((chat) => {
             if (!chat || typeof chat !== 'object') return;
+            chat.retention = window.AURA_CHAT_RETENTION.isSavedChat(chat) ? 'saved' : 'temporary';
             chat.history = (Array.isArray(chat.history) ? chat.history : []).map((message) => {
                 if (!message || typeof message !== 'object') return message;
                 const normalizedMessage = {
@@ -1724,6 +1757,14 @@ class ChatManager {
             entries: migratedFeedbackEntries
         };
         safeState.feedbackLearning = window.AURA_FEEDBACK.normalizeState(safeState.feedbackLearning);
+        const savedChatIds = Object.keys(safeState.chats).filter((id) => (
+            window.AURA_CHAT_RETENTION.isSavedChat(safeState.chats[id])
+        ));
+        safeState.lastSavedChatId = savedChatIds.includes(safeState.lastSavedChatId)
+            ? safeState.lastSavedChatId
+            : (savedChatIds.includes(safeState.activeChatId)
+                ? safeState.activeChatId
+                : (savedChatIds[0] || null));
 
         return safeState;
     }
@@ -1737,7 +1778,9 @@ class ChatManager {
     }
 
     saveState() {
-        return this.profileManager.saveProfileState(this.state);
+        return this.profileManager.saveProfileState(
+            window.AURA_CHAT_RETENTION.projectForPersistence(this.state)
+        );
     }
 
     listProfiles() {
@@ -1837,10 +1880,14 @@ class ChatManager {
 
     createNewChat() {
         const id = Date.now().toString();
+        if (window.AURA_CHAT_RETENTION.isSavedChat(this.state.chats[this.state.activeChatId])) {
+            this.state.lastSavedChatId = this.state.activeChatId;
+        }
 
         this.state.chats[id] = {
             id,
             title: 'New Chat',
+            retention: 'temporary',
             history: [],
             tools: {},
             completed_tasks: [],
@@ -1857,9 +1904,25 @@ class ChatManager {
         this.saveState();
     }
 
+    saveChat(chatId = this.state.activeChatId) {
+        const chat = this.state.chats[chatId];
+        if (!chat) return false;
+        if (window.AURA_CHAT_RETENTION.isSavedChat(chat)) return true;
+        const previousLastSavedChatId = this.state.lastSavedChatId;
+        chat.retention = 'saved';
+        this.state.lastSavedChatId = chatId;
+        if (this.saveState()) return true;
+        chat.retention = 'temporary';
+        this.state.lastSavedChatId = previousLastSavedChatId;
+        return false;
+    }
+
     setActiveChat(id) {
         if (!this.state.chats[id]) return;
         this.state.activeChatId = id;
+        if (window.AURA_CHAT_RETENTION.isSavedChat(this.state.chats[id])) {
+            this.state.lastSavedChatId = id;
+        }
         this.saveState();
     }
 
@@ -1874,6 +1937,11 @@ class ChatManager {
         );
         this.behaviorAnalysisVersions.delete(id);
         delete this.state.chats[id];
+        if (this.state.lastSavedChatId === id) {
+            this.state.lastSavedChatId = Object.keys(this.state.chats).find((chatId) => (
+                window.AURA_CHAT_RETENTION.isSavedChat(this.state.chats[chatId])
+            )) || null;
+        }
 
         const remainingChatIds = Object.keys(this.state.chats);
         this.state.activeChatId = remainingChatIds.length ? remainingChatIds[0] : null;
@@ -1930,7 +1998,8 @@ class ChatManager {
             if (
                 message.source !== 'feedback_retry' &&
                 normalUserTurnCount % 2 === 0 &&
-                this.isPersonalIntelligenceActive()
+                this.isPersonalIntelligenceActive() &&
+                window.AURA_CHAT_RETENTION.isSavedChat(chat)
             ) {
                 this.runBehaviorAnalyzer(chatId).catch((error) => {
                     console.warn('Background preference analysis unavailable:', error.name);
@@ -2113,7 +2182,8 @@ class ChatManager {
     }
 
     recordInteractionPreferenceSignals(previousPreferences, nextPreferences, chatId, messageId = '') {
-        if (!this.isPersonalIntelligenceActive()) return;
+        if (!this.isPersonalIntelligenceActive() ||
+            !window.AURA_CHAT_RETENTION.isSavedChat(this.getChat(chatId))) return;
         const previous = sanitizeResponsePreferences(previousPreferences, DEFAULT_RESPONSE_PREFERENCES);
         const next = sanitizeResponsePreferences(nextPreferences, previous);
         [
@@ -2143,7 +2213,8 @@ class ChatManager {
     }
 
     recordExplicitPreferenceSignals(message, chatId, messageId = '') {
-        if (!this.isPersonalIntelligenceActive()) return;
+        if (!this.isPersonalIntelligenceActive() ||
+            !window.AURA_CHAT_RETENTION.isSavedChat(this.getChat(chatId))) return;
         window.AURA_INTELLIGENCE_BUNDLE.inferExplicitPreferenceSignals(message)
             .forEach((preference) => {
                 this.state.intelligenceBundle = window.AURA_INTELLIGENCE_BUNDLE.recordSignal(
@@ -2284,7 +2355,8 @@ class ChatManager {
             chat,
             messageId,
             patch,
-            this.isPersonalIntelligenceActive()
+            this.isPersonalIntelligenceActive() &&
+                window.AURA_CHAT_RETENTION.isSavedChat(chat)
         );
         if (!nextState) return null;
         this.state.feedbackLearning = nextState;
@@ -2324,7 +2396,8 @@ class ChatManager {
             this.state.feedbackLearning,
             this.getChat(chatId),
             messageId,
-            this.isPersonalIntelligenceActive()
+            this.isPersonalIntelligenceActive() &&
+                window.AURA_CHAT_RETENTION.isSavedChat(this.getChat(chatId))
         );
     }
 
@@ -2333,7 +2406,9 @@ class ChatManager {
     }
 
     markFeedbackPromoted(chatId, messageId, exampleId) {
-        if (!this.isPersonalIntelligenceActive() || !this.getResponseFeedback(chatId, messageId)) return;
+        if (!this.isPersonalIntelligenceActive() ||
+            !window.AURA_CHAT_RETENTION.isSavedChat(this.getChat(chatId)) ||
+            !this.getResponseFeedback(chatId, messageId)) return;
         this.state.feedbackLearning = window.AURA_FEEDBACK.markPromoted(
             this.state.feedbackLearning,
             messageId,
@@ -2379,7 +2454,7 @@ class ChatManager {
             version: 'aura-profile-export-v3',
             profile: this.getActiveProfile(),
             personalIntelligenceState: this.getPersonalIntelligenceState(),
-            state: this.state,
+            state: window.AURA_CHAT_RETENTION.projectForPersistence(this.state),
             settings: {
                 theme: localStorage.getItem(STORAGE_KEYS.THEME),
                 model: localStorage.getItem(STORAGE_KEYS.MODEL),
@@ -2804,11 +2879,15 @@ async function finalizeReplyWithProactiveTool(
         await finalizeAssistantReply(rawReply, userMessage),
         chatId
     );
-    if (!cleanReply && !recommendation) return null;
-    if (!recommendation) return normalizeReplyWhitespace(stripToolTags(cleanReply));
+    const styledReply = turnSupport?.primaryMode === 'reflect' &&
+        turnSupport?.questioningLevel === 'none'
+        ? trimListenOnlyClosing(cleanReply)
+        : cleanReply;
+    if (!styledReply && !recommendation) return null;
+    if (!recommendation) return normalizeReplyWhitespace(stripToolTags(styledReply));
 
     const relevantReply = stripRedundantToolInvitation(
-        cleanReply, recommendation.delivery === 'create'
+        styledReply, recommendation.delivery === 'create'
     );
     const replyBody = relevantReply || recommendation.userLine || 'I can open a tool to help with this.';
     const augmented = attachProactiveToolTag(replyBody, recommendation);
@@ -3333,6 +3412,7 @@ async function runEvidenceComposerAgent(context) {
         );
         const osintReport = await postJson(API_ENDPOINTS.osint, searchPlan);
         const evidenceCatalog = buildEvidenceCatalog(osintReport);
+        if (!evidenceCatalog.length) return runDirectComposerAgent(withoutSearchEvidence(context));
         const evidencePrompt = evidenceCatalog.length
             ? buildAuraEvidencePrompt({
                 systemPrompt: context.responseSystemPrompt,
@@ -3353,6 +3433,7 @@ async function runEvidenceComposerAgent(context) {
         const reviewedDraft = evidencePrompt
             ? await reviewMedicalReplyIfNeeded({ context, prompt: evidencePrompt, draft })
             : null;
+        if (!reviewedDraft) return runDirectComposerAgent(withoutSearchEvidence(context));
         const renderedReplyBody = reviewedDraft ||
             buildDeterministicSearchFallback(
                 context.contextualUserMessage,
@@ -3386,14 +3467,63 @@ async function runEvidenceComposerAgent(context) {
             )
         );
     } catch (error) {
-        if (error.code === 'SEARCH_CONSENT_REQUIRED') throw error;
         responseRuntime.throwIfAborted();
         console.error('[SearchAgent] Full failure details:', error);
-        return attachHighRiskSafetyRecommendations(
-            buildHumanFallbackAnswer(context.contextualUserMessage, context.effectiveRoute),
-            context.highRiskRecommendations
-        );
+        return runDirectComposerAgent(withoutSearchEvidence(context));
     }
+}
+
+function withoutSearchEvidence(context) {
+    return {
+        ...context,
+        turnProfile: `${context.turnProfile}\nExternal search was unavailable for this turn. Answer from what is known without implying that live sources were checked. If the user specifically asked for current facts or citations, say those could not be verified here.`
+    };
+}
+
+async function calibrateUncertainAccessReply({
+    draft, userMessage, route = '', activeModel, modelDecision = null
+}) {
+    if (!draft || !window.AURA_RESPONSE_ADAPTATION.isUncertainAccessQuestion(userMessage, route)) {
+        return draft;
+    }
+
+    const acknowledgment = /\b(?:closed|registration|sign[- ]?up)\b/i.test(userMessage)
+        ? 'Seeing registration marked closed when you wanted to join can feel discouraging.'
+        : /\b(?:declined|turned down|said no)\b/i.test(userMessage)
+            ? 'Changing your mind after declining can leave you wondering whether the chance is gone.'
+            : 'It can feel uncertain when you do not know whether a place is still available.';
+    const hasWarmth = (text) => /\b(?:feel\w*|wonder\w*|disappoint\w*|regret\w*|understandable|frustrat\w*)\b/i.test(text);
+    const isAcceptable = (text) => {
+        const normalized = text.replace(/’/g, "'");
+        return text.length >= 20 && text.length <= 850 &&
+            text.split(/\s+/).length <= 110 &&
+            !/\n\s*(?:[-*]|\d+[.)])/.test(text) &&
+            !/\b(?:most|usually|often|many)\b/i.test(text) &&
+            !(/\b(?:missed|past|passed|expired)\b.{0,40}\b(?:deadline|cutoff|cut-off)\b/i.test(normalized) &&
+                !/\b(?:deadline|cutoff|cut-off)\b/i.test(userMessage)) &&
+            !(/\b(?:full|sold out)\b/i.test(normalized) && !/\b(?:full|sold out)\b/i.test(userMessage)) &&
+            /\b(?:can't tell|cannot tell|don't know|not enough information|only the organizer can confirm|depends on|unclear|can't confirm)\b/i.test(normalized);
+    };
+    const original = normalizeReplyWhitespace(stripToolTags(draft));
+    if (isAcceptable(original)) {
+        return hasWarmth(original) ? original : `${acknowledgment} ${original}`;
+    }
+    const revised = await _callLLM(
+        `Revise Aura's reply to this user-specific access question. Use only what the user supplied. A closed form does not prove a deadline passed or that an event is full. In two to four natural sentences, briefly acknowledge the situation without assigning feelings the user did not express, state what cannot be determined, then give one direct check. Keep a warm conversational voice. Do not use a list, generalized claims about what most places do, or an availability promise. Return only the user-facing reply.\n\nUser: ${userMessage}\n\nDraft: ${draft}`,
+        { modelName: activeModel, callType: 'cleanup', routeDecision: modelDecision }
+    );
+    const clean = normalizeReplyWhitespace(stripToolTags(revised));
+    if (isAcceptable(clean)) {
+        return hasWarmth(clean) ? clean : `${acknowledgment} ${clean}`;
+    }
+    const opening = clean.match(/^.{20,180}?[.!?](?=\s|$)/)?.[0] || '';
+    const normalizedOpening = opening.replace(/’/g, "'");
+    const safeOpening = /\b(?:feel|frustrat\w*|disappoint\w*|regret\w*|understandable|worr\w*|wonder\w*)\b/i.test(normalizedOpening) &&
+        !/\b(?:most|usually|often|many)\b/i.test(normalizedOpening) &&
+        !(/\b(?:missed|past|passed|expired)\b.{0,40}\b(?:deadline|cutoff|cut-off)\b/i.test(normalizedOpening) &&
+            !/\b(?:deadline|cutoff|cut-off)\b/i.test(userMessage)) &&
+        !(/\b(?:full|sold out)\b/i.test(normalizedOpening) && !/\b(?:full|sold out)\b/i.test(userMessage));
+    return `${safeOpening ? opening : acknowledgment} I can't tell whether late entry is allowed from what you shared. Ask the organizer directly whether you can still join.`;
 }
 
 async function runDirectComposerAgent(context) {
@@ -3417,8 +3547,16 @@ async function runDirectComposerAgent(context) {
         draft
     });
 
+    const calibratedDraft = await calibrateUncertainAccessReply({
+        draft: reviewedDraft,
+        userMessage: context.originalUserMessage || context.contextualUserMessage,
+        route: context.effectiveRoute,
+        activeModel: context.activeModel,
+        modelDecision: context.modelDecision
+    });
+
     return (await finalizeAgenticReply(
-        reviewedDraft,
+        calibratedDraft,
         context.originalUserMessage || context.contextualUserMessage,
         context.proactiveRecommendation,
         context.highRiskRecommendations,

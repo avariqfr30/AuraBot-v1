@@ -811,6 +811,8 @@ if (hostedConfig.enabled) {
             version: account.version,
             searchConsent: account.searchConsent,
             models: hostedModels(),
+            primaryModel: hostedConfig.primaryModel,
+            medicalModel: hostedConfig.medicalModel,
             csrfToken: req.csrfToken
         });
     });

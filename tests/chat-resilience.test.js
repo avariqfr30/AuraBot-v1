@@ -55,10 +55,16 @@ function harness({ fetchImpl, retrievalTimeoutMs = 15 } = {}) {
     vm.runInNewContext(handlerSource + `
         refreshUI = () => {};
         globalThis.handlers = { handleSendMessage, triggerAIFollowUp, processToolTags, addAssistantArtifact,
-            setResponseInFlight, handleResponseInterruption };
+            setResponseInFlight, handleResponseInterruption, getProgressMessage };
     });`, sandbox);
     return { runtime, nodes, messages, tools, sandbox, ...sandbox.handlers };
 }
+
+test('listening-only request uses a listening status rather than a planning status', () => {
+    const h = harness();
+    assert.equal(h.getProgressMessage("I don't need steps or an exercise; I just need you to listen."),
+        'Aura is listening carefully.');
+});
 
 test('stopping a response releases actual chat controls without saving a late assistant reply', async () => {
     let finish;

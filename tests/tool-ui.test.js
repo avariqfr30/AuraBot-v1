@@ -6,15 +6,16 @@ const path = require('node:path');
 const vm = require('node:vm');
 
 const source = fs.readFileSync(path.resolve(__dirname, '../public/js/ui.js'), 'utf8');
+const chatMessagesNode = { classList: { add() {} }, innerHTML: '' };
 const sandbox = {
     document: {
-        getElementById: () => ({}),
+        getElementById: (id) => id === 'chatMessages' ? chatMessagesNode : {},
         addEventListener: () => {},
         createElement: () => ({ innerHTML: '', className: '', dataset: {} })
     },
     window: {}
 };
-vm.runInNewContext(source + '\n globalThis.toolRenderers = { renderChecklistInModal, renderBreathingExerciseInModal, renderAffirmationCardInModal, renderMoodTrackerInModal, renderThoughtRecordInModal };', sandbox);
+vm.runInNewContext(source + '\n globalThis.toolRenderers = { renderChecklistInModal, renderBreathingExerciseInModal, renderAffirmationCardInModal, renderMoodTrackerInModal, renderThoughtRecordInModal, renderEmptyState };', sandbox);
 
 function render(name, tool) {
     const container = { children: [], appendChild(node) { this.children.push(node); } };
@@ -58,5 +59,15 @@ assert.doesNotThrow(() => render('renderMoodTrackerInModal', {
 assert.doesNotThrow(() => render('renderBreathingExerciseInModal', {
     title: 'Old breathing card', cycle: null
 }));
+
+sandbox.window.chatManager = {
+    getActiveChatId: () => 'saved-chat',
+    getChat: () => ({ retention: 'saved' })
+};
+sandbox.toolRenderers.renderEmptyState();
+assert.doesNotMatch(chatMessagesNode.innerHTML, /This chat is temporary/i);
+sandbox.window.chatManager.getChat = () => ({ retention: 'temporary' });
+sandbox.toolRenderers.renderEmptyState();
+assert.match(chatMessagesNode.innerHTML, /disappears when you leave or reload/i);
 
 console.log('tool UI tests passed');

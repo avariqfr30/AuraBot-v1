@@ -3,6 +3,11 @@
 const assert = require('node:assert/strict');
 const { test } = require('node:test');
 const { createHostedClient } = require('../public/js/hosted-client');
+const HOSTED_MODELS = {
+    models: ['gpt-oss:120b-cloud', 'medgemma1.5:4b'],
+    primaryModel: 'gpt-oss:120b-cloud',
+    medicalModel: 'medgemma1.5:4b'
+};
 
 class Storage {
     constructor(initial = {}) { this.values = new Map(Object.entries(initial)); }
@@ -27,7 +32,9 @@ test('hosted bootstrap uses account state and syncs versioned changes across dev
             ...server,
             accountId: 'account-one',
             csrfToken: 'csrf-one',
-            models: ['medgemma1.5:4b', 'gpt-oss:120b-cloud']
+            models: ['medgemma1.5:4b', 'gpt-oss:120b-cloud'],
+            primaryModel: 'gpt-oss:120b-cloud',
+            medicalModel: 'medgemma1.5:4b'
         });
         if (url === '/api/account/state') {
             const body = JSON.parse(options.body);
@@ -48,6 +55,8 @@ test('hosted bootstrap uses account state and syncs versioned changes across dev
     assert.equal(client.storage.getItem('aura_profiles_v1'), 'server-registry');
     assert.equal(rawStorage.getItem('aura_profiles_v1'), 'old-device-registry');
     assert.deepEqual(client.allowedModels, ['medgemma1.5:4b', 'gpt-oss:120b-cloud']);
+    assert.equal(client.primaryModel, 'gpt-oss:120b-cloud');
+    assert.equal(client.medicalModel, 'medgemma1.5:4b');
     client.storage.setItem('aura_profiles_v1', 'new-server-registry');
     await client.waitForSync();
     assert.equal(server.storage.aura_profiles_v1, 'new-server-registry');
@@ -69,7 +78,7 @@ test('hosted sync preserves local unsent state and reports version conflicts', a
         fetchImpl: async (url) => url === '/api/runtime'
             ? response(200, { mode: 'hosted' })
             : url === '/api/account/bootstrap'
-                ? response(200, { accountId: 'one', storage: {}, version: 0, csrfToken: 'csrf', searchConsent: false })
+                ? response(200, { ...HOSTED_MODELS, accountId: 'one', storage: {}, version: 0, csrfToken: 'csrf', searchConsent: false })
                 : response(409, { error: 'conflict' })
     });
     await client.initialize();
@@ -85,7 +94,7 @@ test('hosted per-account device settings never use another account namespace', a
         localStorage: raw,
         fetchImpl: async (url) => url === '/api/runtime'
             ? response(200, { mode: 'hosted' })
-            : response(200, { accountId: 'alice', storage: {}, version: 0, csrfToken: 'csrf', searchConsent: false })
+            : response(200, { ...HOSTED_MODELS, accountId: 'alice', storage: {}, version: 0, csrfToken: 'csrf', searchConsent: false })
     });
     await client.initialize();
     client.settingsStorage.setItem('aura_system_prompt', 'Alice private preference');
@@ -111,7 +120,7 @@ test('explicit profile import uploads chats as a paused profile without stale pr
         fetchImpl: async (url, options = {}) => {
             if (url === '/api/runtime') return response(200, { mode: 'hosted' });
             if (url === '/api/account/bootstrap') return response(200, {
-                ...server, accountId: 'account-one', csrfToken: 'csrf', searchConsent: false
+                ...server, ...HOSTED_MODELS, accountId: 'account-one', csrfToken: 'csrf', searchConsent: false
             });
             if (url === '/api/account/state') {
                 writes += 1;
@@ -158,7 +167,7 @@ test('account deletion clears synced state and this account device settings only
         fetchImpl: async (url, options = {}) => {
             if (url === '/api/runtime') return response(200, { mode: 'hosted' });
             if (url === '/api/account/bootstrap') return response(200, {
-                accountId: 'alice', csrfToken: 'csrf', version: 0, searchConsent: false, storage: {}
+                ...HOSTED_MODELS, accountId: 'alice', csrfToken: 'csrf', version: 0, searchConsent: false, storage: {}
             });
             if (url === '/api/account') {
                 assert.equal(options.method, 'DELETE');

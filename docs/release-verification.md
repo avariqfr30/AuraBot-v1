@@ -8,7 +8,7 @@ The optional hosted mode is a separate release track. It must not be considered 
 
 - Configure a real OpenID Connect provider, PostgreSQL database, HTTPS origin, private Ollama, and private Chroma; verify the actual callback and cookie flow in a browser.
 - Test two real accounts with identical profile IDs: each must fail to read, alter, or delete the other's chat state, Chroma memory, and personal examples.
-- Verify the hosted disclosure links to Ollama's current privacy policy, GPT-OSS Cloud remains the primary configured model, and unlisted model IDs are rejected before Ollama is called.
+- Verify the hosted disclosure links to Ollama's current privacy policy, the configured primary and medical models appear in their allowlists, and unlisted model IDs are rejected before Ollama is called. Record whether the primary is local or Ollama Cloud.
 - Test sign-in from a second device, version conflict behavior, explicit old-profile import, logout, and complete hosted-account deletion including Chroma failures.
 - Verify that the separate Serper research consent blocks every search request before any external call and that revocation applies immediately.
 - Verify rate and concurrency limits, restore from PostgreSQL and Chroma backups, and run a real HTTPS deployment review before public exposure.

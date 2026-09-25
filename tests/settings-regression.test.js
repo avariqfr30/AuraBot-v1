@@ -45,7 +45,7 @@ assert.match(indexHtml, /id="clearLearnedPreferencesButton"/);
 assert.match(indexHtml, /Reset Conversation Preferences/);
 assert.match(indexHtml, /not account authentication/i);
 assert.doesNotMatch(indexHtml, /Persistent Companion Memory/);
-assert.match(indexHtml, /<script src="js\/personal-intelligence\.js"><\/script>\s*<script src="js\/intelligence-bundle\.js"><\/script>\s*<script src="js\/model-routing\.js"><\/script>\s*<script src="js\/turn-policy\.js"><\/script>\s*<script src="js\/profile-rag\.js"><\/script>\s*<script src="js\/response-adaptation\.js"><\/script>\s*<script src="js\/tool-decision\.js"><\/script>\s*<script src="js\/tool-follow-up\.js"><\/script>\s*<script src="js\/tool-artifacts\.js"><\/script>\s*<script src="js\/chat-tool-state\.js"><\/script>\s*<script src="js\/feedback-learning\.js"><\/script>\s*<script src="js\/chat-feedback-state\.js"><\/script>\s*<script src="js\/hosted-client\.js"><\/script>\s*<script src="js\/aura-prompts\.js"><\/script>\s*<script src="js\/response-sanitizer\.js"><\/script>\s*<script src="js\/model-request\.js"><\/script>\s*<script src="js\/evidence-utils\.js"><\/script>\s*<script src="js\/chat-logic\.js"><\/script>/);
+assert.match(indexHtml, /<script src="js\/personal-intelligence\.js"><\/script>\s*<script src="js\/intelligence-bundle\.js"><\/script>\s*<script src="js\/model-routing\.js"><\/script>\s*<script src="js\/turn-policy\.js"><\/script>\s*<script src="js\/profile-rag\.js"><\/script>\s*<script src="js\/response-adaptation\.js"><\/script>\s*<script src="js\/tool-decision\.js"><\/script>\s*<script src="js\/tool-follow-up\.js"><\/script>\s*<script src="js\/tool-artifacts\.js"><\/script>\s*<script src="js\/chat-tool-state\.js"><\/script>\s*<script src="js\/feedback-learning\.js"><\/script>\s*<script src="js\/chat-feedback-state\.js"><\/script>\s*<script src="js\/chat-retention\.js"><\/script>\s*<script src="js\/hosted-client\.js"><\/script>\s*<script src="js\/aura-prompts\.js"><\/script>\s*<script src="js\/response-sanitizer\.js"><\/script>\s*<script src="js\/model-request\.js"><\/script>\s*<script src="js\/evidence-utils\.js"><\/script>\s*<script src="js\/chat-logic\.js"><\/script>/);
 assert.match(indexHtml, /<option value="auto">Auto/);
 assert.match(packageJson.scripts.check, /node --check lib\/memory-results\.js/);
 assert.match(packageJson.scripts.check, /node --check public\/js\/turn-policy\.js/);
@@ -117,7 +117,7 @@ assert.match(chatLogicJs, /feedbackLearning:\s*window\.AURA_FEEDBACK\.createStat
 assert.match(chatLogicJs, /getPersonalExampleCandidate/);
 assert.match(chatLogicJs, /window\.AURA_PERSONAL_INTELLIGENCE\.createManager\(\s*window\.AURA_HOSTED\?\.enabled \? window\.AURA_HOSTED\.storage : window\.localStorage/);
 assert.match(chatLogicJs, /this\.profileManager\.loadProfileState\(\)/);
-assert.match(chatLogicJs, /this\.profileManager\.saveProfileState\(this\.state\)/);
+assert.match(chatLogicJs, /this\.profileManager\.saveProfileState\(\s*window\.AURA_CHAT_RETENTION\.projectForPersistence\(this\.state\)/);
 assert.match(chatLogicJs, /getFeedbackProfileId\(\)\s*\{\s*return this\.getActiveProfileId\(\)/);
 assert.match(chatLogicJs, /profileId:\s*sourceProfileId/);
 assert.match(
